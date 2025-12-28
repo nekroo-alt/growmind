@@ -32,7 +32,7 @@ class LLMProvider:
         elif p == "anthropic":
             return os.getenv("ANTHROPIC_MODEL", "claude-3-5-sonnet-20240620")
         elif p == "google":
-            return os.getenv("GOOGLE_MODEL", "gemini-1.5-flash")
+            return os.getenv("GOOGLE_MODEL", "	gemini-3-flash-preview")
         return "mock-model"
 
     def _get_api_key(self, provider=None):
