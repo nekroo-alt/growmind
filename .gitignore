@@ -1,9 +1,7 @@
 # ======= Custom =======
-activity.db
-activities.db
-task.db
-tasks.db
+*.db
 logs/
+.DS_Store
 
 # ======= Common =======
 # Byte-compiled / optimized / DLL files
