@@ -94,6 +94,10 @@ def cmd_doctor(args):
         print(f"Python Version: {sys.version}")
         print(f"Task DB: {'[OK]' if os.path.exists(TASK_DB_PATH) else '[MISSING]'}")
 
+def cmd_init(args):
+    from v1.core.init import run_init
+    run_init()
+
 def cmd_reset(args):
     print("Resetting databases...")
     for db_path in [TASK_DB_PATH, ACTIVITY_DB_PATH]:
@@ -127,6 +131,10 @@ def main():
     # Doctor command
     doctor_p = subparsers.add_parser("doctor", help="Verify environment and dependencies")
     add_common_args(doctor_p)
+
+    # Init command
+    init_p = subparsers.add_parser("init", help="Initialize the project root")
+    add_common_args(init_p)
     
     # Reset command
     reset_p = subparsers.add_parser("reset", help="Reset all databases")
@@ -150,6 +158,8 @@ def main():
         cmd_retro(args)
     elif args.command == "doctor":
         cmd_doctor(args)
+    elif args.command == "init":
+        cmd_init(args)
     elif args.command == "reset":
         cmd_reset(args)
     else:

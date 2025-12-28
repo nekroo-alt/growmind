@@ -3,7 +3,7 @@ activity.db
 activities.db
 task.db
 tasks.db
-
+logs/
 
 # ======= Common =======
 # Byte-compiled / optimized / DLL files

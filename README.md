@@ -39,19 +39,23 @@ flowchart TD
 ## Quick Start
 To get started with the production environment, ensure you are in the project root and your environment is set up.
 
-1.  **Environment Check**: Verify your Python environment, Git status, and API keys.
+1.  **Initialization**: Initialize the project root with the necessary files and databases.
+    ```bash
+    python v1/l4_cli.py init
+    ```
+2.  **Environment Check**: Verify your Python environment, Git status, and API keys.
     ```bash
     python v1/l4_cli.py doctor
     ```
-2.  **Start the Orchestrator**: Launch the main autonomous development loop.
+3.  **Start the Orchestrator**: Launch the main autonomous development loop.
     ```bash
     python v1/l4_cli.py start
     ```
-3.  **Monitor Progress**: View a detailed dashboard of completed tasks, costs, and learned patterns.
+4.  **Monitor Progress**: View a detailed dashboard of completed tasks, costs, and learned patterns.
     ```bash
     python v1/l4_cli.py status
     ```
-4.  **Learning from Manual Edits**: If you manually correct AI-generated code, trigger the retrospective agent to learn the new pattern.
+5.  **Learning from Manual Edits**: If you manually correct AI-generated code, trigger the retrospective agent to learn the new pattern.
     ```bash
     python v1/l4_cli.py retro
     ```
