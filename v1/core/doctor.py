@@ -61,11 +61,12 @@ def check_static_files():
     for f in ["product.md", "technical.md"]:
         exists = os.path.exists(f)
         status = "[green]OK[/green]" if exists else "[red]MISSING[/red]"
-        results.append((f, "Root Directory", status))
+        results.append((f, "Project Root", status))
     return results
 
 def run_doctor():
     table = Table(title="L4 Doctor - Environment Verification")
+    console.print(f"Project Root: [bold]{os.getcwd()}[/bold]")
     table.add_column("Component", style="cyan")
     table.add_column("Details", style="magenta")
     table.add_column("Status", style="bold")

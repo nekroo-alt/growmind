@@ -2,6 +2,16 @@ import sys
 import os
 import sqlite3
 import argparse
+
+# Get the absolute path of the L4 root (parent of v1)
+# __file__ is /Users/ken/Desktop/growmind/v1/l4_cli.py
+# L4_ROOT is /Users/ken/Desktop/growmind
+L4_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+
+# Ensure L4_ROOT is in sys.path so that 'import v1' works even after chdir
+if L4_ROOT not in sys.path:
+    sys.path.insert(0, L4_ROOT)
+
 from v1.core.start import Orchestrator
 from v1.data.db_manager import TASK_DB_PATH, ACTIVITY_DB_PATH, init_db, get_cost_summary
 from v1.retro.retro_agent import RetroAgent
@@ -95,24 +105,42 @@ def cmd_reset(args):
 
 def main():
     parser = argparse.ArgumentParser(description="L4 Self-Evolving Development Platform CLI")
+    parser.add_argument("--project_root", help="Path to the project folder to develop", default=".")
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
 
+    # Helper to add common arguments to subparsers without overwriting top-level defaults
+    def add_common_args(sub_p):
+        sub_p.add_argument("--project_root", help="Path to the project folder to develop", default=argparse.SUPPRESS)
+
     # Start command
-    subparsers.add_parser("start", help="Initiate the orchestration loop")
+    start_p = subparsers.add_parser("start", help="Initiate the orchestration loop")
+    add_common_args(start_p)
     
     # Status command
-    subparsers.add_parser("status", help="Show summary of tasks and costs")
+    status_p = subparsers.add_parser("status", help="Show summary of tasks and costs")
+    add_common_args(status_p)
     
     # Retro command
-    subparsers.add_parser("retro", help="Trigger a retrospective on manual changes")
+    retro_p = subparsers.add_parser("retro", help="Trigger a retrospective on manual changes")
+    add_common_args(retro_p)
     
     # Doctor command
-    subparsers.add_parser("doctor", help="Verify environment and dependencies")
+    doctor_p = subparsers.add_parser("doctor", help="Verify environment and dependencies")
+    add_common_args(doctor_p)
     
     # Reset command
-    subparsers.add_parser("reset", help="Reset all databases")
+    reset_p = subparsers.add_parser("reset", help="Reset all databases")
+    add_common_args(reset_p)
 
     args = parser.parse_args()
+
+    # Change CWD to project root
+    project_root = os.path.abspath(args.project_root)
+    if not os.path.exists(project_root):
+        print(f"Project root '{project_root}' does not exist. Creating it...")
+        os.makedirs(project_root, exist_ok=True)
+    
+    os.chdir(project_root)
 
     if args.command == "start":
         cmd_start(args)
