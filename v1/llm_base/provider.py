@@ -1,6 +1,7 @@
 import os
 import json
 import re
+from v1.core.telemetry import telemetry
 
 
 class LLMProvider:
@@ -119,6 +120,9 @@ class LLMProvider:
                     content = self._mock_call(system_prompt, user_prompt)
                     prompt_tokens = self.count_tokens(system_prompt + user_prompt)
                     completion_tokens = self.count_tokens(content)
+                    telemetry.log_llm_interaction(
+                        self.provider, self.model, system_prompt, user_prompt, content
+                    )
                     return {
                         "content": content,
                         "usage": {
@@ -150,6 +154,10 @@ class LLMProvider:
                     raise ValueError(f"Unsupported provider '{self.provider}'")
 
                 cost = self.calculate_cost(p_tokens, c_tokens)
+                telemetry.log_llm_usage(p_tokens + c_tokens, cost)
+                telemetry.log_llm_interaction(
+                    self.provider, self.model, system_prompt, user_prompt, content
+                )
                 return {
                     "content": content,
                     "usage": {
@@ -164,8 +172,12 @@ class LLMProvider:
                 # Switch to next provider for next attempt
                 self.current_index = (self.current_index + 1) % max_attempts
 
+        error_content = f"Error: All LLM providers failed. Last error: {last_error}"
+        telemetry.log_llm_interaction(
+            "None", "None", system_prompt, user_prompt, error_content
+        )
         return {
-            "content": f"Error: All LLM providers failed. Last error: {last_error}",
+            "content": error_content,
             "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
             "cost": 0.0,
         }

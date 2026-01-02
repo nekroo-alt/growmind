@@ -161,27 +161,24 @@ class Orchestrator:
                     save_state(
                         "orchestrator_phase", f"implementing:{task_id}:{task_title}"
                     )
-                    self.telemetry.log_task_start(f"Implementing: {task_title}")
-                    self._update_telemetry_stats(f"Implementing: {task_title}")
 
-                    success = self.implementor.execute_tdd_cycle(task)
+                    with self.telemetry.task_context(f"Implementing: {task_title}"):
+                        self._update_telemetry_stats()
 
-                    if success:
-                        self.telemetry.info(
-                            f"Task '{task_title}' implementation finished. Running verification..."
-                        )
-                        self._update_telemetry_stats(f"Verifying: {task_title}")
+                        success = self.implementor.execute_tdd_cycle(task)
 
-                        # Verifier check
-                        if self.verifier.run_tests():
-                            self.telemetry.log_task_success(task_title)
-                        else:
-                            self.telemetry.log_task_failure(
-                                task_title, "Tests failed after implementation."
+                        if success:
+                            self.telemetry.info(
+                                f"Task '{task_title}' implementation finished. Running verification..."
                             )
-                    else:
-                        self.telemetry.log_task_failure(task_title, "TDD cycle failed.")
-                        break
+                            self.telemetry.track_step("Verification")
+                            self._update_telemetry_stats()
+
+                            # Verifier check
+                            if not self.verifier.run_tests():
+                                raise Exception("Tests failed after implementation.")
+                        else:
+                            raise Exception("TDD cycle failed.")
 
                 else:
                     self.telemetry.warning(

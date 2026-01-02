@@ -1,5 +1,6 @@
 import sqlite3
 import os
+from v1.core.telemetry import telemetry
 
 # Database paths
 TASK_DB_PATH = "task.db"
@@ -74,10 +75,20 @@ def log_activity(
     commit_hash=None,
     tokens_used=None,
     estimated_cost=None,
+    notify_telemetry=True,
 ):
     """
     Logs an activity to the activity database.
     """
+    if notify_telemetry:
+        msg = f"[{action}] {summary} -> {status}"
+        if status == "Success":
+            telemetry.info(msg)
+        elif status == "Failed":
+            telemetry.error(msg)
+        else:
+            telemetry.info(msg)
+
     conn = get_db_connection(ACTIVITY_DB_PATH)
     cursor = conn.cursor()
     cursor.execute(

@@ -11,6 +11,7 @@ from v1.logic.git_guard import GitGuard
 from v1.logic.context_engine import ContextEngine
 from v1.llm_base.provider import LLMProvider
 from v1.logic.verifier import Verifier
+from v1.core.telemetry import telemetry
 
 
 class Implementor:
@@ -41,17 +42,21 @@ class Implementor:
             action="TDD Start",
             status="Success",
             cot_blob=f"Beginning implementation for task ID {task_id}. Context gathered: {len(context)} chars.",
+            notify_telemetry=False, # We use log_task_start via orchestrator/task_context
         )
 
         # Red Phase: Write a failing test
+        telemetry.track_step("Red Phase: Writing failing test")
         if not self._run_red_phase(task, context):
             return False
 
         # Green Phase: Write minimal code to pass
+        telemetry.track_step("Green Phase: Implementing code")
         if not self._run_green_phase(task, context):
             return False
 
         # Refactor Phase: Cleanup
+        telemetry.track_step("Refactor Phase: Cleaning up")
         self._run_refactor_phase(task_title)
 
         # Check for Refactor Sprint (every 10 commits)
@@ -243,6 +248,7 @@ Keep changes focused and under 30 lines per commit.
         """
         Consolidate patterns after every 10 commits.
         """
+        telemetry.track_step("Refactor Sprint")
         log_activity(
             summary="Initiating Refactor Sprint",
             action="Refactor Sprint",
