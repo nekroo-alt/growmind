@@ -103,7 +103,7 @@ class LLMProvider:
 
         return round(prompt_cost + completion_cost, 6)
 
-    def call(self, system_prompt, user_prompt, temperature=0.7, max_tokens=1000):
+    def call(self, system_prompt, user_prompt, temperature=0.7, max_tokens=4096):
         """
         Executes an LLM call with retry/failover logic across multiple providers.
         Returns a dictionary with 'content', 'usage', and 'cost'.
@@ -238,7 +238,22 @@ class LLMProvider:
                     temperature=temperature, max_output_tokens=max_tokens
                 ),
             )
-            content = response.text
+
+            if not response.candidates:
+                raise ValueError("Gemini returned no candidates.")
+
+            # .text might raise ValueError if blocked or empty
+            try:
+                content = response.text
+            except ValueError:
+                finish_reason = response.candidates[0].finish_reason.name
+                if finish_reason == "SAFETY":
+                    content = "Error: Response blocked by Gemini safety filters."
+                elif finish_reason == "RECITATION":
+                    content = "Error: Response blocked due to recitation/copyright."
+                else:
+                    content = f"Error: Could not retrieve response text. Finish reason: {finish_reason}"
+
             # Gemini's usage_metadata might not always be available or structured the same
             try:
                 p_tokens = response.usage_metadata.prompt_token_count

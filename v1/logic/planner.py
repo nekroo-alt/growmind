@@ -50,9 +50,11 @@ class Planner:
             else "Initial requirement analysis and task breakdown"
         )
         # Limit context to avoid overwhelming the prompt
-        pruned_context = self.context_engine.get_pruned_context(
-            query, relevant_files[:30]
-        )
+        # Exclude product.md and technical.md from additional context as they are already passed explicitly
+        context_files = [
+            f for f in relevant_files if f not in ["product.md", "technical.md"]
+        ][:30]
+        pruned_context = self.context_engine.get_pruned_context(query, context_files)
 
         system_prompt = (
             "You are a Senior Architect. Break down the given requirements into atomic tasks.\n"
@@ -62,9 +64,14 @@ class Planner:
         user_prompt = f"Product Requirements:\n{product_content}\nTechnical Design:\n{technical_content}\n"
         if task_to_break:
             user_prompt += f"Specific task to break down: {task_to_break['title']}\n"
-        user_prompt += f"Current context snippet:\n{pruned_context}"
 
-        result = self.llm.call(system_prompt, user_prompt, temperature=0.2)
+        if pruned_context.strip():
+            user_prompt += f"Relevant project context:\n{pruned_context}"
+
+        # Breakdown requirements often needs more tokens
+        result = self.llm.call(
+            system_prompt, user_prompt, temperature=0.2, max_tokens=4096
+        )
         response = result["content"]
 
         try:

@@ -131,7 +131,9 @@ class Telemetry:
         self.stats["cost"] += cost
         self.update_dashboard()
 
-    def log_llm_interaction(self, provider, model, system_prompt, user_prompt, response):
+    def log_llm_interaction(
+        self, provider, model, system_prompt, user_prompt, response
+    ):
         """Logs the full LLM interaction for traceability."""
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         log_entry = (
@@ -238,7 +240,9 @@ class Telemetry:
         # Left Panel - Current Activity
         activity_text = f"\n  [bold blue]Status:[/bold blue] Running\n  [bold blue]Current Task:[/bold blue] {self.current_task}"
         if self.current_step:
-            activity_text += f"\n  [bold blue]Current Step:[/bold blue] {self.current_step}"
+            activity_text += (
+                f"\n  [bold blue]Current Step:[/bold blue] {self.current_step}"
+            )
 
         task_panel = Panel(
             activity_text,

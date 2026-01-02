@@ -42,7 +42,7 @@ class Implementor:
             action="TDD Start",
             status="Success",
             cot_blob=f"Beginning implementation for task ID {task_id}. Context gathered: {len(context)} chars.",
-            notify_telemetry=False, # We use log_task_start via orchestrator/task_context
+            notify_telemetry=False,  # We use log_task_start via orchestrator/task_context
         )
 
         # Red Phase: Write a failing test
