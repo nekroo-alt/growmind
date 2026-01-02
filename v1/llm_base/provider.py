@@ -34,8 +34,7 @@ class LLMProvider:
         elif p == "anthropic":
             return os.getenv("ANTHROPIC_MODEL", "claude-3-5-sonnet-20240620")
         elif p == "google":
-            # Fixed: Removed leading tab and updated to a valid model name
-            return os.getenv("GOOGLE_MODEL", "gemini-3-flash-preview")
+            return os.getenv("GOOGLE_MODEL", "gemini-1.5-flash")
         return "mock-model"
 
     def _get_api_key(self, provider=None):
@@ -116,11 +115,10 @@ class LLMProvider:
 
             if not self.api_key:
                 last_error = f"Error: Missing API key for {self.provider}"
-                if max_attempts == 1:
+                if self.provider == "mock":
                     content = self._mock_call(system_prompt, user_prompt)
                     prompt_tokens = self.count_tokens(system_prompt + user_prompt)
                     completion_tokens = self.count_tokens(content)
-                    cost = self.calculate_cost(prompt_tokens, completion_tokens)
                     return {
                         "content": content,
                         "usage": {
@@ -128,7 +126,7 @@ class LLMProvider:
                             "completion_tokens": completion_tokens,
                             "total_tokens": prompt_tokens + completion_tokens,
                         },
-                        "cost": cost,
+                        "cost": 0.0,
                     }
 
                 # Try next provider
