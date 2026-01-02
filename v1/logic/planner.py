@@ -89,15 +89,8 @@ class Planner:
                 status="Failed",
                 cot_blob=f"Error parsing LLM response or LLM failed: {str(e)}",
             )
-            if task_to_break:
-                # Still allow simulated breakdown for nested tasks if needed,
-                # but even this should probably be removed in a real system.
-                subtasks = self._simulate_llm_breakdown(
-                    task_to_break["title"], pruned_context
-                )
-            else:
-                # Return empty list to signify planning failed
-                return 0
+            # Return 0 to signify planning failed
+            return 0
 
         parent_id = task_to_break["id"] if task_to_break else None
         module = task_to_break["module"] if task_to_break else None
@@ -123,11 +116,3 @@ class Planner:
             estimated_cost=result["cost"],
         )
         return new_tasks_added
-
-    def _simulate_llm_breakdown(self, task_title, context=""):
-        """Simulates LLM splitting a task into <30 line atomic pieces."""
-        # In reality, 'context' would be part of the prompt
-        return [
-            (f"{task_title} - Phase 1", "Atomic criteria A", None),
-            (f"{task_title} - Phase 2", "Atomic criteria B", None),
-        ]

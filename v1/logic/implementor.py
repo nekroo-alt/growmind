@@ -214,15 +214,8 @@ Keep changes focused and under 30 lines per commit.
         """
         Runs tests and returns (success, output).
         """
-        # If we are in a simulation environment without real tests, we mock it
-        # but capture a 'log' as requested in Task 4.2.
-        if os.getenv("L4_SIMULATION") == "true" or not os.path.exists(test_file):
-            # Simulate failure on first attempt, success on second if needed,
-            # but Task 4.2 is about the LOG passing.
-            return (
-                False,
-                "Mock test failure log: AssertionError in line 5 of test_poc.py",
-            )
+        if not os.path.exists(test_file):
+            return False, f"Test file not found: {test_file}"
 
         try:
             # Use pytest to run the test file and capture output
@@ -337,23 +330,11 @@ Respect the Open-Closed principle for core logic, but feel free to consolidate r
         all_passed = True
         failed_tests = []
 
-        # In simulation mode, we'll assume the refactor passed if LLM provided it,
-        # to avoid the mock failure trap in _run_tests.
-        if os.getenv("L4_SIMULATION") == "true":
-            log_activity(
-                summary="Refactor Sprint (Simulated) Success",
-                action="Refactor Sprint",
-                status="Success",
-                cot_blob=f"Simulation mode: skipping real test run. Applied refactorings in {len(applied_files)} files.",
-                tokens_used=result["usage"]["total_tokens"],
-                estimated_cost=result["cost"],
-            )
-        else:
-            for t_file in test_files:
-                passed, output = self._run_tests(t_file)
-                if not passed:
-                    all_passed = False
-                    failed_tests.append(f"{t_file}: {output}")
+        for t_file in test_files:
+            passed, output = self._run_tests(t_file)
+            if not passed:
+                all_passed = False
+                failed_tests.append(f"{t_file}: {output}")
 
         if all_passed:
             log_activity(
