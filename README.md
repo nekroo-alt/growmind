@@ -76,6 +76,3 @@ The platform follows a **Hub-and-Spoke Agentic Architecture**:
     *   **Implementor**: Executes the TDD cycle.
     *   **Verifier**: Performs mutation testing and final validation.
 *   **Context Bank**: Stores static documentation (`product.md`, `technical.md`), dynamic state (`task.db`, `activity.db`), and evolving patterns (`.patterns/`).
-
----
-*For more details, refer to `v1/design.md` for production specs, `product.md` for business logic, and `technical.md` for architectural deep-dives.*
