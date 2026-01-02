@@ -16,13 +16,15 @@ from v1.core.start import Orchestrator
 from v1.data.db_manager import TASK_DB_PATH, ACTIVITY_DB_PATH, init_db, get_cost_summary
 from v1.retro.retro_agent import RetroAgent
 
+
 def cmd_start(args):
     orchestrator = Orchestrator()
     orchestrator.run()
 
+
 def cmd_status(args):
     print("L4 Platform v1.0 Status")
-    
+
     # Cost Summary
     total_tokens, total_cost = get_cost_summary()
     print("\n--- Cost Summary ---")
@@ -36,7 +38,9 @@ def cmd_status(args):
         with open(patterns_path, "r") as f:
             lines = f.readlines()
             # Just show headers as a summary
-            headers = [line.strip("# ").strip() for line in lines if line.startswith("##")]
+            headers = [
+                line.strip("# ").strip() for line in lines if line.startswith("##")
+            ]
             if headers:
                 # Remove duplicates while preserving order
                 unique_headers = []
@@ -55,13 +59,17 @@ def cmd_status(args):
         conn = sqlite3.connect(ACTIVITY_DB_PATH)
         cursor = conn.cursor()
         # Querying with tokens and cost if they exist (Task 0.2)
-        cursor.execute("SELECT timestamp, action, status, summary, tokens_used, estimated_cost FROM activities ORDER BY timestamp DESC LIMIT 5")
+        cursor.execute(
+            "SELECT timestamp, action, status, summary, tokens_used, estimated_cost FROM activities ORDER BY timestamp DESC LIMIT 5"
+        )
         rows = cursor.fetchall()
         print("\nRecent Activities (activity.db):")
         for row in rows:
             tokens = row[4] if row[4] is not None else 0
             cost = row[5] if row[5] is not None else 0.0
-            print(f"{row[0]} | {row[1]} | {row[2]} | {row[3]} | Tokens: {tokens} | Cost: ${cost:.4f}")
+            print(
+                f"{row[0]} | {row[1]} | {row[2]} | {row[3]} | Tokens: {tokens} | Cost: ${cost:.4f}"
+            )
         conn.close()
     else:
         print("Activity database not found.")
@@ -70,7 +78,9 @@ def cmd_status(args):
     if os.path.exists(TASK_DB_PATH):
         conn = sqlite3.connect(TASK_DB_PATH)
         cursor = conn.cursor()
-        cursor.execute("SELECT id, title, status, module FROM tasks ORDER BY id DESC LIMIT 5")
+        cursor.execute(
+            "SELECT id, title, status, module FROM tasks ORDER BY id DESC LIMIT 5"
+        )
         rows = cursor.fetchall()
         print("\nRecent Tasks (task.db):")
         for row in rows:
@@ -79,14 +89,17 @@ def cmd_status(args):
     else:
         print("Task database not found.")
 
+
 def cmd_retro(args):
     agent = RetroAgent()
     result = agent.analyze_human_override()
     print(result)
 
+
 def cmd_doctor(args):
     try:
         from v1.core.doctor import run_doctor
+
         run_doctor()
     except ImportError:
         print("Error: rich library required for doctor. Please install it.")
@@ -94,9 +107,12 @@ def cmd_doctor(args):
         print(f"Python Version: {sys.version}")
         print(f"Task DB: {'[OK]' if os.path.exists(TASK_DB_PATH) else '[MISSING]'}")
 
+
 def cmd_init(args):
     from v1.core.init import run_init
+
     run_init()
+
 
 def cmd_reset(args):
     print("Resetting databases...")
@@ -107,35 +123,48 @@ def cmd_reset(args):
     init_db()
     print("Databases re-initialized.")
 
+
 def main():
-    parser = argparse.ArgumentParser(description="L4 Self-Evolving Development Platform CLI")
-    parser.add_argument("--project_root", help="Path to the project folder to develop", default=".")
+    parser = argparse.ArgumentParser(
+        description="L4 Self-Evolving Development Platform CLI"
+    )
+    parser.add_argument(
+        "--project_root", help="Path to the project folder to develop", default="."
+    )
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
 
     # Helper to add common arguments to subparsers without overwriting top-level defaults
     def add_common_args(sub_p):
-        sub_p.add_argument("--project_root", help="Path to the project folder to develop", default=argparse.SUPPRESS)
+        sub_p.add_argument(
+            "--project_root",
+            help="Path to the project folder to develop",
+            default=argparse.SUPPRESS,
+        )
 
     # Start command
     start_p = subparsers.add_parser("start", help="Initiate the orchestration loop")
     add_common_args(start_p)
-    
+
     # Status command
     status_p = subparsers.add_parser("status", help="Show summary of tasks and costs")
     add_common_args(status_p)
-    
+
     # Retro command
-    retro_p = subparsers.add_parser("retro", help="Trigger a retrospective on manual changes")
+    retro_p = subparsers.add_parser(
+        "retro", help="Trigger a retrospective on manual changes"
+    )
     add_common_args(retro_p)
-    
+
     # Doctor command
-    doctor_p = subparsers.add_parser("doctor", help="Verify environment and dependencies")
+    doctor_p = subparsers.add_parser(
+        "doctor", help="Verify environment and dependencies"
+    )
     add_common_args(doctor_p)
 
     # Init command
     init_p = subparsers.add_parser("init", help="Initialize the project root")
     add_common_args(init_p)
-    
+
     # Reset command
     reset_p = subparsers.add_parser("reset", help="Reset all databases")
     add_common_args(reset_p)
@@ -147,7 +176,7 @@ def main():
     if not os.path.exists(project_root):
         print(f"Project root '{project_root}' does not exist. Creating it...")
         os.makedirs(project_root, exist_ok=True)
-    
+
     os.chdir(project_root)
 
     if args.command == "start":
@@ -164,6 +193,7 @@ def main():
         cmd_reset(args)
     else:
         parser.print_help()
+
 
 if __name__ == "__main__":
     main()

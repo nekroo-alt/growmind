@@ -1,6 +1,7 @@
 import ast
 import os
 
+
 class SemanticMapper:
     """
     Parses Python source code using the AST module to create a semantic map of the file.
@@ -15,10 +16,7 @@ class SemanticMapper:
         """
         Returns a structured summary of the classes and functions in the file.
         """
-        summary = {
-            "classes": [],
-            "functions": []
-        }
+        summary = {"classes": [], "functions": []}
 
         for node in ast.iter_child_nodes(self.tree):
             if isinstance(node, ast.ClassDef):
@@ -34,7 +32,7 @@ class SemanticMapper:
         """
         methods = []
         dependencies = set()
-        
+
         # Base classes are dependencies
         for base in node.bases:
             if isinstance(base, ast.Name):
@@ -53,7 +51,7 @@ class SemanticMapper:
             "end_line": getattr(node, "end_lineno", node.lineno),
             "docstring": ast.get_docstring(node),
             "methods": methods,
-            "dependencies": sorted(list(dependencies))
+            "dependencies": sorted(list(dependencies)),
         }
 
     def _parse_function(self, node: ast.FunctionDef):
@@ -69,7 +67,7 @@ class SemanticMapper:
             "end_line": getattr(node, "end_lineno", node.lineno),
             "docstring": ast.get_docstring(node),
             "args": args,
-            "dependencies": dependencies
+            "dependencies": dependencies,
         }
 
     def _get_dependencies(self, node):
@@ -79,12 +77,12 @@ class SemanticMapper:
         """
         deps = set()
         args = set()
-        
+
         # Collect arguments to exclude
         if hasattr(node, "args"):
             for arg in node.args.args:
                 args.add(arg.arg)
-        
+
         for child in ast.walk(node):
             if isinstance(child, ast.Name):
                 if isinstance(child.ctx, ast.Load):
@@ -99,12 +97,27 @@ class SemanticMapper:
                         deps.add(child.value.id)
 
         exclude = args | {
-            "self", "cls", "None", "True", "False", "int", "str", 
-            "list", "dict", "set", "print", "len", "range", 
-            "getattr", "setattr", "isinstance", "getattr", "hasattr"
+            "self",
+            "cls",
+            "None",
+            "True",
+            "False",
+            "int",
+            "str",
+            "list",
+            "dict",
+            "set",
+            "print",
+            "len",
+            "range",
+            "getattr",
+            "setattr",
+            "isinstance",
+            "getattr",
+            "hasattr",
         }
         filtered_deps = {d for d in deps if d not in exclude}
-        
+
         return sorted(list(filtered_deps))
 
     def get_relevant_nodes(self, node_names):
@@ -118,17 +131,25 @@ class SemanticMapper:
             # Check functions
             for func in summary["functions"]:
                 if func["name"] == node_name:
-                    relevant_code.append(self._get_source_range(func["start_line"], func["end_line"]))
-            
+                    relevant_code.append(
+                        self._get_source_range(func["start_line"], func["end_line"])
+                    )
+
             # Check classes
             for cls in summary["classes"]:
                 if cls["name"] == node_name:
-                    relevant_code.append(self._get_source_range(cls["start_line"], cls["end_line"]))
+                    relevant_code.append(
+                        self._get_source_range(cls["start_line"], cls["end_line"])
+                    )
                 else:
                     # Check methods within classes
                     for method in cls["methods"]:
                         if method["name"] == node_name:
-                             relevant_code.append(self._get_source_range(method["start_line"], method["end_line"]))
+                            relevant_code.append(
+                                self._get_source_range(
+                                    method["start_line"], method["end_line"]
+                                )
+                            )
 
         return "\n\n".join(relevant_code)
 
@@ -136,7 +157,8 @@ class SemanticMapper:
         """
         Helper to extract source code lines.
         """
-        return "\n".join(self.lines[start_line-1:end_line])
+        return "\n".join(self.lines[start_line - 1 : end_line])
+
 
 def map_file(file_path):
     """
@@ -144,9 +166,9 @@ def map_file(file_path):
     """
     if not os.path.exists(file_path):
         return None
-    
+
     with open(file_path, "r") as f:
         source = f.read()
-    
+
     mapper = SemanticMapper(source)
     return mapper.get_summary()
