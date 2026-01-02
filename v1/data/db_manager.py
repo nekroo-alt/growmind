@@ -5,6 +5,7 @@ import os
 TASK_DB_PATH = "task.db"
 ACTIVITY_DB_PATH = "activity.db"
 
+
 def init_db():
     """
     Initializes the task and activity databases if they don't exist.
@@ -12,7 +13,8 @@ def init_db():
     # Initialize activity database
     with sqlite3.connect(ACTIVITY_DB_PATH) as conn:
         cursor = conn.cursor()
-        cursor.execute('''
+        cursor.execute(
+            """
         CREATE TABLE IF NOT EXISTS activities (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -24,13 +26,15 @@ def init_db():
             tokens_used INTEGER,
             estimated_cost REAL
         )
-        ''')
+        """
+        )
         conn.commit()
 
     # Initialize task database
     with sqlite3.connect(TASK_DB_PATH) as conn:
         cursor = conn.cursor()
-        cursor.execute('''
+        cursor.execute(
+            """
         CREATE TABLE IF NOT EXISTS tasks (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             title TEXT,
@@ -40,14 +44,18 @@ def init_db():
             module TEXT,
             FOREIGN KEY (parent_id) REFERENCES tasks (id)
         )
-        ''')
-        cursor.execute('''
+        """
+        )
+        cursor.execute(
+            """
         CREATE TABLE IF NOT EXISTS state (
             key TEXT PRIMARY KEY,
             value TEXT
         )
-        ''')
+        """
+        )
         conn.commit()
+
 
 def get_db_connection(db_path):
     """
@@ -57,18 +65,31 @@ def get_db_connection(db_path):
     conn.row_factory = sqlite3.Row
     return conn
 
-def log_activity(summary, action, status, cot_blob=None, commit_hash=None, tokens_used=None, estimated_cost=None):
+
+def log_activity(
+    summary,
+    action,
+    status,
+    cot_blob=None,
+    commit_hash=None,
+    tokens_used=None,
+    estimated_cost=None,
+):
     """
     Logs an activity to the activity database.
     """
     conn = get_db_connection(ACTIVITY_DB_PATH)
     cursor = conn.cursor()
-    cursor.execute('''
+    cursor.execute(
+        """
         INSERT INTO activities (summary, action, status, CoT_blob, commit_hash, tokens_used, estimated_cost)
         VALUES (?, ?, ?, ?, ?, ?, ?)
-    ''', (summary, action, status, cot_blob, commit_hash, tokens_used, estimated_cost))
+    """,
+        (summary, action, status, cot_blob, commit_hash, tokens_used, estimated_cost),
+    )
     conn.commit()
     conn.close()
+
 
 def log_task(title, status, acceptance_criteria=None, parent_id=None, module=None):
     """
@@ -76,12 +97,16 @@ def log_task(title, status, acceptance_criteria=None, parent_id=None, module=Non
     """
     conn = get_db_connection(TASK_DB_PATH)
     cursor = conn.cursor()
-    cursor.execute('''
+    cursor.execute(
+        """
         INSERT INTO tasks (title, status, acceptance_criteria, parent_id, module)
         VALUES (?, ?, ?, ?, ?)
-    ''', (title, status, acceptance_criteria, parent_id, module))
+    """,
+        (title, status, acceptance_criteria, parent_id, module),
+    )
     conn.commit()
     conn.close()
+
 
 def get_pending_task(preferred_id=None):
     """
@@ -91,16 +116,19 @@ def get_pending_task(preferred_id=None):
     conn = get_db_connection(TASK_DB_PATH)
     cursor = conn.cursor()
     if preferred_id:
-        cursor.execute('SELECT * FROM tasks WHERE status = "pending" AND id = ?', (preferred_id,))
+        cursor.execute(
+            'SELECT * FROM tasks WHERE status = "pending" AND id = ?', (preferred_id,)
+        )
         task = cursor.fetchone()
         if task:
             conn.close()
             return task
-            
+
     cursor.execute('SELECT * FROM tasks WHERE status = "pending" LIMIT 1')
     task = cursor.fetchone()
     conn.close()
     return task
+
 
 def task_exists(title):
     """
@@ -108,10 +136,11 @@ def task_exists(title):
     """
     conn = get_db_connection(TASK_DB_PATH)
     cursor = conn.cursor()
-    cursor.execute('SELECT 1 FROM tasks WHERE title = ? LIMIT 1', (title,))
+    cursor.execute("SELECT 1 FROM tasks WHERE title = ? LIMIT 1", (title,))
     exists = cursor.fetchone() is not None
     conn.close()
     return exists
+
 
 def update_task_status(task_id, new_status):
     """
@@ -119,9 +148,10 @@ def update_task_status(task_id, new_status):
     """
     conn = get_db_connection(TASK_DB_PATH)
     cursor = conn.cursor()
-    cursor.execute('UPDATE tasks SET status = ? WHERE id = ?', (new_status, task_id))
+    cursor.execute("UPDATE tasks SET status = ? WHERE id = ?", (new_status, task_id))
     conn.commit()
     conn.close()
+
 
 def save_state(key, value):
     """
@@ -129,13 +159,17 @@ def save_state(key, value):
     """
     conn = get_db_connection(TASK_DB_PATH)
     cursor = conn.cursor()
-    cursor.execute('''
+    cursor.execute(
+        """
         INSERT INTO state (key, value)
         VALUES (?, ?)
         ON CONFLICT(key) DO UPDATE SET value = excluded.value
-    ''', (key, value))
+    """,
+        (key, value),
+    )
     conn.commit()
     conn.close()
+
 
 def load_state(key):
     """
@@ -144,10 +178,11 @@ def load_state(key):
     """
     conn = get_db_connection(TASK_DB_PATH)
     cursor = conn.cursor()
-    cursor.execute('SELECT value FROM state WHERE key = ?', (key,))
+    cursor.execute("SELECT value FROM state WHERE key = ?", (key,))
     row = cursor.fetchone()
     conn.close()
-    return row['value'] if row else None
+    return row["value"] if row else None
+
 
 def get_commit_count():
     """
@@ -155,10 +190,13 @@ def get_commit_count():
     """
     conn = get_db_connection(ACTIVITY_DB_PATH)
     cursor = conn.cursor()
-    cursor.execute("SELECT COUNT(*) FROM activities WHERE action = 'Git Commit' AND status = 'Success'")
+    cursor.execute(
+        "SELECT COUNT(*) FROM activities WHERE action = 'Git Commit' AND status = 'Success'"
+    )
     count = cursor.fetchone()[0]
     conn.close()
     return count
+
 
 def get_cost_summary():
     """
@@ -173,6 +211,7 @@ def get_cost_summary():
     conn.close()
     return total_tokens, total_cost
 
+
 def get_completed_tasks_count():
     """
     Returns the number of completed tasks from the task database.
@@ -184,11 +223,14 @@ def get_completed_tasks_count():
     conn.close()
     return count
 
+
 def fcid_mapping(id):
     """
     Decorator to annotate functions with FCIDs.
     """
+
     def decorator(func):
         func.fcid = id
         return func
+
     return decorator

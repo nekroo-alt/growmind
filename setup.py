@@ -5,7 +5,7 @@ setup(
     version="0.1.0",
     packages=find_packages(),
     install_requires=[
-        # Add dependencies here if needed, 
+        # Add dependencies here if needed,
         # but for now we focus on the entry point
     ],
     entry_points={

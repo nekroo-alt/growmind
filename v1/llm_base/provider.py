@@ -2,11 +2,13 @@ import os
 import json
 import re
 
+
 class LLMProvider:
     """
     Simple wrapper for LLM calls to abstract prompts from logic.
     Supports OpenAI and Anthropic, with a mock fallback for MVP development.
     """
+
     def __init__(self, provider=None, model=None, providers=None):
         if providers:
             self.providers = providers
@@ -14,7 +16,7 @@ class LLMProvider:
             p = provider or os.getenv("LLM_PROVIDER", "google").lower()
             m = model or self._get_default_model(p)
             self.providers = [{"provider": p, "model": m}]
-        
+
         self.current_index = 0
         self._update_active_provider()
 
@@ -32,7 +34,8 @@ class LLMProvider:
         elif p == "anthropic":
             return os.getenv("ANTHROPIC_MODEL", "claude-3-5-sonnet-20240620")
         elif p == "google":
-            return os.getenv("GOOGLE_MODEL", "	gemini-3-flash-preview")
+            # Fixed: Removed leading tab and updated to a valid model name
+            return os.getenv("GOOGLE_MODEL", "gemini-3-flash-preview")
         return "mock-model"
 
     def _get_api_key(self, provider=None):
@@ -54,6 +57,7 @@ class LLMProvider:
             return 0
         try:
             import tiktoken
+
             try:
                 encoding = tiktoken.encoding_for_model(self.model)
             except (KeyError, AttributeError):
@@ -82,7 +86,7 @@ class LLMProvider:
         model_key = self.model
         if "gpt-4o" in model_key:
             model_key = "gpt-4o"
-        
+
         model_pricing = pricing.get(model_key)
         if not model_pricing:
             # Try matching prefixes if exact match fails
@@ -90,13 +94,13 @@ class LLMProvider:
                 if key in self.model:
                     model_pricing = rates
                     break
-        
+
         if not model_pricing:
             return 0.0
 
         prompt_cost = (prompt_tokens / 1_000_000) * model_pricing["prompt"]
         completion_cost = (completion_tokens / 1_000_000) * model_pricing["completion"]
-        
+
         return round(prompt_cost + completion_cost, 6)
 
     def call(self, system_prompt, user_prompt, temperature=0.7, max_tokens=1000):
@@ -109,7 +113,7 @@ class LLMProvider:
 
         for _ in range(max_attempts):
             self._update_active_provider()
-            
+
             if not self.api_key:
                 last_error = f"Error: Missing API key for {self.provider}"
                 if max_attempts == 1:
@@ -122,22 +126,28 @@ class LLMProvider:
                         "usage": {
                             "prompt_tokens": prompt_tokens,
                             "completion_tokens": completion_tokens,
-                            "total_tokens": prompt_tokens + completion_tokens
+                            "total_tokens": prompt_tokens + completion_tokens,
                         },
-                        "cost": cost
+                        "cost": cost,
                     }
-                
+
                 # Try next provider
                 self.current_index = (self.current_index + 1) % max_attempts
                 continue
 
             try:
                 if self.provider == "openai":
-                    content, p_tokens, c_tokens = self._call_openai(system_prompt, user_prompt, temperature, max_tokens)
+                    content, p_tokens, c_tokens = self._call_openai(
+                        system_prompt, user_prompt, temperature, max_tokens
+                    )
                 elif self.provider == "anthropic":
-                    content, p_tokens, c_tokens = self._call_anthropic(system_prompt, user_prompt, temperature, max_tokens)
+                    content, p_tokens, c_tokens = self._call_anthropic(
+                        system_prompt, user_prompt, temperature, max_tokens
+                    )
                 elif self.provider == "google":
-                    content, p_tokens, c_tokens = self._call_google(system_prompt, user_prompt, temperature, max_tokens)
+                    content, p_tokens, c_tokens = self._call_google(
+                        system_prompt, user_prompt, temperature, max_tokens
+                    )
                 else:
                     raise ValueError(f"Unsupported provider '{self.provider}'")
 
@@ -147,9 +157,9 @@ class LLMProvider:
                     "usage": {
                         "prompt_tokens": p_tokens,
                         "completion_tokens": c_tokens,
-                        "total_tokens": p_tokens + c_tokens
+                        "total_tokens": p_tokens + c_tokens,
                     },
-                    "cost": cost
+                    "cost": cost,
                 }
             except Exception as e:
                 last_error = f"Error calling {self.provider}: {str(e)}"
@@ -159,21 +169,22 @@ class LLMProvider:
         return {
             "content": f"Error: All LLM providers failed. Last error: {last_error}",
             "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
-            "cost": 0.0
+            "cost": 0.0,
         }
 
     def _call_openai(self, system_prompt, user_prompt, temperature, max_tokens):
         try:
             from openai import OpenAI
+
             client = OpenAI(api_key=self.api_key)
             response = client.chat.completions.create(
                 model=self.model,
                 messages=[
                     {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
+                    {"role": "user", "content": user_prompt},
                 ],
                 temperature=temperature,
-                max_tokens=max_tokens
+                max_tokens=max_tokens,
             )
             content = response.choices[0].message.content
             usage = response.usage
@@ -186,15 +197,14 @@ class LLMProvider:
     def _call_anthropic(self, system_prompt, user_prompt, temperature, max_tokens):
         try:
             import anthropic
+
             client = anthropic.Anthropic(api_key=self.api_key)
             response = client.messages.create(
                 model=self.model,
                 max_tokens=max_tokens,
                 temperature=temperature,
                 system=system_prompt,
-                messages=[
-                    {"role": "user", "content": user_prompt}
-                ]
+                messages=[{"role": "user", "content": user_prompt}],
             )
             content = response.content[0].text
             usage = response.usage
@@ -207,17 +217,16 @@ class LLMProvider:
     def _call_google(self, system_prompt, user_prompt, temperature, max_tokens):
         try:
             import google.generativeai as genai
+
             genai.configure(api_key=self.api_key)
             model = genai.GenerativeModel(
-                model_name=self.model,
-                system_instruction=system_prompt
+                model_name=self.model, system_instruction=system_prompt
             )
             response = model.generate_content(
                 user_prompt,
                 generation_config=genai.types.GenerationConfig(
-                    temperature=temperature,
-                    max_output_tokens=max_tokens
-                )
+                    temperature=temperature, max_output_tokens=max_tokens
+                ),
             )
             content = response.text
             # Gemini's usage_metadata might not always be available or structured the same
@@ -227,7 +236,7 @@ class LLMProvider:
             except AttributeError:
                 p_tokens = self.count_tokens(system_prompt + user_prompt)
                 c_tokens = self.count_tokens(content)
-            
+
             return content, p_tokens, c_tokens
         except ImportError:
             raise ImportError("'google-generativeai' library not installed.")
@@ -237,18 +246,30 @@ class LLMProvider:
     def _mock_call(self, system_prompt, user_prompt):
         """
         Fallback mock response for testing when no API key is provided.
+        Returns a format that's often expected by the planner/implementor.
         """
-        mock_response = {
-            "status": "success",
-            "provider": self.provider,
-            "model": self.model,
-            "received_system_prompt": system_prompt[:100] + "...",
-            "received_user_prompt": user_prompt[:100] + "...",
-            "content": f"Mock response for task analysis. Based on your input, here are some simulated insights for {self.model}."
-        }
-        return json.dumps(mock_response, indent=2)
+        if "Break down the given requirements" in system_prompt:
+            # Return a JSON list if it looks like a planning request
+            return json.dumps(
+                [
+                    {
+                        "title": "Mock Task 1",
+                        "acceptance_criteria": "Criteria 1",
+                        "module": "mock",
+                    },
+                    {
+                        "title": "Mock Task 2",
+                        "acceptance_criteria": "Criteria 2",
+                        "module": "mock",
+                    },
+                ]
+            )
 
-    def call_multi_file(self, system_prompt, user_prompt, temperature=0.7, max_tokens=2000):
+        return f"Mock response for {self.model}. No API key provided."
+
+    def call_multi_file(
+        self, system_prompt, user_prompt, temperature=0.7, max_tokens=2000
+    ):
         """
         Calls the LLM and parses the response into a dictionary of {filepath: content}.
         Returns a dictionary with 'files', 'usage', and 'cost'.
@@ -259,7 +280,7 @@ class LLMProvider:
             "files": files,
             "usage": result["usage"],
             "cost": result["cost"],
-            "raw_content": result["content"]
+            "raw_content": result["content"],
         }
 
     def parse_multi_file_response(self, response):
@@ -274,7 +295,7 @@ class LLMProvider:
         files = {}
         # Pattern to match file path followed by code block
         pattern = r"(?:File: |### )?([a-zA-Z0-9_\-\./]+)[\r\n]+```[a-zA-Z-]*[\r\n]+([\s\S]*?)[\r\n]+```"
-        
+
         matches = re.finditer(pattern, response)
         for match in matches:
             path = match.group(1).strip()
@@ -282,5 +303,5 @@ class LLMProvider:
             if "." in path or "/" in path:
                 content = match.group(2)
                 files[path] = content
-            
+
         return files

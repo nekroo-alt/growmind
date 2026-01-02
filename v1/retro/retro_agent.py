@@ -7,38 +7,48 @@ from v1.data.db_manager import log_activity, fcid_mapping
 from v1.llm_base.provider import LLMProvider
 import json
 
+
 class RetroHandler(FileSystemEventHandler):
     """
     Handles filesystem events to trigger retrospective analysis.
     """
+
     def __init__(self, agent):
         self.agent = agent
 
     def on_modified(self, event):
         if event.is_directory or not event.src_path.endswith(".py"):
             return
-        
+
         # Ignore common non-source directories
-        if any(x in event.src_path for x in [".git", "__pycache__", ".patterns", "node_modules"]):
+        if any(
+            x in event.src_path
+            for x in [".git", "__pycache__", ".patterns", "node_modules"]
+        ):
             return
 
         # Task 6.2: Manual Change Detection logic
         # If the orchestrator is actively implementing, we ignore the change to avoid AI feedback loops
         from v1.data.db_manager import load_state
+
         phase = load_state("orchestrator_phase")
         if phase and "implementing" in phase:
             return
 
         print(f"\n[Watcher] Detected potential manual change in: {event.src_path}")
-        result = self.agent.analyze_human_override(simulated_diff={"file": event.src_path, "triggered_by": "watcher"})
+        result = self.agent.analyze_human_override(
+            simulated_diff={"file": event.src_path, "triggered_by": "watcher"}
+        )
         if "No human overrides detected" not in result:
             print(f"RetroAgent: {result}")
+
 
 class RetroAgent:
     """
     FCID: RETRO-000
     Agent responsible for analyzing human overrides and evolving project patterns.
     """
+
     PATTERNS_DIR = ".patterns"
     STYLE_FILE = os.path.join(PATTERNS_DIR, "coding_style.md")
 
@@ -47,7 +57,9 @@ class RetroAgent:
             os.makedirs(self.PATTERNS_DIR)
         if not os.path.exists(self.STYLE_FILE):
             with open(self.STYLE_FILE, "w") as f:
-                f.write("# Project Coding Patterns\n\nThis document tracks evolved coding standards from human interventions.\n")
+                f.write(
+                    "# Project Coding Patterns\n\nThis document tracks evolved coding standards from human interventions.\n"
+                )
         self.observer = None
         self.llm = llm_provider or LLMProvider()
 
@@ -57,7 +69,7 @@ class RetroAgent:
         """
         if self.observer and self.observer.is_alive():
             return
-        
+
         event_handler = RetroHandler(self)
         self.observer = Observer()
         self.observer.schedule(event_handler, path, recursive=True)
@@ -89,14 +101,14 @@ class RetroAgent:
 
         pattern, telemetry = self._extract_pattern(diff_info)
         self._update_patterns_doc(pattern)
-        
+
         log_activity(
             summary=f"Extracted Pattern: {pattern['name']}",
             action="Retro Analysis",
             status="Success",
             cot_blob=f"Analyzed human override. Identified pattern: {pattern['description']}",
             tokens_used=telemetry.get("tokens_used"),
-            estimated_cost=telemetry.get("estimated_cost")
+            estimated_cost=telemetry.get("estimated_cost"),
         )
         return f"Pattern '{pattern['name']}' extracted and saved."
 
@@ -107,20 +119,20 @@ class RetroAgent:
         try:
             cmd = ["git", "diff"]
             if file_path:
-                # Ensure we use path relative to git root if needed, 
+                # Ensure we use path relative to git root if needed,
                 # but watchdog usually gives path relative to where it started.
                 cmd.append(file_path)
-            
+
             result = subprocess.run(cmd, capture_output=True, text=True)
             if result.returncode == 0 and result.stdout.strip():
                 return {
                     "file": file_path or "multiple files",
                     "diff": result.stdout,
-                    "context": "Uncommitted manual changes detected via git diff"
+                    "context": "Uncommitted manual changes detected via git diff",
                 }
         except Exception as e:
             print(f"Error detecting human changes: {e}")
-        
+
         return None
 
     def _extract_pattern(self, diff_info):
@@ -135,9 +147,9 @@ class RetroAgent:
             "1. A concise name for the pattern.\n"
             "2. A clear description of the rule.\n"
             "3. An example of the change (the diff itself).\n\n"
-            "Return your response in strict JSON format with keys: \"name\", \"description\", \"example_diff\"."
+            'Return your response in strict JSON format with keys: "name", "description", "example_diff".'
         )
-        
+
         user_prompt = (
             f"Diff information:\n"
             f"File: {diff_info['file']}\n"
@@ -150,16 +162,16 @@ class RetroAgent:
         response = result["content"]
         telemetry = {
             "tokens_used": result["usage"]["total_tokens"],
-            "estimated_cost": result["cost"]
+            "estimated_cost": result["cost"],
         }
-        
+
         try:
             # Clean up response in case LLM added markdown formatting
             if "```json" in response:
                 response = response.split("```json")[1].split("```")[0].strip()
             elif "```" in response:
                 response = response.split("```")[1].split("```")[0].strip()
-            
+
             pattern = json.loads(response)
             # Ensure all keys are present
             if not all(k in pattern for k in ["name", "description", "example_diff"]):
@@ -171,18 +183,20 @@ class RetroAgent:
             pattern = {
                 "name": "Manual Override Detected",
                 "description": f"A manual change was detected in {diff_info['file']}. Context: {diff_info['context']}",
-                "example_diff": diff_info['diff']
+                "example_diff": diff_info["diff"],
             }
             return pattern, telemetry
 
     def _update_patterns_doc(self, pattern):
         """
-        Updates the coding_style.md file with the new pattern. 
+        Updates the coding_style.md file with the new pattern.
         Avoids duplicates and ensures clean formatting.
         """
         if not os.path.exists(self.STYLE_FILE):
             with open(self.STYLE_FILE, "w") as f:
-                f.write("# Project Coding Patterns\n\nThis document tracks evolved coding standards from human interventions.\n")
+                f.write(
+                    "# Project Coding Patterns\n\nThis document tracks evolved coding standards from human interventions.\n"
+                )
 
         with open(self.STYLE_FILE, "r") as f:
             lines = f.readlines()
@@ -193,13 +207,18 @@ class RetroAgent:
         while i < len(lines):
             line = lines[i]
             # Check if this pattern already exists (case-insensitive)
-            if line.startswith("## ") and line.strip("# ").strip().lower() == pattern['name'].lower():
+            if (
+                line.startswith("## ")
+                and line.strip("# ").strip().lower() == pattern["name"].lower()
+            ):
                 found = True
                 # Replace the existing pattern section
                 new_content.append(f"## {pattern['name']}\n")
                 new_content.append(f"**Description:** {pattern['description']}\n\n")
-                new_content.append(f"**Example Correction:**\n```diff\n{pattern['example_diff']}\n```\n")
-                
+                new_content.append(
+                    f"**Example Correction:**\n```diff\n{pattern['example_diff']}\n```\n"
+                )
+
                 # Skip the old pattern section until next header or end
                 i += 1
                 while i < len(lines) and not lines[i].startswith("##"):
@@ -214,7 +233,9 @@ class RetroAgent:
                 new_content.append("\n")
             new_content.append(f"\n## {pattern['name']}\n")
             new_content.append(f"**Description:** {pattern['description']}\n\n")
-            new_content.append(f"**Example Correction:**\n```diff\n{pattern['example_diff']}\n```\n")
+            new_content.append(
+                f"**Example Correction:**\n```diff\n{pattern['example_diff']}\n```\n"
+            )
 
         with open(self.STYLE_FILE, "w") as f:
             f.writelines(new_content)

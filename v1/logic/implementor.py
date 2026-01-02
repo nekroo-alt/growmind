@@ -1,11 +1,17 @@
 import os
 import subprocess
 import glob
-from v1.data.db_manager import log_activity, update_task_status, fcid_mapping, get_commit_count
+from v1.data.db_manager import (
+    log_activity,
+    update_task_status,
+    fcid_mapping,
+    get_commit_count,
+)
 from v1.logic.git_guard import GitGuard
 from v1.logic.context_engine import ContextEngine
 from v1.llm_base.provider import LLMProvider
 from v1.logic.verifier import Verifier
+
 
 class Implementor:
     def __init__(self, workspace_root="."):
@@ -20,11 +26,13 @@ class Implementor:
         """
         Executes a Red-Green-Refactor cycle for the given task.
         """
-        task_id = task['id']
-        task_title = task['title']
-        
+        task_id = task["id"]
+        task_title = task["title"]
+
         # Context Injection
-        v1_files = glob.glob(os.path.join(self.workspace_root, "v1/**/*.py"), recursive=True)
+        v1_files = glob.glob(
+            os.path.join(self.workspace_root, "v1/**/*.py"), recursive=True
+        )
         v1_files = [os.path.relpath(f, self.workspace_root) for f in v1_files]
         context = self.context_engine.get_pruned_context(task_title, v1_files)
 
@@ -32,20 +40,20 @@ class Implementor:
             summary=f"Starting TDD Cycle: {task_title}",
             action="TDD Start",
             status="Success",
-            cot_blob=f"Beginning implementation for task ID {task_id}. Context gathered: {len(context)} chars."
+            cot_blob=f"Beginning implementation for task ID {task_id}. Context gathered: {len(context)} chars.",
         )
 
         # Red Phase: Write a failing test
         if not self._run_red_phase(task, context):
             return False
-            
+
         # Green Phase: Write minimal code to pass
         if not self._run_green_phase(task, context):
             return False
-            
+
         # Refactor Phase: Cleanup
         self._run_refactor_phase(task_title)
-        
+
         # Check for Refactor Sprint (every 10 commits)
         if get_commit_count() % 10 == 0 and get_commit_count() > 0:
             self.run_refactor_sprint()
@@ -54,7 +62,7 @@ class Implementor:
         return True
 
     def _run_red_phase(self, task, context):
-        task_title = task['title']
+        task_title = task["title"]
         system_prompt = """You are a TDD expert and senior software engineer. 
 Your task is to generate failing tests (the "Red" phase of TDD) based on a task description, context, and acceptance criteria.
 
@@ -70,10 +78,10 @@ Prefer using `pytest`.
 Keep changes focused and under 30 lines per commit.
 """
         user_prompt = f"Task: {task_title}\nContext: {context}\nAcceptance Criteria: {task['acceptance_criteria']}"
-        
+
         result = self.llm.call_multi_file(system_prompt, user_prompt)
         test_changes = result["files"]
-        
+
         if not test_changes:
             log_activity(
                 summary=f"Red Phase Failed: No tests generated for {task_title}",
@@ -81,28 +89,35 @@ Keep changes focused and under 30 lines per commit.
                 status="Failed",
                 cot_blob=f"LLM did not return any file changes. Raw content: {result.get('raw_content', '')[:500]}",
                 tokens_used=result["usage"]["total_tokens"],
-                estimated_cost=result["cost"]
+                estimated_cost=result["cost"],
             )
             return False
-        
+
         for file_path, test_code in test_changes.items():
             os.makedirs(os.path.dirname(file_path), exist_ok=True)
-            # Use 'w' instead of 'a' for cleaner test generation, 
+            # Use 'w' instead of 'a' for cleaner test generation,
             # as the LLM is expected to provide full file content or at least a full suite.
             with open(file_path, "w") as f:
                 f.write(test_code)
-        
-        return self.git.commit("ACT-100", f"Red Phase: {task_title}", 
-                               files=list(test_changes.keys()),
-                               cot=f"Added test cases for {task_title} across {len(test_changes)} files.",
-                               tokens_used=result["usage"]["total_tokens"],
-                               estimated_cost=result["cost"])
+
+        return self.git.commit(
+            "ACT-100",
+            f"Red Phase: {task_title}",
+            files=list(test_changes.keys()),
+            cot=f"Added test cases for {task_title} across {len(test_changes)} files.",
+            tokens_used=result["usage"]["total_tokens"],
+            estimated_cost=result["cost"],
+        )
 
     def _run_green_phase(self, task, context):
-        task_title = task['title']
+        task_title = task["title"]
         # If the Red phase created multiple files, we should ideally run all of them.
         # For v1, we focus on the primary test file or use a heuristic.
-        test_file = "v1/test_multi_poc.py" if "multi" in task_title.lower() else "v1/test_poc.py"
+        test_file = (
+            "v1/test_multi_poc.py"
+            if "multi" in task_title.lower()
+            else "v1/test_poc.py"
+        )
 
         attempts = 3
         last_error = ""
@@ -112,7 +127,7 @@ Keep changes focused and under 30 lines per commit.
                 summary=f"Green Phase Attempt {attempt}/{attempts}: {task_title}",
                 action="Green Phase",
                 status="Progress",
-                cot_blob=f"Attempting to pass tests for {task_title}. Feedback from previous error: {bool(last_error)}"
+                cot_blob=f"Attempting to pass tests for {task_title}. Feedback from previous error: {bool(last_error)}",
             )
 
             # Construct prompt for fix generation
@@ -135,7 +150,7 @@ Keep changes focused and under 30 lines per commit.
 
             result = self.llm.call_multi_file(system_prompt, user_prompt)
             suggested_changes = result["files"]
-            
+
             if not suggested_changes:
                 log_activity(
                     summary=f"Green Phase Attempt {attempt} Failed: No code generated",
@@ -143,7 +158,7 @@ Keep changes focused and under 30 lines per commit.
                     status="Failed",
                     cot_blob=f"LLM did not return any file changes for attempt {attempt}. Raw content: {result.get('raw_content', '')[:500]}",
                     tokens_used=result["usage"]["total_tokens"],
-                    estimated_cost=result["cost"]
+                    estimated_cost=result["cost"],
                 )
                 continue
 
@@ -152,40 +167,45 @@ Keep changes focused and under 30 lines per commit.
                 # Using 'w' to allow full file replacement by LLM
                 with open(file_path, "w") as f:
                     f.write(impl_code)
-            
+
             # Run tests and capture logs
             test_passed, test_output = self._run_tests(test_file)
-            
+
             mutation_passed = True
             if test_passed:
                 # Quality Gate: Mutation Testing (VER-102)
                 for file_path in suggested_changes.keys():
                     if file_path.endswith(".py") and "test" not in file_path:
-                        if not self.verifier.run_mutation_tests(target_file=file_path, test_file=test_file):
+                        if not self.verifier.run_mutation_tests(
+                            target_file=file_path, test_file=test_file
+                        ):
                             mutation_passed = False
                             last_error = f"Mutation testing failed for {file_path}. 100% score required."
                             break
-                
+
                 if mutation_passed:
-                    return self.git.commit("ACT-101", f"Green Phase: {task_title}", 
-                                           files=list(suggested_changes.keys()),
-                                           cot=f"Implementation passed on attempt {attempt} and met 100% mutation quality gate.",
-                                           tokens_used=result["usage"]["total_tokens"],
-                                           estimated_cost=result["cost"])
-            
+                    return self.git.commit(
+                        "ACT-101",
+                        f"Green Phase: {task_title}",
+                        files=list(suggested_changes.keys()),
+                        cot=f"Implementation passed on attempt {attempt} and met 100% mutation quality gate.",
+                        tokens_used=result["usage"]["total_tokens"],
+                        estimated_cost=result["cost"],
+                    )
+
             if not test_passed or not mutation_passed:
                 if not test_passed:
                     last_error = test_output
-                
+
                 log_activity(
                     summary=f"Green Phase Attempt {attempt} Failed",
                     action="Green Phase",
                     status="Failed",
                     cot_blob=f"Attempt {attempt} failed for {task_title}. Error: {last_error[:500]}",
                     tokens_used=result["usage"]["total_tokens"],
-                    estimated_cost=result["cost"]
+                    estimated_cost=result["cost"],
                 )
-                
+
                 if attempt == attempts:
                     return False
         return False
@@ -197,13 +217,21 @@ Keep changes focused and under 30 lines per commit.
         # If we are in a simulation environment without real tests, we mock it
         # but capture a 'log' as requested in Task 4.2.
         if os.getenv("L4_SIMULATION") == "true" or not os.path.exists(test_file):
-            # Simulate failure on first attempt, success on second if needed, 
+            # Simulate failure on first attempt, success on second if needed,
             # but Task 4.2 is about the LOG passing.
-            return False, "Mock test failure log: AssertionError in line 5 of test_poc.py"
+            return (
+                False,
+                "Mock test failure log: AssertionError in line 5 of test_poc.py",
+            )
 
         try:
             # Use pytest to run the test file and capture output
-            result = subprocess.run(['python3', '-m', 'pytest', test_file], capture_output=True, text=True, timeout=30)
+            result = subprocess.run(
+                ["python3", "-m", "pytest", test_file],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
             return result.returncode == 0, result.stdout + result.stderr
         except Exception as e:
             return False, f"Test execution error: {str(e)}"
@@ -213,7 +241,7 @@ Keep changes focused and under 30 lines per commit.
             summary=f"Refactor Phase: {task_title}",
             action="Refactor",
             status="Success",
-            cot_blob="Verified code against tests and cleaned up"
+            cot_blob="Verified code against tests and cleaned up",
         )
         return True
 
@@ -226,28 +254,34 @@ Keep changes focused and under 30 lines per commit.
             summary="Initiating Refactor Sprint",
             action="Refactor Sprint",
             status="Progress",
-            cot_blob="10 commits reached, starting pattern consolidation using .patterns"
+            cot_blob="10 commits reached, starting pattern consolidation using .patterns",
         )
-        
+
         # 1. Load patterns
         patterns_path = os.path.join(self.workspace_root, ".patterns/coding_style.md")
         patterns = ""
         if os.path.exists(patterns_path):
             with open(patterns_path, "r") as f:
                 patterns = f.read()
-        
+
         # 2. Gather context (all v1 python files, excluding tests and __init__.py)
-        v1_files = glob.glob(os.path.join(self.workspace_root, "v1/**/*.py"), recursive=True)
-        src_files = [f for f in v1_files if "test" not in os.path.basename(f) and "__init__.py" not in f]
-        
+        v1_files = glob.glob(
+            os.path.join(self.workspace_root, "v1/**/*.py"), recursive=True
+        )
+        src_files = [
+            f
+            for f in v1_files
+            if "test" not in os.path.basename(f) and "__init__.py" not in f
+        ]
+
         context_parts = []
         for file_path in src_files:
             rel_path = os.path.relpath(file_path, self.workspace_root)
             with open(file_path, "r") as f:
                 context_parts.append(f"File: {rel_path}\n```python\n{f.read()}\n```")
-        
+
         full_context = "\n\n".join(context_parts)
-        
+
         # 3. Call LLM for refactoring
         system_prompt = """You are a senior software architect specializing in refactoring and pattern consolidation.
 Your goal is to improve the codebase by applying the provided coding patterns and reducing technical debt.
@@ -268,11 +302,13 @@ File: path/to/file.py
 Keep changes focused and ensure they don't break existing functionality.
 Respect the Open-Closed principle for core logic, but feel free to consolidate repetitive patterns.
 """
-        user_prompt = f"Coding Patterns:\n{patterns}\n\nSource Code Context:\n{full_context}"
-        
+        user_prompt = (
+            f"Coding Patterns:\n{patterns}\n\nSource Code Context:\n{full_context}"
+        )
+
         result = self.llm.call_multi_file(system_prompt, user_prompt, max_tokens=4000)
         refactored_files = result["files"]
-        
+
         if not refactored_files:
             log_activity(
                 summary="Refactor Sprint: No changes recommended",
@@ -280,7 +316,7 @@ Respect the Open-Closed principle for core logic, but feel free to consolidate r
                 status="Success",
                 cot_blob="LLM analyzed the code but found no patterns to consolidate at this time.",
                 tokens_used=result["usage"]["total_tokens"],
-                estimated_cost=result["cost"]
+                estimated_cost=result["cost"],
             )
             return True
 
@@ -295,13 +331,13 @@ Respect the Open-Closed principle for core logic, but feel free to consolidate r
                 with open(full_path, "w") as f:
                     f.write(content)
                 applied_files.append(file_path)
-        
+
         # 5. Run all tests to verify
         test_files = [f for f in v1_files if "test" in os.path.basename(f)]
         all_passed = True
         failed_tests = []
-        
-        # In simulation mode, we'll assume the refactor passed if LLM provided it, 
+
+        # In simulation mode, we'll assume the refactor passed if LLM provided it,
         # to avoid the mock failure trap in _run_tests.
         if os.getenv("L4_SIMULATION") == "true":
             log_activity(
@@ -310,7 +346,7 @@ Respect the Open-Closed principle for core logic, but feel free to consolidate r
                 status="Success",
                 cot_blob=f"Simulation mode: skipping real test run. Applied refactorings in {len(applied_files)} files.",
                 tokens_used=result["usage"]["total_tokens"],
-                estimated_cost=result["cost"]
+                estimated_cost=result["cost"],
             )
         else:
             for t_file in test_files:
@@ -318,7 +354,7 @@ Respect the Open-Closed principle for core logic, but feel free to consolidate r
                 if not passed:
                     all_passed = False
                     failed_tests.append(f"{t_file}: {output}")
-        
+
         if all_passed:
             log_activity(
                 summary=f"Refactor Sprint Success: Consolidated patterns in {len(applied_files)} files",
@@ -326,25 +362,29 @@ Respect the Open-Closed principle for core logic, but feel free to consolidate r
                 status="Success",
                 cot_blob=f"Applied refactorings based on patterns. All {len(test_files)} test suites passed.",
                 tokens_used=result["usage"]["total_tokens"],
-                estimated_cost=result["cost"]
+                estimated_cost=result["cost"],
             )
-            return self.git.commit("ACT-200", "Refactor Sprint: Consolidated coding patterns", 
-                                   files=applied_files,
-                                   cot=f"Refactor sprint completed. Files updated: {', '.join(applied_files)}",
-                                   tokens_used=result["usage"]["total_tokens"],
-                                   estimated_cost=result["cost"])
+            return self.git.commit(
+                "ACT-200",
+                "Refactor Sprint: Consolidated coding patterns",
+                files=applied_files,
+                cot=f"Refactor sprint completed. Files updated: {', '.join(applied_files)}",
+                tokens_used=result["usage"]["total_tokens"],
+                estimated_cost=result["cost"],
+            )
         else:
             # Rollback
             for full_path, content in backups.items():
                 with open(full_path, "w") as f:
                     f.write(content)
-            
+
             log_activity(
                 summary="Refactor Sprint Failed: Regression detected",
                 action="Refactor Sprint",
                 status="Failed",
-                cot_blob=f"LLM suggested changes caused test failures. Rolling back.\nErrors:\n" + "\n".join(failed_tests),
+                cot_blob=f"LLM suggested changes caused test failures. Rolling back.\nErrors:\n"
+                + "\n".join(failed_tests),
                 tokens_used=result["usage"]["total_tokens"],
-                estimated_cost=result["cost"]
+                estimated_cost=result["cost"],
             )
             return False
