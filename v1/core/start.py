@@ -62,10 +62,15 @@ class Orchestrator:
         return True
 
     def _update_telemetry_stats(self, current_task=None):
-        tokens, cost = get_cost_summary()
+        tokens, cost, p_tokens, c_tokens = get_cost_summary()
         tasks_done = get_completed_tasks_count()
         self.telemetry.update_dashboard(
-            task=current_task, tokens=tokens, cost=cost, tasks_completed=tasks_done
+            task=current_task,
+            tokens=tokens,
+            cost=cost,
+            tasks_completed=tasks_done,
+            prompt_tokens=p_tokens,
+            completion_tokens=c_tokens,
         )
 
     @fcid_mapping("CORE-101")

@@ -25,10 +25,23 @@ def init_db():
             CoT_blob TEXT,
             commit_hash TEXT,
             tokens_used INTEGER,
+            prompt_tokens INTEGER,
+            completion_tokens INTEGER,
             estimated_cost REAL
         )
         """
         )
+
+        # Ensure columns exist if table was already created
+        try:
+            cursor.execute("ALTER TABLE activities ADD COLUMN prompt_tokens INTEGER")
+        except sqlite3.OperationalError:
+            pass  # Already exists
+        try:
+            cursor.execute("ALTER TABLE activities ADD COLUMN completion_tokens INTEGER")
+        except sqlite3.OperationalError:
+            pass  # Already exists
+
         conn.commit()
 
     # Initialize task database
@@ -74,6 +87,8 @@ def log_activity(
     cot_blob=None,
     commit_hash=None,
     tokens_used=None,
+    prompt_tokens=None,
+    completion_tokens=None,
     estimated_cost=None,
     notify_telemetry=True,
 ):
@@ -82,6 +97,9 @@ def log_activity(
     """
     if notify_telemetry:
         msg = f"[{action}] {summary} -> {status}"
+        if status == "Failed" and cot_blob:
+            msg += f" - {cot_blob}"
+
         if status == "Success":
             telemetry.info(msg)
         elif status == "Failed":
@@ -89,14 +107,32 @@ def log_activity(
         else:
             telemetry.info(msg)
 
+    # Calculate tokens_used if not provided but prompt/completion are
+    if (
+        tokens_used is None
+        and prompt_tokens is not None
+        and completion_tokens is not None
+    ):
+        tokens_used = prompt_tokens + completion_tokens
+
     conn = get_db_connection(ACTIVITY_DB_PATH)
     cursor = conn.cursor()
     cursor.execute(
         """
-        INSERT INTO activities (summary, action, status, CoT_blob, commit_hash, tokens_used, estimated_cost)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO activities (summary, action, status, CoT_blob, commit_hash, tokens_used, prompt_tokens, completion_tokens, estimated_cost)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     """,
-        (summary, action, status, cot_blob, commit_hash, tokens_used, estimated_cost),
+        (
+            summary,
+            action,
+            status,
+            cot_blob,
+            commit_hash,
+            tokens_used,
+            prompt_tokens,
+            completion_tokens,
+            estimated_cost,
+        ),
     )
     conn.commit()
     conn.close()
@@ -212,15 +248,20 @@ def get_commit_count():
 def get_cost_summary():
     """
     Returns total tokens used and estimated cost from all activities.
+    Returns (total_tokens, total_cost, prompt_tokens, completion_tokens)
     """
     conn = get_db_connection(ACTIVITY_DB_PATH)
     cursor = conn.cursor()
-    cursor.execute("SELECT SUM(tokens_used), SUM(estimated_cost) FROM activities")
+    cursor.execute(
+        "SELECT SUM(tokens_used), SUM(estimated_cost), SUM(prompt_tokens), SUM(completion_tokens) FROM activities"
+    )
     row = cursor.fetchone()
     total_tokens = row[0] if row[0] is not None else 0
     total_cost = row[1] if row[1] is not None else 0.0
+    prompt_tokens = row[2] if row[2] is not None else 0
+    completion_tokens = row[3] if row[3] is not None else 0
     conn.close()
-    return total_tokens, total_cost
+    return total_tokens, total_cost, prompt_tokens, completion_tokens
 
 
 def get_completed_tasks_count():

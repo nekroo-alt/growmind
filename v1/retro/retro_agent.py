@@ -108,6 +108,8 @@ class RetroAgent:
             status="Success",
             cot_blob=f"Analyzed human override. Identified pattern: {pattern['description']}",
             tokens_used=telemetry.get("tokens_used"),
+            prompt_tokens=telemetry.get("prompt_tokens"),
+            completion_tokens=telemetry.get("completion_tokens"),
             estimated_cost=telemetry.get("estimated_cost"),
         )
         return f"Pattern '{pattern['name']}' extracted and saved."
@@ -162,6 +164,8 @@ class RetroAgent:
         response = result["content"]
         telemetry = {
             "tokens_used": result["usage"]["total_tokens"],
+            "prompt_tokens": result["usage"]["prompt_tokens"],
+            "completion_tokens": result["usage"]["completion_tokens"],
             "estimated_cost": result["cost"],
         }
 

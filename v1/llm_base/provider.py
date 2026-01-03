@@ -120,6 +120,12 @@ class LLMProvider:
                     content = self._mock_call(system_prompt, user_prompt)
                     prompt_tokens = self.count_tokens(system_prompt + user_prompt)
                     completion_tokens = self.count_tokens(content)
+                    telemetry.log_llm_usage(
+                        prompt_tokens + completion_tokens,
+                        0.0,
+                        prompt_tokens,
+                        completion_tokens,
+                    )
                     telemetry.log_llm_interaction(
                         self.provider, self.model, system_prompt, user_prompt, content
                     )
@@ -154,7 +160,7 @@ class LLMProvider:
                     raise ValueError(f"Unsupported provider '{self.provider}'")
 
                 cost = self.calculate_cost(p_tokens, c_tokens)
-                telemetry.log_llm_usage(p_tokens + c_tokens, cost)
+                telemetry.log_llm_usage(p_tokens + c_tokens, cost, p_tokens, c_tokens)
                 telemetry.log_llm_interaction(
                     self.provider, self.model, system_prompt, user_prompt, content
                 )
@@ -256,11 +262,18 @@ class LLMProvider:
 
             # Gemini's usage_metadata might not always be available or structured the same
             try:
+                # Newer versions of the SDK use these attribute names
                 p_tokens = response.usage_metadata.prompt_token_count
                 c_tokens = response.usage_metadata.candidates_token_count
-            except AttributeError:
-                p_tokens = self.count_tokens(system_prompt + user_prompt)
-                c_tokens = self.count_tokens(content)
+            except (AttributeError, ValueError):
+                try:
+                    # Alternative names in some versions/responses
+                    p_tokens = response.usage_metadata.prompt_tokens
+                    c_tokens = response.usage_metadata.completion_tokens
+                except (AttributeError, ValueError):
+                    # Fallback to estimation if metadata is missing
+                    p_tokens = self.count_tokens(system_prompt + user_prompt)
+                    c_tokens = self.count_tokens(content)
 
             return content, p_tokens, c_tokens
         except ImportError:

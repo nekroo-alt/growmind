@@ -120,6 +120,8 @@ class Planner:
             status="Success",
             cot_blob=f"Broke down {'project' if not task_to_break else task_to_break['title']} into {len(subtasks)} tasks. Added {new_tasks_added} new tasks.",
             tokens_used=result["usage"]["total_tokens"],
+            prompt_tokens=result["usage"]["prompt_tokens"],
+            completion_tokens=result["usage"]["completion_tokens"],
             estimated_cost=result["cost"],
         )
         return new_tasks_added

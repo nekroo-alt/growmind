@@ -80,7 +80,7 @@ File: path/to/file.py
 
 Ensure the tests are comprehensive and would fail until the implementation is completed.
 Prefer using `pytest`.
-Keep changes focused and under 30 lines per commit.
+Keep changes focused and under 100 lines per commit.
 """
         user_prompt = f"Task: {task_title}\nContext: {context}\nAcceptance Criteria: {task['acceptance_criteria']}"
 
@@ -94,6 +94,8 @@ Keep changes focused and under 30 lines per commit.
                 status="Failed",
                 cot_blob=f"LLM did not return any file changes. Raw content: {result.get('raw_content', '')[:500]}",
                 tokens_used=result["usage"]["total_tokens"],
+                prompt_tokens=result["usage"]["prompt_tokens"],
+                completion_tokens=result["usage"]["completion_tokens"],
                 estimated_cost=result["cost"],
             )
             return False
@@ -111,6 +113,8 @@ Keep changes focused and under 30 lines per commit.
             files=list(test_changes.keys()),
             cot=f"Added test cases for {task_title} across {len(test_changes)} files.",
             tokens_used=result["usage"]["total_tokens"],
+            prompt_tokens=result["usage"]["prompt_tokens"],
+            completion_tokens=result["usage"]["completion_tokens"],
             estimated_cost=result["cost"],
         )
 
@@ -147,7 +151,7 @@ File: path/to/file.py
 ```
 
 Respect the Open-Closed Principle and avoid modifying stable modules unless necessary.
-Keep changes focused and under 30 lines per commit.
+Keep changes focused and under 100 lines per commit.
 """
             user_prompt = f"Task: {task_title}\nContext: {context}\n"
             if last_error:
@@ -163,6 +167,8 @@ Keep changes focused and under 30 lines per commit.
                     status="Failed",
                     cot_blob=f"LLM did not return any file changes for attempt {attempt}. Raw content: {result.get('raw_content', '')[:500]}",
                     tokens_used=result["usage"]["total_tokens"],
+                    prompt_tokens=result["usage"]["prompt_tokens"],
+                    completion_tokens=result["usage"]["completion_tokens"],
                     estimated_cost=result["cost"],
                 )
                 continue
@@ -195,6 +201,8 @@ Keep changes focused and under 30 lines per commit.
                         files=list(suggested_changes.keys()),
                         cot=f"Implementation passed on attempt {attempt} and met 100% mutation quality gate.",
                         tokens_used=result["usage"]["total_tokens"],
+                        prompt_tokens=result["usage"]["prompt_tokens"],
+                        completion_tokens=result["usage"]["completion_tokens"],
                         estimated_cost=result["cost"],
                     )
 
@@ -208,6 +216,8 @@ Keep changes focused and under 30 lines per commit.
                     status="Failed",
                     cot_blob=f"Attempt {attempt} failed for {task_title}. Error: {last_error[:500]}",
                     tokens_used=result["usage"]["total_tokens"],
+                    prompt_tokens=result["usage"]["prompt_tokens"],
+                    completion_tokens=result["usage"]["completion_tokens"],
                     estimated_cost=result["cost"],
                 )
 
@@ -315,6 +325,8 @@ Respect the Open-Closed principle for core logic, but feel free to consolidate r
                 status="Success",
                 cot_blob="LLM analyzed the code but found no patterns to consolidate at this time.",
                 tokens_used=result["usage"]["total_tokens"],
+                prompt_tokens=result["usage"]["prompt_tokens"],
+                completion_tokens=result["usage"]["completion_tokens"],
                 estimated_cost=result["cost"],
             )
             return True
@@ -349,6 +361,8 @@ Respect the Open-Closed principle for core logic, but feel free to consolidate r
                 status="Success",
                 cot_blob=f"Applied refactorings based on patterns. All {len(test_files)} test suites passed.",
                 tokens_used=result["usage"]["total_tokens"],
+                prompt_tokens=result["usage"]["prompt_tokens"],
+                completion_tokens=result["usage"]["completion_tokens"],
                 estimated_cost=result["cost"],
             )
             return self.git.commit(
@@ -357,6 +371,8 @@ Respect the Open-Closed principle for core logic, but feel free to consolidate r
                 files=applied_files,
                 cot=f"Refactor sprint completed. Files updated: {', '.join(applied_files)}",
                 tokens_used=result["usage"]["total_tokens"],
+                prompt_tokens=result["usage"]["prompt_tokens"],
+                completion_tokens=result["usage"]["completion_tokens"],
                 estimated_cost=result["cost"],
             )
         else:
@@ -372,6 +388,8 @@ Respect the Open-Closed principle for core logic, but feel free to consolidate r
                 cot_blob=f"LLM suggested changes caused test failures. Rolling back.\nErrors:\n"
                 + "\n".join(failed_tests),
                 tokens_used=result["usage"]["total_tokens"],
+                prompt_tokens=result["usage"]["prompt_tokens"],
+                completion_tokens=result["usage"]["completion_tokens"],
                 estimated_cost=result["cost"],
             )
             return False

@@ -35,7 +35,13 @@ class Telemetry:
         self.layout = None
         self.current_task = "Waiting..."
         self.current_step = ""
-        self.stats = {"tokens": 0, "cost": 0.0, "tasks_completed": 0}
+        self.stats = {
+            "tokens": 0,
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "cost": 0.0,
+            "tasks_completed": 0,
+        }
         self.log_history = deque(maxlen=10)
 
         self.log_dir = "logs"
@@ -125,9 +131,13 @@ class Telemetry:
         self.current_step = step_name
         self.info(f"  ↳ [bold blue]Step:[/bold blue] {step_name}")
 
-    def log_llm_usage(self, tokens: int, cost: float):
+    def log_llm_usage(
+        self, tokens: int, cost: float, p_tokens: int = 0, c_tokens: int = 0
+    ):
         """Updates LLM usage stats."""
         self.stats["tokens"] += tokens
+        self.stats["prompt_tokens"] += p_tokens
+        self.stats["completion_tokens"] += c_tokens
         self.stats["cost"] += cost
         self.update_dashboard()
 
@@ -205,6 +215,8 @@ class Telemetry:
         tokens: int = None,
         cost: float = None,
         tasks_completed: int = None,
+        prompt_tokens: int = None,
+        completion_tokens: int = None,
     ):
         """
         Updates the dashboard with new data.
@@ -217,6 +229,10 @@ class Telemetry:
             # We treat these as absolute updates from start.py, or incremental from provider.py
             # For simplicity in v1, start.py overrides them with DB totals.
             self.stats["tokens"] = tokens
+        if prompt_tokens is not None:
+            self.stats["prompt_tokens"] = prompt_tokens
+        if completion_tokens is not None:
+            self.stats["completion_tokens"] = completion_tokens
         if cost is not None:
             self.stats["cost"] = cost
         if tasks_completed is not None:
@@ -254,7 +270,8 @@ class Telemetry:
         # Right Panel - Stats
         stats_table = Table(show_header=False, box=None, padding=(0, 1))
         stats_table.add_row(
-            "Tokens Used", f"[bold cyan]{self.stats['tokens']:,}[/bold cyan]"
+            "Tokens Used",
+            f"[bold cyan]{self.stats['tokens']:,}[/bold cyan] [grey70](P:{self.stats['prompt_tokens']:,}|C:{self.stats['completion_tokens']:,})[/grey70]",
         )
         stats_table.add_row(
             "Est. Cost", f"[bold green]${self.stats['cost']:.4f}[/bold green]"

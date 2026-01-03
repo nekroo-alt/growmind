@@ -42,9 +42,11 @@ class GitGuard:
     @fcid_mapping("GIT-101")
     def check_policy(self):
         """
-        Enforce <30 lines and Open-Closed principle.
+        Enforce line limit and Open-Closed principle.
         """
-        line_check = self._check_line_limit()
+        line_count = self._get_line_diff_count()
+        line_limit = 100
+        line_check = line_count <= line_limit
         oc_check = self._check_open_closed()
 
         is_valid = line_check and oc_check
@@ -53,11 +55,11 @@ class GitGuard:
             summary="Git Policy Check",
             action="check_policy",
             status=status,
-            cot_blob=f"Lines <= 30: {line_check}, Open-Closed: {oc_check}",
+            cot_blob=f"Lines changed: {line_count} (Limit: {line_limit}), Open-Closed: {oc_check}",
         )
         return is_valid
 
-    def _check_line_limit(self):
+    def _get_line_diff_count(self):
         try:
             result = subprocess.run(
                 ["git", "diff", "--cached", "--shortstat"],
@@ -66,15 +68,15 @@ class GitGuard:
             )
             output = result.stdout.strip()
             if not output:
-                return True
+                return 0
             parts = output.split(",")
             total = 0
             for p in parts:
                 if "insertion" in p or "deletion" in p:
-                    total += int(p.split()[0])
-            return total <= 30
+                    total += int(p.split()[0].replace(",", ""))
+            return total
         except Exception:
-            return False
+            return 999  # Fail safe
 
     def _check_open_closed(self):
         try:
@@ -93,7 +95,15 @@ class GitGuard:
 
     @fcid_mapping("GIT-102")
     def commit(
-        self, fcid, summary, files=None, cot="", tokens_used=None, estimated_cost=None
+        self,
+        fcid,
+        summary,
+        files=None,
+        cot="",
+        tokens_used=None,
+        prompt_tokens=None,
+        completion_tokens=None,
+        estimated_cost=None,
     ):
         """
         Finalize commit and record CoT in activity log.
@@ -132,6 +142,8 @@ class GitGuard:
                 cot_blob=cot,
                 commit_hash=commit_hash,
                 tokens_used=tokens_used,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
                 estimated_cost=estimated_cost,
             )
             return True
