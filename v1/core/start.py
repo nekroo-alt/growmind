@@ -174,7 +174,9 @@ class Orchestrator:
                         self._update_telemetry_stats()
 
                         try:
-                            success = self.implementor.execute_tdd_cycle(task)
+                            success, error_reason = self.implementor.execute_tdd_cycle(
+                                task
+                            )
 
                             if success:
                                 self.telemetry.info(
@@ -184,23 +186,26 @@ class Orchestrator:
                                 self._update_telemetry_stats()
 
                                 # Verifier check
+                                # Note: Ideally verifier.run_tests should also return more info
                                 if not self.verifier.run_tests():
-                                    self.telemetry.error(
-                                        f"Tests failed after implementation of '{task_title}'. Marking as blocked."
-                                    )
-                                    update_task_status(task_id, "blocked")
+                                    reason = f"Final verification tests failed after implementation of '{task_title}'."
+                                    self.telemetry.error(f"{reason} Marking as blocked.")
+                                    update_task_status(task_id, "blocked", reason=reason)
                                     outcome["success"] = False
                             else:
                                 self.telemetry.error(
-                                    f"TDD cycle failed for '{task_title}' after multiple attempts. Marking as blocked."
+                                    f"TDD cycle failed for '{task_title}': {error_reason}. Marking as blocked."
                                 )
-                                update_task_status(task_id, "blocked")
+                                update_task_status(
+                                    task_id, "blocked", reason=error_reason
+                                )
                                 outcome["success"] = False
                         except Exception as e:
+                            reason = f"Unexpected error during implementation: {str(e)}"
                             self.telemetry.error(
                                 f"Unexpected error during implementation of '{task_title}': {str(e)}"
                             )
-                            update_task_status(task_id, "blocked")
+                            update_task_status(task_id, "blocked", reason=reason)
                             outcome["success"] = False
 
                 else:

@@ -56,10 +56,17 @@ def init_db():
             acceptance_criteria TEXT,
             parent_id INTEGER,
             module TEXT,
+            blocked_reason TEXT,
             FOREIGN KEY (parent_id) REFERENCES tasks (id)
         )
         """
         )
+        # Ensure blocked_reason column exists if table was already created
+        try:
+            cursor.execute("ALTER TABLE tasks ADD COLUMN blocked_reason TEXT")
+        except sqlite3.OperationalError:
+            pass  # Already exists
+
         cursor.execute(
             """
         CREATE TABLE IF NOT EXISTS state (
@@ -201,13 +208,21 @@ def task_exists(title):
     return exists
 
 
-def update_task_status(task_id, new_status):
+def update_task_status(task_id, new_status, reason=None):
     """
     Updates the status of a task in the task database.
     """
     conn = get_db_connection(TASK_DB_PATH)
     cursor = conn.cursor()
-    cursor.execute("UPDATE tasks SET status = ? WHERE id = ?", (new_status, task_id))
+    if reason:
+        cursor.execute(
+            "UPDATE tasks SET status = ?, blocked_reason = ? WHERE id = ?",
+            (new_status, reason, task_id),
+        )
+    else:
+        cursor.execute(
+            "UPDATE tasks SET status = ? WHERE id = ?", (new_status, task_id)
+        )
     conn.commit()
     conn.close()
 

@@ -26,6 +26,7 @@ class Implementor:
     def execute_tdd_cycle(self, task):
         """
         Executes a Red-Green-Refactor cycle for the given task.
+        Returns (success, error_message).
         """
         task_id = task["id"]
         task_title = task["title"]
@@ -47,13 +48,15 @@ class Implementor:
 
         # Red Phase: Write a failing test
         telemetry.track_step("Red Phase: Writing failing test")
-        if not self._run_red_phase(task, context):
-            return False
+        success, error = self._run_red_phase(task, context)
+        if not success:
+            return False, error
 
         # Green Phase: Write minimal code to pass
         telemetry.track_step("Green Phase: Implementing code")
-        if not self._run_green_phase(task, context):
-            return False
+        success, error = self._run_green_phase(task, context)
+        if not success:
+            return False, error
 
         # Refactor Phase: Cleanup
         telemetry.track_step("Refactor Phase: Cleaning up")
@@ -64,7 +67,7 @@ class Implementor:
             self.run_refactor_sprint()
 
         update_task_status(task_id, "completed")
-        return True
+        return True, None
 
     def _run_red_phase(self, task, context):
         task_title = task["title"]
@@ -124,12 +127,12 @@ Keep changes focused and under 100 lines per commit.
             )
 
             if success:
-                return True
+                return True, None
             else:
                 last_error = error_msg
                 telemetry.warning(f"Red Phase attempt {attempt} failed: {error_msg}")
 
-        return False
+        return False, last_error or "Red Phase failed after maximum attempts."
 
     def _run_green_phase(self, task, context):
         task_title = task["title"]
@@ -219,7 +222,7 @@ Keep changes focused and under 100 lines per commit.
                         estimated_cost=result["cost"],
                     )
                     if success:
-                        return True
+                        return True, None
                     else:
                         last_error = f"Git Policy Violation: {error_msg}"
                         telemetry.warning(f"Green Phase attempt {attempt} failed policy check: {error_msg}")
@@ -239,7 +242,7 @@ Keep changes focused and under 100 lines per commit.
                     estimated_cost=result["cost"],
                 )
 
-        return False
+        return False, last_error or "Green Phase failed after maximum attempts."
 
     def _run_tests(self, test_file):
         """
