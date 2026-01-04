@@ -164,9 +164,11 @@ class Telemetry:
     def task_context(self, task_title: str):
         """Context manager for task execution."""
         self.log_task_start(task_title)
+        outcome = {"success": True}
         try:
-            yield
-            self.log_task_success(task_title)
+            yield outcome
+            if outcome["success"]:
+                self.log_task_success(task_title)
         except Exception as e:
             self.log_task_failure(task_title, str(e))
             self.error(f"Error in task '{task_title}'", exc_info=True)

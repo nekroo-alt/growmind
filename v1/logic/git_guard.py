@@ -72,19 +72,47 @@ class GitGuard:
 
     def _get_line_diff_count(self):
         try:
+            # Get per-file diff stats (additions, deletions, filename)
             result = subprocess.run(
-                ["git", "diff", "--cached", "--shortstat"],
+                ["git", "diff", "--cached", "--numstat"],
                 capture_output=True,
                 text=True,
+                check=True,
             )
             output = result.stdout.strip()
             if not output:
                 return 0
-            parts = output.split(",")
+
             total = 0
-            for p in parts:
-                if "insertion" in p or "deletion" in p:
-                    total += int(p.split()[0].replace(",", ""))
+            for line in output.split("\n"):
+                if not line.strip():
+                    continue
+                parts = line.split(None, 2)
+                if len(parts) < 3:
+                    continue
+
+                add, delete, filename = parts[0], parts[1], parts[2]
+
+                # Skip non-functional files: Markdown and Test scripts
+                basename = filename.split("/")[-1]
+                if filename.endswith(".md"):
+                    continue
+                if (
+                    basename.startswith("test_")
+                    or basename.endswith("_test.py")
+                    or "/tests/" in filename
+                    or filename.startswith("tests/")
+                ):
+                    continue
+
+                # Add up additions and deletions for functional files
+                # Handle binary files where add/delete might be '-'
+                try:
+                    total += int(add) if add != "-" else 0
+                    total += int(delete) if delete != "-" else 0
+                except ValueError:
+                    continue
+
             return total
         except Exception:
             return 999  # Fail safe

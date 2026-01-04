@@ -168,7 +168,9 @@ class Orchestrator:
                         "orchestrator_phase", f"implementing:{task_id}:{task_title}"
                     )
 
-                    with self.telemetry.task_context(f"Implementing: {task_title}"):
+                    with self.telemetry.task_context(
+                        f"Implementing: {task_title}"
+                    ) as outcome:
                         self._update_telemetry_stats()
 
                         try:
@@ -187,16 +189,19 @@ class Orchestrator:
                                         f"Tests failed after implementation of '{task_title}'. Marking as blocked."
                                     )
                                     update_task_status(task_id, "blocked")
+                                    outcome["success"] = False
                             else:
                                 self.telemetry.error(
                                     f"TDD cycle failed for '{task_title}' after multiple attempts. Marking as blocked."
                                 )
                                 update_task_status(task_id, "blocked")
+                                outcome["success"] = False
                         except Exception as e:
                             self.telemetry.error(
                                 f"Unexpected error during implementation of '{task_title}': {str(e)}"
                             )
                             update_task_status(task_id, "blocked")
+                            outcome["success"] = False
 
                 else:
                     self.telemetry.warning(
