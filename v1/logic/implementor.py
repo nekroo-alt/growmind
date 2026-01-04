@@ -22,6 +22,19 @@ class Implementor:
         self.llm = LLMProvider()
         self.verifier = Verifier()
 
+    def _get_error_reason(self, result):
+        raw_content = result.get("raw_content", "").strip()
+        if not raw_content:
+            return "LLM returned an empty response."
+        if raw_content.startswith("Error:"):
+            return raw_content
+
+        # If there's content but no files were parsed, show a snippet
+        snippet = raw_content[:200]
+        if len(raw_content) > 200:
+            snippet += "..."
+        return f"LLM did not return any file changes in the expected format. Response: {snippet}"
+
     @fcid_mapping("ACT-100")
     def execute_tdd_cycle(self, task):
         """
@@ -97,12 +110,12 @@ Keep changes focused and under 100 lines per commit.
             test_changes = result["files"]
 
             if not test_changes:
-                last_error = "LLM did not return any file changes."
+                last_error = self._get_error_reason(result)
                 log_activity(
                     summary=f"Red Phase Attempt {attempt} Failed",
                     action="Red Phase",
                     status="Failed",
-                    cot_blob=f"LLM did not return any file changes for attempt {attempt}.",
+                    cot_blob=f"Failed to get file changes: {last_error}",
                     tokens_used=result["usage"]["total_tokens"],
                     prompt_tokens=result["usage"]["prompt_tokens"],
                     completion_tokens=result["usage"]["completion_tokens"],
@@ -177,12 +190,12 @@ Keep changes focused and under 100 lines per commit.
             suggested_changes = result["files"]
 
             if not suggested_changes:
-                last_error = "LLM did not return any file changes."
+                last_error = self._get_error_reason(result)
                 log_activity(
                     summary=f"Green Phase Attempt {attempt} Failed: No code generated",
                     action="Green Phase",
                     status="Failed",
-                    cot_blob=f"LLM did not return any file changes for attempt {attempt}.",
+                    cot_blob=f"Failed to get file changes: {last_error}",
                     tokens_used=result["usage"]["total_tokens"],
                     prompt_tokens=result["usage"]["prompt_tokens"],
                     completion_tokens=result["usage"]["completion_tokens"],
