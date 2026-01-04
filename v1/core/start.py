@@ -8,6 +8,7 @@ from v1.data.db_manager import (
     get_completed_tasks_count,
     save_state,
     load_state,
+    update_task_status,
 )
 from v1.logic.git_guard import GitGuard
 from v1.logic.dispatcher import Dispatcher
@@ -170,20 +171,32 @@ class Orchestrator:
                     with self.telemetry.task_context(f"Implementing: {task_title}"):
                         self._update_telemetry_stats()
 
-                        success = self.implementor.execute_tdd_cycle(task)
+                        try:
+                            success = self.implementor.execute_tdd_cycle(task)
 
-                        if success:
-                            self.telemetry.info(
-                                f"Task '{task_title}' implementation finished. Running verification..."
+                            if success:
+                                self.telemetry.info(
+                                    f"Task '{task_title}' implementation finished. Running verification..."
+                                )
+                                self.telemetry.track_step("Verification")
+                                self._update_telemetry_stats()
+
+                                # Verifier check
+                                if not self.verifier.run_tests():
+                                    self.telemetry.error(
+                                        f"Tests failed after implementation of '{task_title}'. Marking as blocked."
+                                    )
+                                    update_task_status(task_id, "blocked")
+                            else:
+                                self.telemetry.error(
+                                    f"TDD cycle failed for '{task_title}' after multiple attempts. Marking as blocked."
+                                )
+                                update_task_status(task_id, "blocked")
+                        except Exception as e:
+                            self.telemetry.error(
+                                f"Unexpected error during implementation of '{task_title}': {str(e)}"
                             )
-                            self.telemetry.track_step("Verification")
-                            self._update_telemetry_stats()
-
-                            # Verifier check
-                            if not self.verifier.run_tests():
-                                raise Exception("Tests failed after implementation.")
-                        else:
-                            raise Exception("TDD cycle failed.")
+                            update_task_status(task_id, "blocked")
 
                 else:
                     self.telemetry.warning(

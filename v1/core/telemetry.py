@@ -68,7 +68,9 @@ class Telemetry:
         file_handler.setLevel(logging.DEBUG)
 
         # Rich Console Handler
-        rich_handler = RichHandler(console=self.console, show_time=True, show_path=True)
+        rich_handler = RichHandler(
+            console=self.console, show_time=True, show_path=True, markup=True
+        )
         rich_handler.setLevel(logging.INFO)
 
         self.logger.addHandler(file_handler)

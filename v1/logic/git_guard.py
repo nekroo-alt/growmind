@@ -43,21 +43,32 @@ class GitGuard:
     def check_policy(self):
         """
         Enforce line limit and Open-Closed principle.
+        Returns (is_valid, error_message).
         """
         line_count = self._get_line_diff_count()
         line_limit = 100
         line_check = line_count <= line_limit
         oc_check = self._check_open_closed()
 
-        is_valid = line_check and oc_check
+        errors = []
+        if not line_check:
+            errors.append(f"Lines changed: {line_count} exceeds limit of {line_limit}.")
+        if not oc_check:
+            errors.append(
+                "Open-Closed Principle violation: Modified stable files (e.g., db_manager.py, product.md, technical.md)."
+            )
+
+        is_valid = len(errors) == 0
         status = "Passed" if is_valid else "Failed"
+        error_msg = "; ".join(errors) if errors else ""
+
         log_activity(
             summary="Git Policy Check",
             action="check_policy",
             status=status,
-            cot_blob=f"Lines changed: {line_count} (Limit: {line_limit}), Open-Closed: {oc_check}",
+            cot_blob=f"Lines changed: {line_count} (Limit: {line_limit}), Open-Closed: {oc_check}. Errors: {error_msg}",
         )
-        return is_valid
+        return is_valid, error_msg
 
     def _get_line_diff_count(self):
         try:
@@ -121,10 +132,11 @@ class GitGuard:
                     status="Failed",
                     cot_blob=f"Error staging files {files}: {str(e)}",
                 )
-                return False
+                return False, f"Error staging files: {str(e)}"
 
-        if not self.check_policy():
-            return False
+        is_valid, error_msg = self.check_policy()
+        if not is_valid:
+            return False, error_msg
 
         commit_msg = f"[{fcid}] {summary}"
         try:
@@ -146,9 +158,9 @@ class GitGuard:
                 completion_tokens=completion_tokens,
                 estimated_cost=estimated_cost,
             )
-            return True
+            return True, ""
         except subprocess.CalledProcessError as e:
             log_activity(
                 summary=summary, action="Git Commit", status="Failed", cot_blob=str(e)
             )
-            return False
+            return False, str(e)

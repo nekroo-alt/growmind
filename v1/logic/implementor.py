@@ -68,7 +68,11 @@ class Implementor:
 
     def _run_red_phase(self, task, context):
         task_title = task["title"]
-        system_prompt = """You are a TDD expert and senior software engineer. 
+        attempts = 3
+        last_error = ""
+
+        for attempt in range(1, attempts + 1):
+            system_prompt = """You are a TDD expert and senior software engineer. 
 Your task is to generate failing tests (the "Red" phase of TDD) based on a task description, context, and acceptance criteria.
 
 Output Format:
@@ -82,41 +86,50 @@ Ensure the tests are comprehensive and would fail until the implementation is co
 Prefer using `pytest`.
 Keep changes focused and under 100 lines per commit.
 """
-        user_prompt = f"Task: {task_title}\nContext: {context}\nAcceptance Criteria: {task['acceptance_criteria']}"
+            user_prompt = f"Task: {task_title}\nContext: {context}\nAcceptance Criteria: {task['acceptance_criteria']}"
+            if last_error:
+                user_prompt += f"\n\nPrevious attempt failed with error: {last_error}\nPlease adjust the test generation to comply with policies and requirements."
 
-        result = self.llm.call_multi_file(system_prompt, user_prompt)
-        test_changes = result["files"]
+            result = self.llm.call_multi_file(system_prompt, user_prompt)
+            test_changes = result["files"]
 
-        if not test_changes:
-            log_activity(
-                summary=f"Red Phase Failed: No tests generated for {task_title}",
-                action="Red Phase",
-                status="Failed",
-                cot_blob=f"LLM did not return any file changes. Raw content: {result.get('raw_content', '')[:500]}",
+            if not test_changes:
+                last_error = "LLM did not return any file changes."
+                log_activity(
+                    summary=f"Red Phase Attempt {attempt} Failed",
+                    action="Red Phase",
+                    status="Failed",
+                    cot_blob=f"LLM did not return any file changes for attempt {attempt}.",
+                    tokens_used=result["usage"]["total_tokens"],
+                    prompt_tokens=result["usage"]["prompt_tokens"],
+                    completion_tokens=result["usage"]["completion_tokens"],
+                    estimated_cost=result["cost"],
+                )
+                continue
+
+            for file_path, test_code in test_changes.items():
+                os.makedirs(os.path.dirname(file_path), exist_ok=True)
+                with open(file_path, "w") as f:
+                    f.write(test_code)
+
+            success, error_msg = self.git.commit(
+                "ACT-100",
+                f"Red Phase: {task_title}",
+                files=list(test_changes.keys()),
+                cot=f"Added test cases for {task_title} across {len(test_changes)} files. Attempt {attempt}.",
                 tokens_used=result["usage"]["total_tokens"],
                 prompt_tokens=result["usage"]["prompt_tokens"],
                 completion_tokens=result["usage"]["completion_tokens"],
                 estimated_cost=result["cost"],
             )
-            return False
 
-        for file_path, test_code in test_changes.items():
-            os.makedirs(os.path.dirname(file_path), exist_ok=True)
-            # Use 'w' instead of 'a' for cleaner test generation,
-            # as the LLM is expected to provide full file content or at least a full suite.
-            with open(file_path, "w") as f:
-                f.write(test_code)
+            if success:
+                return True
+            else:
+                last_error = error_msg
+                telemetry.warning(f"Red Phase attempt {attempt} failed: {error_msg}")
 
-        return self.git.commit(
-            "ACT-100",
-            f"Red Phase: {task_title}",
-            files=list(test_changes.keys()),
-            cot=f"Added test cases for {task_title} across {len(test_changes)} files.",
-            tokens_used=result["usage"]["total_tokens"],
-            prompt_tokens=result["usage"]["prompt_tokens"],
-            completion_tokens=result["usage"]["completion_tokens"],
-            estimated_cost=result["cost"],
-        )
+        return False
 
     def _run_green_phase(self, task, context):
         task_title = task["title"]
@@ -155,17 +168,18 @@ Keep changes focused and under 100 lines per commit.
 """
             user_prompt = f"Task: {task_title}\nContext: {context}\n"
             if last_error:
-                user_prompt += f"\nPrevious attempt failed with error:\n{last_error}\nPlease fix the implementation."
+                user_prompt += f"\nPrevious attempt failed with error:\n{last_error}\nPlease fix the implementation and ensure it complies with all policies (line limits, etc.)."
 
             result = self.llm.call_multi_file(system_prompt, user_prompt)
             suggested_changes = result["files"]
 
             if not suggested_changes:
+                last_error = "LLM did not return any file changes."
                 log_activity(
                     summary=f"Green Phase Attempt {attempt} Failed: No code generated",
                     action="Green Phase",
                     status="Failed",
-                    cot_blob=f"LLM did not return any file changes for attempt {attempt}. Raw content: {result.get('raw_content', '')[:500]}",
+                    cot_blob=f"LLM did not return any file changes for attempt {attempt}.",
                     tokens_used=result["usage"]["total_tokens"],
                     prompt_tokens=result["usage"]["prompt_tokens"],
                     completion_tokens=result["usage"]["completion_tokens"],
@@ -175,7 +189,6 @@ Keep changes focused and under 100 lines per commit.
 
             for file_path, impl_code in suggested_changes.items():
                 os.makedirs(os.path.dirname(file_path), exist_ok=True)
-                # Using 'w' to allow full file replacement by LLM
                 with open(file_path, "w") as f:
                     f.write(impl_code)
 
@@ -195,7 +208,7 @@ Keep changes focused and under 100 lines per commit.
                             break
 
                 if mutation_passed:
-                    return self.git.commit(
+                    success, error_msg = self.git.commit(
                         "ACT-101",
                         f"Green Phase: {task_title}",
                         files=list(suggested_changes.keys()),
@@ -205,6 +218,11 @@ Keep changes focused and under 100 lines per commit.
                         completion_tokens=result["usage"]["completion_tokens"],
                         estimated_cost=result["cost"],
                     )
+                    if success:
+                        return True
+                    else:
+                        last_error = f"Git Policy Violation: {error_msg}"
+                        telemetry.warning(f"Green Phase attempt {attempt} failed policy check: {error_msg}")
 
             if not test_passed or not mutation_passed:
                 if not test_passed:
@@ -221,8 +239,6 @@ Keep changes focused and under 100 lines per commit.
                     estimated_cost=result["cost"],
                 )
 
-                if attempt == attempts:
-                    return False
         return False
 
     def _run_tests(self, test_file):
@@ -355,17 +371,7 @@ Respect the Open-Closed principle for core logic, but feel free to consolidate r
                 failed_tests.append(f"{t_file}: {output}")
 
         if all_passed:
-            log_activity(
-                summary=f"Refactor Sprint Success: Consolidated patterns in {len(applied_files)} files",
-                action="Refactor Sprint",
-                status="Success",
-                cot_blob=f"Applied refactorings based on patterns. All {len(test_files)} test suites passed.",
-                tokens_used=result["usage"]["total_tokens"],
-                prompt_tokens=result["usage"]["prompt_tokens"],
-                completion_tokens=result["usage"]["completion_tokens"],
-                estimated_cost=result["cost"],
-            )
-            return self.git.commit(
+            success, error_msg = self.git.commit(
                 "ACT-200",
                 "Refactor Sprint: Consolidated coding patterns",
                 files=applied_files,
@@ -375,6 +381,15 @@ Respect the Open-Closed principle for core logic, but feel free to consolidate r
                 completion_tokens=result["usage"]["completion_tokens"],
                 estimated_cost=result["cost"],
             )
+            if success:
+                return True
+            else:
+                telemetry.error(f"Refactor Sprint commit failed: {error_msg}")
+                # Rollback since commit failed (policy violation probably)
+                for full_path, content in backups.items():
+                    with open(full_path, "w") as f:
+                        f.write(content)
+                return False
         else:
             # Rollback
             for full_path, content in backups.items():

@@ -177,6 +177,18 @@ def get_pending_task(preferred_id=None):
     return task
 
 
+def get_blocked_task():
+    """
+    Fetches the first blocked task from the task database.
+    """
+    conn = get_db_connection(TASK_DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('SELECT * FROM tasks WHERE status = "blocked" LIMIT 1')
+    task = cursor.fetchone()
+    conn.close()
+    return task
+
+
 def task_exists(title):
     """
     Checks if a task with the given title already exists in the database.
