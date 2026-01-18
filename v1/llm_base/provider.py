@@ -321,6 +321,27 @@ class LLMProvider:
             "raw_content": result["content"],
         }
 
+    @staticmethod
+    def is_quota_error(error_msg):
+        """
+        Checks if the error message indicates a quota, billing, or payment issue.
+        """
+        if not error_msg:
+            return False
+        # Normalize: lower case and replace underscores with spaces to handle both formats
+        normalized_msg = error_msg.lower().replace("_", " ")
+        quota_keywords = [
+            "quota",
+            "rate limit",
+            "billing",
+            "credit balance",
+            "insufficient funds",
+            "payment",
+            "429",
+            "resource exhausted",
+        ]
+        return any(kw in normalized_msg for kw in quota_keywords)
+
     def parse_multi_file_response(self, response):
         """
         Parses a string containing multiple file blocks into a dictionary.

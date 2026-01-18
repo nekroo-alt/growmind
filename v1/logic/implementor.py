@@ -29,10 +29,11 @@ class Implementor:
         if raw_content.startswith("Error:"):
             return raw_content
 
-        # If there's content but no files were parsed, show a snippet
-        snippet = raw_content[:200]
+        # If there's content but no files were parsed, show a snippet (last 200 chars)
         if len(raw_content) > 200:
-            snippet += "..."
+            snippet = "..." + raw_content[-200:]
+        else:
+            snippet = raw_content
         return f"LLM did not return any file changes in the expected format. Response: {snippet}"
 
     @fcid_mapping("ACT-100")

@@ -10,6 +10,7 @@ from v1.data.db_manager import (
     load_state,
     update_task_status,
 )
+from v1.llm_base.provider import LLMProvider
 from v1.logic.git_guard import GitGuard
 from v1.logic.dispatcher import Dispatcher
 from v1.logic.planner import Planner
@@ -193,19 +194,29 @@ class Orchestrator:
                                     update_task_status(task_id, "blocked", reason=reason)
                                     outcome["success"] = False
                             else:
-                                self.telemetry.error(
-                                    f"TDD cycle failed for '{task_title}': {error_reason}. Marking as blocked."
-                                )
-                                update_task_status(
-                                    task_id, "blocked", reason=error_reason
-                                )
+                                if LLMProvider.is_quota_error(error_reason):
+                                    self.telemetry.warning(
+                                        f"LLM Quota/Billing issue detected: {error_reason}. Not marking task as blocked."
+                                    )
+                                else:
+                                    self.telemetry.error(
+                                        f"TDD cycle failed for '{task_title}': {error_reason}. Marking as blocked."
+                                    )
+                                    update_task_status(
+                                        task_id, "blocked", reason=error_reason
+                                    )
                                 outcome["success"] = False
                         except Exception as e:
                             reason = f"Unexpected error during implementation: {str(e)}"
-                            self.telemetry.error(
-                                f"Unexpected error during implementation of '{task_title}': {str(e)}"
-                            )
-                            update_task_status(task_id, "blocked", reason=reason)
+                            if LLMProvider.is_quota_error(reason):
+                                self.telemetry.warning(
+                                    f"LLM Quota/Billing issue detected: {reason}. Not marking task as blocked."
+                                )
+                            else:
+                                self.telemetry.error(
+                                    f"Unexpected error during implementation of '{task_title}': {str(e)}"
+                                )
+                                update_task_status(task_id, "blocked", reason=reason)
                             outcome["success"] = False
 
                 else:
