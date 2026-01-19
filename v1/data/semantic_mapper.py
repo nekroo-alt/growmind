@@ -45,6 +45,7 @@ class SemanticMapper:
         """
         methods = []
         dependencies = set()
+        attribute_type_hints = {}
 
         # Base classes are dependencies
         for base in node.bases:
@@ -56,6 +57,18 @@ class SemanticMapper:
         for item in node.body:
             if isinstance(item, ast.FunctionDef):
                 methods.append(self._parse_function(item))
+            elif isinstance(item, ast.AnnAssign):
+                # Extract class attribute type hints (e.g., self.attr: int = 5)
+                attr_info = self._extract_class_attribute_type_hint(item)
+                if attr_info:
+                    attribute_type_hints[attr_info["name"]] = attr_info
+            elif isinstance(item, ast.Assign):
+                # Check for __annotations__ assignments
+                for target in item.targets:
+                    if isinstance(target, ast.Name) and target.id == "__annotations__":
+                        # Extract type hints from __annotations__ dict
+                        annotations = self._extract_annotations_dict(item.value)
+                        attribute_type_hints.update(annotations)
 
         return {
             "name": node.name,
@@ -65,6 +78,7 @@ class SemanticMapper:
             "docstring": ast.get_docstring(node),
             "methods": methods,
             "dependencies": sorted(list(dependencies)),
+            "attribute_type_hints": attribute_type_hints,
         }
 
     def _parse_function(self, node: ast.FunctionDef):
@@ -74,6 +88,7 @@ class SemanticMapper:
         args = [arg.arg for arg in node.args.args]
         dependencies = self._get_dependencies(node)
         data_flow = self._analyze_data_flow(node)
+        type_hints = self._extract_function_type_hints(node)
         return {
             "name": node.name,
             "type": "function",
@@ -83,6 +98,7 @@ class SemanticMapper:
             "args": args,
             "dependencies": dependencies,
             "data_flow": data_flow,
+            "type_hints": type_hints,
         }
 
     def _get_dependencies(self, node):
@@ -682,6 +698,149 @@ class SemanticMapper:
             "internal_modules": sorted(list(internal_modules)),
             "is_importing_star": has_star_import
         }
+
+    def _extract_function_type_hints(self, node: ast.FunctionDef):
+        """
+        Extracts type hints from a function definition.
+        
+        Args:
+            node: ast.FunctionDef node
+        
+        Returns:
+            dict: Type hints including parameter types and return type
+        """
+        type_hints = {
+            "parameters": {},
+            "return_type": None,
+            "has_type_hints": False
+        }
+        
+        # Extract parameter type hints
+        for arg in node.args.args:
+            if arg.annotation is not None:
+                type_str = self._ast_type_to_string(arg.annotation)
+                type_hints["parameters"][arg.arg] = type_str
+                type_hints["has_type_hints"] = True
+        
+        # Extract return type hint
+        if node.returns is not None:
+            type_hints["return_type"] = self._ast_type_to_string(node.returns)
+            type_hints["has_type_hints"] = True
+        
+        return type_hints
+
+    def _extract_class_attribute_type_hint(self, node: ast.AnnAssign):
+        """
+        Extracts type hints from class attribute annotations.
+        
+        Args:
+            node: ast.AnnAssign node (e.g., self.attr: int = 5)
+        
+        Returns:
+            dict or None: Attribute type hint information
+        """
+        if node.annotation is not None:
+            type_str = self._ast_type_to_string(node.annotation)
+            
+            # Extract attribute name
+            attr_name = None
+            if isinstance(node.target, ast.Name):
+                attr_name = node.target.id
+            elif isinstance(node.target, ast.Attribute):
+                attr_name = node.target.attr
+            
+            if attr_name:
+                return {
+                    "name": attr_name,
+                    "type": type_str,
+                    "line_number": node.lineno,
+                    "has_default": node.value is not None
+                }
+        
+        return None
+
+    def _extract_annotations_dict(self, node):
+        """
+        Extracts type hints from an __annotations__ dictionary assignment.
+        
+        Args:
+            node: ast.Dict node containing the __annotations__ dict
+        
+        Returns:
+            dict: Mapping of attribute names to type strings
+        """
+        annotations = {}
+        
+        if isinstance(node, ast.Dict):
+            keys = node.keys
+            values = node.values
+            
+            for key, value in zip(keys, values):
+                if isinstance(key, ast.Constant):
+                    attr_name = key.value
+                    type_str = self._ast_type_to_string(value)
+                    if type_str:
+                        annotations[attr_name] = {
+                            "type": type_str,
+                            "line_number": getattr(value, 'lineno', key.lineno)
+                        }
+        
+        return annotations
+
+    def _ast_type_to_string(self, type_node):
+        """
+        Converts an AST type annotation node to a string representation.
+        
+        Args:
+            type_node: AST node representing a type annotation
+        
+        Returns:
+            str: String representation of the type
+        """
+        if type_node is None:
+            return None
+        
+        # Simple name: int, str, List, etc.
+        if isinstance(type_node, ast.Name):
+            return type_node.id
+        
+        # Attribute: typing.List, collections.abc.Iterable, etc.
+        elif isinstance(type_node, ast.Attribute):
+            value_str = self._ast_type_to_string(type_node.value)
+            return f"{value_str}.{type_node.attr}"
+        
+        # Subscript: List[int], Dict[str, int], Optional[int], etc.
+        elif isinstance(type_node, ast.Subscript):
+            base_str = self._ast_type_to_string(type_node.value)
+            
+            # Handle slice (the part in brackets)
+            if isinstance(type_node.slice, ast.Tuple):
+                # Multiple arguments: Dict[str, int]
+                elements = [self._ast_type_to_string(elt) for elt in type_node.slice.elts]
+                slice_str = ", ".join(elements)
+            else:
+                # Single argument: List[int]
+                slice_str = self._ast_type_to_string(type_node.slice)
+            
+            return f"{base_str}[{slice_str}]"
+        
+        # Constant type (rare, but possible)
+        elif isinstance(type_node, ast.Constant):
+            return str(type_node.value)
+        
+        # Ellipsis (used in tuple types like Tuple[int, ...])
+        elif isinstance(type_node, ast.Ellipsis):
+            return "..."
+        
+        # BinOp for Union types (Python 3.9+)
+        elif isinstance(type_node, ast.BinOp):
+            left = self._ast_type_to_string(type_node.left)
+            right = self._ast_type_to_string(type_node.right)
+            op_str = " | " if isinstance(type_node.op, ast.BitOr) else " & "
+            return f"{left}{op_str}{right}"
+        
+        # If we can't parse it, return None
+        return None
 
     def _is_stdlib_module(self, module_name):
         """
