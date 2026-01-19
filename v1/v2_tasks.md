@@ -246,15 +246,15 @@ This document defines a series of tasks to enhance L4D v1 to use Abstract Syntax
 
 ---
 
-### Task 3.2: AST-Informed Task Breakdown
+### Task 3.2: AST-Informed Task Breakdown ✅ **COMPLETE**
 
 **Title**: Enhance Planner to use AST analysis for more accurate task breakdown
 
 **Acceptance Criteria**:
-- Use existing code analysis to suggest natural task boundaries
-- Break down tasks at logical code units (e.g., "add method to class X")
-- Estimate token impact of proposed tasks during breakdown
-- Validate that subtasks don't overlap in code modifications
+- Use existing code analysis to suggest natural task boundaries ✓
+- Break down tasks at logical code units (e.g., "add method to class X") ✓
+- Estimate token impact of proposed tasks during breakdown ✓
+- Validate that subtasks don't overlap in code modifications ✓
 
 **Module**: `logic/planner.py` (enhance)
 

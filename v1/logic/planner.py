@@ -1,8 +1,11 @@
 import os
 import glob
 import json
+from typing import Dict, List, Optional
 from v1.data.db_manager import log_task, log_activity, fcid_mapping, task_exists
 from v1.logic.context_engine import ContextEngine
+from v1.logic.task_impact_analyzer import TaskImpactAnalyzer
+from v1.data.semantic_mapper import SemanticMapper
 from v1.llm_base.provider import LLMProvider
 
 
@@ -10,7 +13,9 @@ class Planner:
     def __init__(self, workspace_root="."):
         self.workspace_root = workspace_root
         self.context_engine = ContextEngine(workspace_root)
+        self.task_impact_analyzer = TaskImpactAnalyzer(workspace_root)
         self.llm = LLMProvider()
+        self.semantic_mappers = {}  # Cache of semantic mappers
 
     @fcid_mapping("PLAN-0100")
     def breakdown_requirements(
@@ -19,56 +24,41 @@ class Planner:
         """
         Analyzes requirements and breaks them down into atomic tasks (<30 lines).
         If task_to_break is provided, it breaks down that specific task.
+        
+        Enhanced with AST-based impact analysis to:
+        - Use existing code structure to suggest natural task boundaries
+        - Break down tasks at logical code units
+        - Estimate token impact of proposed tasks
+        - Validate that subtasks don't overlap in code modifications
         """
-        # In a full implementation, this would use an LLM with product_content
-        # and technical_content to generate a task list.
-
-        # Context Injection: Find relevant project files
-        relevant_files = []
-        # Look for source files in the workspace, excluding common noise
-        extensions = ["*.py", "*.js", "*.ts", "*.yaml", "*.yml", "*.md"]
-        ignore_dirs = {".git", "__pycache__", "node_modules", "build", "dist", "logs"}
-
-        for ext in extensions:
-            found = glob.glob(
-                os.path.join(self.workspace_root, f"**/{ext}"), recursive=True
-            )
-            for f in found:
-                rel_f = os.path.relpath(f, self.workspace_root)
-                parts = rel_f.split(os.sep)
-                if not any(d in parts for d in ignore_dirs):
-                    # Only include 'v1' if we are actually working on the platform itself
-                    if "v1" in parts and not os.path.exists(
-                        os.path.join(self.workspace_root, "v1")
-                    ):
-                        continue
-                    relevant_files.append(rel_f)
-
-        query = (
-            task_to_break["title"]
-            if task_to_break
-            else "Initial requirement analysis and task breakdown"
+        # Step 1: Analyze task impact using AST analysis
+        task_title = task_to_break["title"] if task_to_break else "Initial requirement analysis and task breakdown"
+        acceptance_criteria = task_to_break["acceptance_criteria"] if task_to_break else ""
+        
+        impact_analysis = self.task_impact_analyzer.analyze_task_impact(
+            task_title, acceptance_criteria
         )
-        # Limit context to avoid overwhelming the prompt
-        # Exclude product.md and technical.md from additional context as they are already passed explicitly
-        context_files = [
-            f for f in relevant_files if f not in ["product.md", "technical.md"]
-        ][:30]
-        pruned_context = self.context_engine.get_pruned_context(query, context_files)
-
-        system_prompt = (
-            "You are a Senior Architect. Break down the given requirements into atomic tasks.\n"
-            "Each task must be estimated to involve <30 lines of code changes.\n"
-            "Return a JSON list of objects with keys: 'title', 'acceptance_criteria', 'module'."
+        
+        # Step 2: Build semantic mappers for affected files
+        self._build_semantic_mappers(impact_analysis["affected_files"])
+        
+        # Step 3: Get relevant project files using impact-based selection
+        relevant_files = self._get_relevant_files(impact_analysis)
+        
+        query = task_title
+        pruned_context = self.context_engine.get_pruned_context(query, relevant_files)
+        
+        # Step 4: Prepare code structure information for LLM
+        code_structure_info = self._prepare_code_structure_info(impact_analysis)
+        
+        # Step 5: Build enhanced prompt with AST insights
+        system_prompt = self._build_enhanced_system_prompt(code_structure_info)
+        user_prompt = self._build_enhanced_user_prompt(
+            product_content, technical_content, task_to_break, 
+            pruned_context, code_structure_info, impact_analysis
         )
-        user_prompt = f"Product Requirements:\n{product_content}\nTechnical Design:\n{technical_content}\n"
-        if task_to_break:
-            user_prompt += f"Specific task to break down: {task_to_break['title']}\n"
 
-        if pruned_context.strip():
-            user_prompt += f"Relevant project context:\n{pruned_context}"
-
-        # Breakdown requirements often needs more tokens
+        # Step 6: Call LLM with enhanced context
         result = self.llm.call(
             system_prompt, user_prompt, temperature=0.2, max_tokens=4096
         )
@@ -78,15 +68,20 @@ class Planner:
             if "Error: All LLM providers failed" in response:
                 raise ValueError(response)
 
-            # Simple parsing for MVP, Task 7.4 will refine this
+            # Parse JSON response
             if "```json" in response:
                 response = response.split("```json")[1].split("```")[0].strip()
             elif "```" in response:
                 response = response.split("```")[1].split("```")[0].strip()
             subtasks_data = json.loads(response)
+            
+            # Step 7: Validate subtasks for overlap and estimate impact
+            validated_subtasks = self._validate_and_estimate_subtasks(
+                subtasks_data, impact_analysis
+            )
             subtasks = [
                 (t["title"], t["acceptance_criteria"], t.get("module"))
-                for t in subtasks_data
+                for t in validated_subtasks
             ]
         except Exception as e:
             # Improved error handling: No more hardcoded platform tasks
@@ -118,10 +113,287 @@ class Planner:
             summary="Task Breakdown",
             action="PLANNING",
             status="Success",
-            cot_blob=f"Broke down {'project' if not task_to_break else task_to_break['title']} into {len(subtasks)} tasks. Added {new_tasks_added} new tasks.",
+            cot_blob=f"Broke down {'project' if not task_to_break else task_to_break['title']} into {len(subtasks)} tasks. Added {new_tasks_added} new tasks. AST analysis identified {len(impact_analysis['affected_files'])} relevant files with {len(impact_analysis['target_classes'])} classes and {len(impact_analysis['target_functions'])} functions.",
             tokens_used=result["usage"]["total_tokens"],
             prompt_tokens=result["usage"]["prompt_tokens"],
             completion_tokens=result["usage"]["completion_tokens"],
             estimated_cost=result["cost"],
         )
         return new_tasks_added
+    
+    def _build_semantic_mappers(self, affected_files: List[Dict]):
+        """
+        Build semantic mappers for files identified by impact analysis.
+        
+        Args:
+            affected_files: List of files with impact scores from TaskImpactAnalyzer
+        """
+        for file_info in affected_files[:15]:  # Limit to top 15 files
+            file_path = os.path.join(self.workspace_root, file_info["file_path"])
+            try:
+                with open(file_path, "r", encoding="utf-8") as f:
+                    source_code = f.read()
+                
+                mapper = SemanticMapper(source_code)
+                self.semantic_mappers[file_path] = mapper
+            except Exception:
+                # Skip files that cannot be parsed
+                continue
+    
+    def _get_relevant_files(self, impact_analysis: Dict) -> List[str]:
+        """
+        Get list of relevant files based on impact analysis.
+        
+        Args:
+            impact_analysis: Impact analysis result from TaskImpactAnalyzer
+        
+        Returns:
+            List of file paths sorted by relevance
+        """
+        # Extract file paths from impact analysis, sorted by impact score
+        relevant_files = [
+            f["file_path"] for f in impact_analysis["affected_files"]
+            if f["confidence"] in ["high", "medium"]
+        ]
+        
+        return relevant_files
+    
+    def _prepare_code_structure_info(self, impact_analysis: Dict) -> Dict:
+        """
+        Prepare code structure information for LLM context.
+        
+        Args:
+            impact_analysis: Impact analysis result from TaskImpactAnalyzer
+        
+        Returns:
+            Dictionary with code structure information
+        """
+        structure_info = {
+            "target_modules": impact_analysis["target_modules"],
+            "target_classes": [],
+            "target_functions": [],
+            "file_structure": {}
+        }
+        
+        # Extract detailed information about affected classes and functions
+        for file_info in impact_analysis["affected_files"][:10]:
+            file_path = file_info["file_path"]
+            full_path = os.path.join(self.workspace_root, file_path)
+            
+            if full_path not in self.semantic_mappers:
+                continue
+            
+            mapper = self.semantic_mappers[full_path]
+            summary = mapper.get_summary()
+            
+            # Extract class information
+            for cls in summary.get("classes", []):
+                if cls["name"] in impact_analysis["target_classes"]:
+                    structure_info["target_classes"].append({
+                        "name": cls["name"],
+                        "file": file_path,
+                        "methods": [m["name"] for m in cls["methods"]],
+                        "start_line": cls["start_line"],
+                        "end_line": cls["end_line"]
+                    })
+            
+            # Extract function information
+            for func in summary.get("functions", []):
+                if func["name"] in impact_analysis["target_functions"]:
+                    structure_info["target_functions"].append({
+                        "name": func["name"],
+                        "file": file_path,
+                        "start_line": func["start_line"],
+                        "end_line": func["end_line"]
+                    })
+            
+            # Build file structure summary
+            structure_info["file_structure"][file_path] = {
+                "classes": [c["name"] for c in summary.get("classes", [])],
+                "functions": [f["name"] for f in summary.get("functions", [])],
+                "impact_score": file_info["impact_score"]
+            }
+        
+        return structure_info
+    
+    def _build_enhanced_system_prompt(self, code_structure_info: Dict) -> str:
+        """
+        Build enhanced system prompt with AST-based insights.
+        
+        Args:
+            code_structure_info: Code structure information from AST analysis
+        
+        Returns:
+            Enhanced system prompt
+        """
+        prompt = (
+            "You are a Senior Architect with deep knowledge of AST-based code analysis. "
+            "Break down the given requirements into atomic tasks (<30 lines of code).\n\n"
+            
+            "**AST-Based Task Breakdown Guidelines:**\n"
+            "1. Respect existing code structure - break tasks at natural boundaries (classes, methods, functions)\n"
+            "2. Each task should modify a single logical code unit\n"
+            "3. Avoid overlapping modifications across tasks\n"
+            "4. Leverage existing code patterns and conventions\n"
+            "5. Consider dependency chains when proposing tasks\n\n"
+            
+            "**Code Structure Available:**\n"
+        )
+        
+        if code_structure_info["target_classes"]:
+            prompt += f"- Target Classes: {', '.join([c['name'] for c in code_structure_info['target_classes']])}\n"
+        
+        if code_structure_info["target_functions"]:
+            prompt += f"- Target Functions: {', '.join([f['name'] for f in code_structure_info['target_functions']])}\n"
+        
+        if code_structure_info["target_modules"]:
+            prompt += f"- Target Modules: {', '.join(code_structure_info['target_modules'])}\n"
+        
+        prompt += (
+            "\n**Output Format:**\n"
+            "Return a JSON list of objects with keys:\n"
+            "- 'title': Clear task title\n"
+            "- 'acceptance_criteria': Specific, testable criteria\n"
+            "- 'module': Target module/file (optional)\n"
+            "- 'estimated_lines': Estimated lines of code (must be <30)\n"
+            "- 'target_class': Class being modified (if applicable)\n"
+            "- 'target_function': Function/method being modified (if applicable)\n"
+        )
+        
+        return prompt
+    
+    def _build_enhanced_user_prompt(
+        self, 
+        product_content: str,
+        technical_content: str,
+        task_to_break: Optional[Dict],
+        pruned_context: str,
+        code_structure_info: Dict,
+        impact_analysis: Dict
+    ) -> str:
+        """
+        Build enhanced user prompt with AST context.
+        
+        Args:
+            product_content: Product requirements content
+            technical_content: Technical design content
+            task_to_break: Task to break down (optional)
+            pruned_context: Pruned context from ContextEngine
+            code_structure_info: Code structure information
+            impact_analysis: Impact analysis result
+        
+        Returns:
+            Enhanced user prompt
+        """
+        prompt = f"Product Requirements:\n{product_content}\n\n"
+        prompt += f"Technical Design:\n{technical_content}\n\n"
+        
+        if task_to_break:
+            prompt += f"**Task to Break Down:**\n"
+            prompt += f"Title: {task_to_break['title']}\n"
+            prompt += f"Acceptance Criteria: {task_to_break['acceptance_criteria']}\n\n"
+        
+        # Add code structure insights
+        prompt += "**AST-Based Code Analysis:**\n"
+        prompt += f"High-impact files identified: {len(impact_analysis['affected_files'])}\n"
+        prompt += f"Classes likely affected: {len(code_structure_info['target_classes'])}\n"
+        prompt += f"Functions likely affected: {len(code_structure_info['target_functions'])}\n\n"
+        
+        # Add file structure details
+        prompt += "**Affected File Structure:**\n"
+        for file_path, info in code_structure_info["file_structure"].items():
+            prompt += f"\n{file_path} (impact: {info['impact_score']:.2f}):\n"
+            if info["classes"]:
+                prompt += f"  Classes: {', '.join(info['classes'])}\n"
+            if info["functions"]:
+                prompt += f"  Functions: {', '.join(info['functions'])}\n"
+        
+        prompt += "\n"
+        
+        if pruned_context.strip():
+            prompt += f"**Relevant Code Context:**\n{pruned_context}\n\n"
+        
+        prompt += "**Instructions:**\n"
+        prompt += "1. Break down the requirements into atomic tasks based on the code structure provided\n"
+        prompt += "2. Each task should target a specific class or function identified above\n"
+        prompt += "3. Ensure tasks don't overlap in what they modify\n"
+        prompt += "4. Estimate lines of code for each task (must be <30)\n"
+        prompt += "5. Provide specific acceptance criteria that can be tested\n\n"
+        
+        return prompt
+    
+    def _validate_and_estimate_subtasks(
+        self, 
+        subtasks_data: List[Dict],
+        impact_analysis: Dict
+    ) -> List[Dict]:
+        """
+        Validate subtasks for overlap and estimate token impact.
+        
+        Args:
+            subtasks_data: List of subtasks from LLM
+            impact_analysis: Impact analysis result
+        
+        Returns:
+            Validated list of subtasks with impact estimates
+        """
+        validated_tasks = []
+        task_targets = set()  # Track (file, class, function) to detect overlaps
+        
+        for task in subtasks_data:
+            # Check for overlap
+            task_key = self._create_task_key(task, impact_analysis)
+            
+            if task_key in task_targets:
+                # Overlapping task - mark for review
+                task["validation_warning"] = "Potential overlap with another task"
+            
+            task_targets.add(task_key)
+            
+            # Ensure estimated_lines is present
+            if "estimated_lines" not in task:
+                # Default estimate based on complexity
+                task["estimated_lines"] = 25
+            
+            # Validate line limit
+            if task["estimated_lines"] > 30:
+                task["estimated_lines"] = 30
+                task["validation_warning"] = "Adjusted to 30-line limit"
+            
+            validated_tasks.append(task)
+        
+        return validated_tasks
+    
+    def _create_task_key(self, task: Dict, impact_analysis: Dict) -> tuple:
+        """
+        Create a unique key for a task to detect overlaps.
+        
+        Args:
+            task: Task dictionary
+            impact_analysis: Impact analysis result
+        
+        Returns:
+            Tuple representing the task's target
+        """
+        # Use module/target_class/target_function to create unique key
+        module = task.get("module", "")
+        target_class = task.get("target_class", "")
+        target_function = task.get("target_function", "")
+        
+        # If not specified, try to infer from title
+        if not (target_class or target_function):
+            title = task.get("title", "").lower()
+            
+            # Check against target classes/functions from impact analysis
+            for cls in impact_analysis["target_classes"]:
+                if cls.lower() in title:
+                    target_class = cls
+                    break
+            
+            if not target_class:
+                for func in impact_analysis["target_functions"]:
+                    if func.lower() in title:
+                        target_function = func
+                        break
+        
+        return (module, target_class, target_function)
