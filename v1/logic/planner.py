@@ -30,6 +30,7 @@ class Planner:
         - Break down tasks at logical code units
         - Estimate token impact of proposed tasks
         - Validate that subtasks don't overlap in code modifications
+        - Generate context-aware acceptance criteria
         """
         # Step 1: Analyze task impact using AST analysis
         task_title = task_to_break["title"] if task_to_break else "Initial requirement analysis and task breakdown"
@@ -79,9 +80,15 @@ class Planner:
             validated_subtasks = self._validate_and_estimate_subtasks(
                 subtasks_data, impact_analysis
             )
+            
+            # Step 8: Enhance acceptance criteria with context-aware checks
+            context_aware_subtasks = self._enhance_acceptance_criteria(
+                validated_subtasks, impact_analysis, code_structure_info
+            )
+            
             subtasks = [
                 (t["title"], t["acceptance_criteria"], t.get("module"))
-                for t in validated_subtasks
+                for t in context_aware_subtasks
             ]
         except Exception as e:
             # Improved error handling: No more hardcoded platform tasks
@@ -397,3 +404,340 @@ class Planner:
                         break
         
         return (module, target_class, target_function)
+        
+    def _enhance_acceptance_criteria(
+        self,
+        subtasks: List[Dict],
+        impact_analysis: Dict,
+        code_structure_info: Dict
+    ) -> List[Dict]:
+        """
+        Enhance acceptance criteria with context-aware checks.
+        
+        Acceptance criteria should include:
+        - Checks for proper context integration
+        - Verification of dependency contracts
+        - Criteria for not breaking downstream consumers
+        - Testing both direct functionality and side effects
+        
+        Args:
+            subtasks: Validated list of subtasks
+            impact_analysis: Impact analysis result
+            code_structure_info: Code structure information
+        
+        Returns:
+            Enhanced subtasks with context-aware acceptance criteria
+        """
+        enhanced_tasks = []
+        
+        for task in subtasks:
+            original_criteria = task.get("acceptance_criteria", "")
+            
+            # Build context-aware additions
+            context_additions = []
+            
+            # 1. Context integration checks
+            context_additions.extend(self._generate_context_integration_checks(
+                task, impact_analysis, code_structure_info
+            ))
+            
+            # 2. Dependency contract verification
+            context_additions.extend(self._generate_dependency_contract_checks(
+                task, impact_analysis
+            ))
+            
+            # 3. Downstream consumer protection
+            context_additions.extend(self._generate_downstream_consumer_checks(
+                task, impact_analysis
+            ))
+            
+            # 4. Side effect testing
+            context_additions.extend(self._generate_side_effect_checks(
+                task, impact_analysis
+            ))
+            
+            # 5. Integration test requirements
+            context_additions.extend(self._generate_integration_test_requirements(
+                task, impact_analysis
+            ))
+            
+            # 6. Mutation testing requirements
+            context_additions.extend(self._generate_mutation_test_requirements(
+                task
+            ))
+            
+            # 7. Public API breaking change checks
+            context_additions.extend(self._generate_api_change_checks(
+                task, impact_analysis
+            ))
+            
+            # Combine original criteria with context-aware additions
+            if context_additions:
+                enhanced_criteria = original_criteria
+                if not enhanced_criteria.endswith(('\n', '.', '!', '?')):
+                    enhanced_criteria += ".\n\n"
+                
+                enhanced_criteria += "**Context-Aware Requirements:**\n"
+                enhanced_criteria += "\n".join(f"- {check}" for check in context_additions)
+                
+                task["acceptance_criteria"] = enhanced_criteria
+            
+            enhanced_tasks.append(task)
+        
+        return enhanced_tasks
+    
+    def _generate_context_integration_checks(
+        self,
+        task: Dict,
+        impact_analysis: Dict,
+        code_structure_info: Dict
+    ) -> List[str]:
+        """
+        Generate checks for proper context integration.
+        """
+        checks = []
+        
+        target_class = task.get("target_class")
+        target_function = task.get("target_function")
+        
+        if target_class:
+            checks.append(
+                f"Integration with existing {target_class} class context is maintained"
+            )
+            # Check if class has specific methods that need context awareness
+            for cls_info in code_structure_info["target_classes"]:
+                if cls_info["name"] == target_class:
+                    if cls_info.get("methods"):
+                        checks.append(
+                            f"Context correctly propagated to methods: {', '.join(cls_info['methods'])}"
+                        )
+                    break
+        
+        if target_function:
+            checks.append(
+                f"Function {target_function} properly integrates with its surrounding context"
+            )
+        
+        return checks
+    
+    def _generate_dependency_contract_checks(
+        self,
+        task: Dict,
+        impact_analysis: Dict
+    ) -> List[str]:
+        """
+        Generate checks for maintaining dependency contracts.
+        """
+        checks = []
+        
+        # Check for upstream dependencies
+        if impact_analysis.get("upstream_dependencies"):
+            upstream = impact_analysis["upstream_dependencies"][:3]  # Limit to top 3
+            if upstream:
+                checks.append(
+                    f"Maintains contract with upstream dependencies: {', '.join(upstream)}"
+                )
+        
+        # Check for type hints consistency
+        target_class = task.get("target_class")
+        target_function = task.get("target_function")
+        
+        for file_info in impact_analysis["affected_files"]:
+            file_path = file_info["file_path"]
+            full_path = os.path.join(self.workspace_root, file_path)
+            
+            if full_path not in self.semantic_mappers:
+                continue
+            
+            mapper = self.semantic_mappers[full_path]
+            summary = mapper.get_summary()
+            
+            # Check function type hints
+            for func in summary.get("functions", []):
+                if func["name"] == target_function:
+                    if func.get("return_type"):
+                        checks.append(
+                            f"Return type {func['return_type']} contract is maintained"
+                        )
+                    if func.get("parameters"):
+                        param_types = [p for p in func["parameters"] if ":" in str(p)]
+                        if param_types:
+                            checks.append(
+                                f"Type contracts for parameters are respected"
+                            )
+                    break
+            
+            # Check class type hints
+            for cls in summary.get("classes", []):
+                if cls["name"] == target_class:
+                    if cls.get("methods"):
+                        checks.append(
+                            f"Method signatures and type contracts are preserved"
+                        )
+                    break
+        
+        return checks
+    
+    def _generate_downstream_consumer_checks(
+        self,
+        task: Dict,
+        impact_analysis: Dict
+    ) -> List[str]:
+        """
+        Generate checks for not breaking downstream consumers.
+        """
+        checks = []
+        
+        # Check for downstream consumers
+        if impact_analysis.get("downstream_consumers"):
+            consumers = impact_analysis["downstream_consumers"][:3]  # Limit to top 3
+            if consumers:
+                checks.append(
+                    f"Changes do not break downstream consumers: {', '.join(consumers)}"
+                )
+        
+        # Check for public API modifications
+        target_class = task.get("target_class")
+        if target_class:
+            checks.append(
+                f"Public API of {target_class} remains backward compatible"
+            )
+        
+        return checks
+    
+    def _generate_side_effect_checks(
+        self,
+        task: Dict,
+        impact_analysis: Dict
+    ) -> List[str]:
+        """
+        Generate checks for testing side effects.
+        """
+        checks = []
+        
+        target_class = task.get("target_class")
+        target_function = task.get("target_function")
+        
+        # Check for mutable state
+        for file_info in impact_analysis["affected_files"]:
+            file_path = file_info["file_path"]
+            full_path = os.path.join(self.workspace_root, file_path)
+            
+            if full_path not in self.semantic_mappers:
+                continue
+            
+            mapper = self.semantic_mappers[full_path]
+            
+            # Check if function has side effects
+            if target_function and hasattr(mapper, "call_graph"):
+                call_graph = mapper.call_graph
+                # Check for calls that might have side effects
+                side_effect_calls = ["print", "open", "write", "append", "extend"]
+                for caller, callees in call_graph.items():
+                    if target_function in caller:
+                        for callee in callees:
+                            if any(se in callee for se in side_effect_calls):
+                                checks.append(
+                                    f"Side effects from {callee} are properly tested"
+                                )
+                                break
+        
+        if target_class:
+            checks.append(
+                f"Class-level state mutations are properly isolated and tested"
+            )
+        
+        return checks
+    
+    def _generate_integration_test_requirements(
+        self,
+        task: Dict,
+        impact_analysis: Dict
+    ) -> List[str]:
+        """
+        Generate integration test requirements.
+        """
+        checks = []
+        
+        target_module = task.get("module")
+        
+        # Require integration tests if task affects multiple files
+        affected_files = [f["file_path"] for f in impact_analysis["affected_files"][:5]]
+        if len(affected_files) > 1:
+            checks.append(
+                f"Integration tests verify behavior across affected files"
+            )
+        
+        # Require integration tests for class modifications
+        target_class = task.get("target_class")
+        if target_class:
+            checks.append(
+                f"Integration tests verify {target_class} interacts correctly with dependencies"
+            )
+        
+        return checks
+    
+    def _generate_mutation_test_requirements(
+        self,
+        task: Dict
+    ) -> List[str]:
+        """
+        Generate mutation testing requirements.
+        """
+        checks = []
+        
+        # Require mutation testing for critical acceptance criteria
+        checks.append(
+            "Tests include mutation testing to verify test quality"
+        )
+        checks.append(
+            "Mutations in critical code paths cause test failures"
+        )
+        
+        return checks
+    
+    def _generate_api_change_checks(
+        self,
+        task: Dict,
+        impact_analysis: Dict
+    ) -> List[str]:
+        """
+        Generate checks for public API breaking changes.
+        """
+        checks = []
+        
+        target_class = task.get("target_class")
+        target_function = task.get("target_function")
+        
+        # Check for public API modifications
+        if target_class or target_function:
+            checks.append(
+                "No breaking changes to public interfaces"
+            )
+            checks.append(
+                "Backward compatibility is maintained for existing consumers"
+            )
+        
+        # Check if task involves modifying existing methods
+        for file_info in impact_analysis["affected_files"]:
+            file_path = file_info["file_path"]
+            full_path = os.path.join(self.workspace_root, file_path)
+            
+            if full_path not in self.semantic_mappers:
+                continue
+            
+            mapper = self.semantic_mappers[full_path]
+            summary = mapper.get_summary()
+            
+            # Check if modifying existing methods
+            if target_class:
+                for cls in summary.get("classes", []):
+                    if cls["name"] == target_class:
+                        # If class has existing methods, check for modifications
+                        if cls.get("methods"):
+                            checks.append(
+                                f"Existing method signatures in {target_class} are preserved"
+                            )
+                        break
+        
+        return checks
