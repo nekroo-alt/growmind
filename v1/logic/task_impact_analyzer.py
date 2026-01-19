@@ -127,39 +127,76 @@ class TaskImpactAnalyzer:
             entities.setdefault("keywords", [])
             
         except json.JSONDecodeError:
-            # Fallback: Basic keyword extraction if JSON parsing fails
-            entities = {
-                "modules": [],
-                "classes": [],
-                "functions": [],
-                "keywords": self._extract_keywords_fallback(task_title, acceptance_criteria)
-            }
+            # Fallback: Extract entities using regex-based method
+            entities = self._extract_keywords_fallback(task_title, acceptance_criteria)
         
         return entities
     
-    def _extract_keywords_fallback(self, task_title: str, acceptance_criteria: str) -> List[str]:
+    def _extract_keywords_fallback(self, task_title: str, acceptance_criteria: str) -> Dict:
         """
-        Fallback method to extract keywords when JSON parsing fails.
+        Fallback method to extract entities when LLM is not available or fails.
         
         Args:
             task_title: Title of the task
             acceptance_criteria: Acceptance criteria for the task
         
         Returns:
-            list: Extracted keywords
+            dict: Extracted entities (modules, classes, functions, keywords)
         """
-        text = f"{task_title} {acceptance_criteria}".lower()
+        import re
+        
+        text = f"{task_title} {acceptance_criteria}"
+        
+        # Extract potential class names (capitalized words followed by context patterns)
+        class_pattern = r'\b([A-Z][a-zA-Z0-9_]*)\b'
+        potential_classes = re.findall(class_pattern, text)
+        
+        # Filter common non-class capitalized words
+        excluded = ["The", "A", "An", "In", "On", "For", "To", "With", "From", "About"]
+        classes = list(set([c for c in potential_classes if c not in excluded and len(c) > 2]))
+        
+        # Extract potential function/method names (lowercase_with_underscores or camelCase)
+        func_pattern = r'\b([a-z_][a-z0-9_]*)\b'
+        potential_functions = re.findall(func_pattern, text)
+        
+        # Filter to likely function names (contains underscore or is a common verb)
+        common_verbs = ["get", "set", "add", "create", "update", "delete", "find", 
+                     "load", "save", "parse", "analyze", "build", "run", "execute",
+                     "construct", "track", "implement", "identify"]
+        functions = list(set([f for f in potential_functions 
+                           if "_" in f or any(verb in f for verb in common_verbs)]))
+        
+        # Extract module names (lowercase words that appear in file contexts)
+        module_pattern = r'\b([a-z][a-z0-9_]*)\b'
+        all_lower_words = re.findall(module_pattern, text.lower())
+        
+        # Filter to likely module names
+        common_modules = ["semantic", "task", "dependency", "context", "mapper",
+                       "analyzer", "traverser", "pruner", "engine", "planner",
+                       "implementor", "verifier", "dispatcher", "git_guard"]
+        modules = list(set([w for w in all_lower_words 
+                         if any(mod in w for mod in common_modules) or len(w.split("_")) > 1]))
         
         # Common technical keywords
         tech_keywords = [
             "database", "api", "test", "cache", "logger", "config",
             "import", "export", "model", "view", "controller",
             "service", "repository", "interface", "abstract",
-            "async", "sync", "http", "json", "xml"
+            "async", "sync", "http", "json", "xml",
+            "call", "graph", "ast", "tree", "node", "edge",
+            "upstream", "downstream", "chain", "traversal", "bfs", "dfs",
+            "dependency", "semantic", "impact", "score", "prune", "scope"
         ]
         
-        found = [kw for kw in tech_keywords if kw in text]
-        return found
+        text_lower = text.lower()
+        keywords = list(set([kw for kw in tech_keywords if kw in text_lower]))
+        
+        return {
+            "modules": modules,
+            "classes": classes,
+            "functions": functions,
+            "keywords": keywords
+        }
     
     def _find_files_with_entities(
         self, 
@@ -305,10 +342,10 @@ class TaskImpactAnalyzer:
             elif match_types >= 2:
                 score = min(score + 0.05, 1.0)
             
-            # Confidence levels
-            if score >= 0.7:
+            # Confidence levels (lowered threshold to "medium" for more inclusive results)
+            if score >= 0.5:
                 confidence = "high"
-            elif score >= 0.4:
+            elif score >= 0.2:
                 confidence = "medium"
             else:
                 confidence = "low"
