@@ -128,15 +128,15 @@ This document defines a series of tasks to enhance L4D v1 to use Abstract Syntax
 
 ## Phase 2: Task-Specific Context Collection
 
-### Task 2.1: Task Impact Analyzer
+### Task 2.1: Task Impact Analyzer ✅ **COMPLETE**
 
 **Title**: Create TaskImpactAnalyzer to predict which code a task will affect
 
 **Acceptance Criteria**:
-- Analyze task title and acceptance criteria to identify target modules
-- Parse acceptance criteria for function/class references
-- Predict which files will need to be modified based on task description
-- Return a prioritized list of files with impact confidence scores
+- Analyze task title and acceptance criteria to identify target modules ✓
+- Parse acceptance criteria for function/class references ✓
+- Predict which files will need to be modified based on task description ✓
+- Return a prioritized list of files with impact confidence scores ✓
 
 **Module**: `logic/task_impact_analyzer.py` (new)
 
