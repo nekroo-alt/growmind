@@ -1,5 +1,7 @@
 import sqlite3
 import os
+import json
+from typing import List, Set, Dict
 from v1.core.telemetry import telemetry
 
 # Database paths
@@ -64,6 +66,12 @@ def init_db():
         # Ensure blocked_reason column exists if table was already created
         try:
             cursor.execute("ALTER TABLE tasks ADD COLUMN blocked_reason TEXT")
+        except sqlite3.OperationalError:
+            pass  # Already exists
+
+        # Add depends_on column for task dependency tracking
+        try:
+            cursor.execute("ALTER TABLE tasks ADD COLUMN depends_on TEXT")
         except sqlite3.OperationalError:
             pass  # Already exists
 
@@ -145,18 +153,29 @@ def log_activity(
     conn.close()
 
 
-def log_task(title, status, acceptance_criteria=None, parent_id=None, module=None):
+def log_task(title, status, acceptance_criteria=None, parent_id=None, module=None, depends_on=None):
     """
     Logs a task to the task database.
+    
+    Args:
+        title: Task title
+        status: Task status (pending, in_progress, completed, blocked)
+        acceptance_criteria: Optional acceptance criteria text
+        parent_id: Optional parent task ID for hierarchical tasks
+        module: Optional module name
+        depends_on: Optional list of task IDs this task depends on
     """
+    # Convert depends_on list to JSON string
+    depends_on_json = json.dumps(depends_on) if depends_on else None
+    
     conn = get_db_connection(TASK_DB_PATH)
     cursor = conn.cursor()
     cursor.execute(
         """
-        INSERT INTO tasks (title, status, acceptance_criteria, parent_id, module)
-        VALUES (?, ?, ?, ?, ?)
+        INSERT INTO tasks (title, status, acceptance_criteria, parent_id, module, depends_on)
+        VALUES (?, ?, ?, ?, ?, ?)
     """,
-        (title, status, acceptance_criteria, parent_id, module),
+        (title, status, acceptance_criteria, parent_id, module, depends_on_json),
     )
     conn.commit()
     conn.close()
@@ -166,22 +185,33 @@ def get_pending_task(preferred_id=None):
     """
     Fetches the next pending task from the task database.
     If preferred_id is provided and that task is pending, it returns it.
+    Only returns tasks whose dependencies are satisfied.
     """
     conn = get_db_connection(TASK_DB_PATH)
     cursor = conn.cursor()
+    
     if preferred_id:
         cursor.execute(
             'SELECT * FROM tasks WHERE status = "pending" AND id = ?', (preferred_id,)
         )
         task = cursor.fetchone()
-        if task:
+        if task and check_dependencies_satisfied(task["id"], conn):
             conn.close()
             return task
+        elif task:
+            # Task exists but dependencies not satisfied
+            conn.close()
+            return None
 
-    cursor.execute('SELECT * FROM tasks WHERE status = "pending" LIMIT 1')
-    task = cursor.fetchone()
+    # Get all pending tasks and return the first one with satisfied dependencies
+    cursor.execute('SELECT * FROM tasks WHERE status = "pending"')
+    for task in cursor.fetchall():
+        if check_dependencies_satisfied(task["id"], conn):
+            conn.close()
+            return dict(task)
+    
     conn.close()
-    return task
+    return None
 
 
 def get_blocked_task():
@@ -194,6 +224,217 @@ def get_blocked_task():
     task = cursor.fetchone()
     conn.close()
     return task
+
+
+def get_task_dependencies(task_id):
+    """
+    Returns the list of task IDs that the given task depends on.
+    
+    Args:
+        task_id: The ID of the task
+        
+    Returns:
+        List of task IDs (integers)
+    """
+    conn = get_db_connection(TASK_DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT depends_on FROM tasks WHERE id = ?", (task_id,))
+    row = cursor.fetchone()
+    conn.close()
+    
+    if row and row["depends_on"]:
+        try:
+            return json.loads(row["depends_on"])
+        except json.JSONDecodeError:
+            return []
+    return []
+
+
+def check_dependencies_satisfied(task_id, conn=None):
+    """
+    Checks if all dependencies for a task are satisfied.
+    A dependency is satisfied if the prerequisite task has status "completed".
+    
+    Args:
+        task_id: The ID of the task to check
+        conn: Optional database connection (if provided, won't close it)
+        
+    Returns:
+        True if all dependencies are satisfied, False otherwise
+    """
+    should_close = conn is None
+    if conn is None:
+        conn = get_db_connection(TASK_DB_PATH)
+    
+    cursor = conn.cursor()
+    
+    # Get dependencies for this task
+    cursor.execute("SELECT depends_on FROM tasks WHERE id = ?", (task_id,))
+    row = cursor.fetchone()
+    
+    if not row or not row["depends_on"]:
+        if should_close:
+            conn.close()
+        return True
+    
+    dependencies = json.loads(row["depends_on"])
+    
+    for dep_id in dependencies:
+        # Check if dependency task exists and is completed
+        cursor.execute(
+            "SELECT status FROM tasks WHERE id = ?", (dep_id,)
+        )
+        dep_row = cursor.fetchone()
+        
+        if not dep_row or dep_row["status"] != "completed":
+            if should_close:
+                conn.close()
+            return False
+    
+    if should_close:
+        conn.close()
+    return True
+
+
+def validate_no_circular_dependencies(task_id, depends_on, conn=None):
+    """
+    Validates that adding these dependencies won't create a circular dependency.
+    
+    Args:
+        task_id: The ID of the task
+        depends_on: List of task IDs this task depends on
+        conn: Optional database connection
+        
+    Returns:
+        (is_valid, message) where is_valid is True if no circular dependency exists
+    """
+    should_close = conn is None
+    if conn is None:
+        conn = get_db_connection(TASK_DB_PATH)
+    
+    cursor = conn.cursor()
+    
+    # Check if any dependency has a dependency chain back to task_id
+    for dep_id in depends_on:
+        if has_dependency_chain_to(dep_id, task_id, cursor):
+            if should_close:
+                conn.close()
+            return False, f"Circular dependency detected: task {task_id} depends on {dep_id}, but {dep_id} has a dependency chain back to {task_id}"
+    
+    if should_close:
+        conn.close()
+    return True, "No circular dependencies"
+
+
+def has_dependency_chain_to(from_id, to_id, cursor, visited=None):
+    """
+    Recursively checks if from_id has a dependency chain to to_id.
+    
+    Args:
+        from_id: Starting task ID
+        to_id: Target task ID to find
+        cursor: Database cursor
+        visited: Set of already visited task IDs (to prevent infinite loops)
+        
+    Returns:
+        True if there's a dependency chain from from_id to to_id
+    """
+    if visited is None:
+        visited = set()
+    
+    if from_id in visited:
+        return False
+    
+    visited.add(from_id)
+    
+    # Get dependencies for from_id
+    cursor.execute("SELECT depends_on FROM tasks WHERE id = ?", (from_id,))
+    row = cursor.fetchone()
+    
+    if not row or not row["depends_on"]:
+        return False
+    
+    dependencies = json.loads(row["depends_on"])
+    
+    for dep_id in dependencies:
+        if dep_id == to_id:
+            return True
+        if has_dependency_chain_to(dep_id, to_id, cursor, visited):
+            return True
+    
+    return False
+
+
+def get_task_dependency_graph():
+    """
+    Returns the complete task dependency graph.
+    
+    Returns:
+        Dictionary mapping task IDs to their dependencies:
+        {
+            task_id: {
+                'title': str,
+                'status': str,
+                'depends_on': List[int]
+            }
+        }
+    """
+    conn = get_db_connection(TASK_DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, title, status, depends_on FROM tasks")
+    rows = cursor.fetchall()
+    conn.close()
+    
+    graph = {}
+    for row in rows:
+        task_id = row["id"]
+        depends_on = json.loads(row["depends_on"]) if row["depends_on"] else []
+        graph[task_id] = {
+            'title': row["title"],
+            'status': row["status"],
+            'depends_on': depends_on
+        }
+    
+    return graph
+
+
+def update_task_dependencies(task_id, depends_on):
+    """
+    Updates the dependencies for a task.
+    
+    Args:
+        task_id: The ID of the task to update
+        depends_on: List of task IDs this task depends on
+        
+    Returns:
+        (success, message) where success is True if update was successful
+    """
+    # Validate no circular dependencies
+    conn = get_db_connection(TASK_DB_PATH)
+    is_valid, message = validate_no_circular_dependencies(task_id, depends_on, conn)
+    
+    if not is_valid:
+        conn.close()
+        return False, message
+    
+    # Validate all dependencies exist
+    cursor = conn.cursor()
+    for dep_id in depends_on:
+        cursor.execute("SELECT 1 FROM tasks WHERE id = ?", (dep_id,))
+        if not cursor.fetchone():
+            conn.close()
+            return False, f"Dependency task {dep_id} does not exist"
+    
+    # Update the task
+    depends_on_json = json.dumps(depends_on)
+    cursor.execute(
+        "UPDATE tasks SET depends_on = ? WHERE id = ?",
+        (depends_on_json, task_id)
+    )
+    conn.commit()
+    conn.close()
+    
+    return True, "Dependencies updated successfully"
 
 
 def task_exists(title):

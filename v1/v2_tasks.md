@@ -223,14 +223,14 @@ This document defines a series of tasks to enhance L4D v1 to use Abstract Syntax
 
 ## Phase 3: Intelligent Task Definition
 
-### Task 3.1: Task Dependency Graph
+### Task 3.1: Task Dependency Graph ✅ **COMPLETE**
 
 **Title**: Create task dependency graph to track relationships between tasks
 
 **Acceptance Criteria**:
-- Store task dependencies in `task.db` (new table or columns)
-- Identify when one task depends on completion of another
-- Prevent execution of dependent tasks until prerequisites are met
+- Store task dependencies in `task.db` (new table or columns) ✓
+- Identify when one task depends on completion of another ✓
+- Prevent execution of dependent tasks until prerequisites are met ✓
 - Visualize task dependency structure (optional)
 
 **Module**: `data/db_manager.py` (enhance)
@@ -240,9 +240,9 @@ This document defines a series of tasks to enhance L4D v1 to use Abstract Syntax
 **Dependencies**: None
 
 **Technical Notes**:
-- Add `depends_on` column to tasks table (JSON array of task IDs)
-- Update Planner to check dependencies before task selection
-- Validate no circular dependencies in task graph
+- Add `depends_on` column to tasks table (JSON array of task IDs) ✓
+- Update Planner to check dependencies before task selection ✓
+- Validate no circular dependencies in task graph ✓
 
 ---
 
