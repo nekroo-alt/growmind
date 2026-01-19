@@ -11,6 +11,7 @@ class SemanticMapper:
         self.source_code = source_code
         self.tree = ast.parse(source_code)
         self.lines = source_code.splitlines()
+        self.call_graph = None  # Will be built on demand
 
     def get_summary(self):
         """
@@ -25,6 +26,18 @@ class SemanticMapper:
                 summary["functions"].append(self._parse_function(node))
 
         return summary
+
+    def get_call_graph(self, max_depth=10):
+        """
+        Builds and returns a call graph showing which functions call which.
+        
+        Returns:
+            dict: Call graph where keys are caller functions and values are lists
+                  of called functions with metadata (callee, line_number, call_depth)
+        """
+        if self.call_graph is None:
+            self.call_graph = self._build_call_graph(max_depth)
+        return self.call_graph
 
     def _parse_class(self, node: ast.ClassDef):
         """
@@ -158,6 +171,136 @@ class SemanticMapper:
         Helper to extract source code lines.
         """
         return "\n".join(self.lines[start_line - 1 : end_line])
+
+    def _build_call_graph(self, max_depth):
+        """
+        Builds a call graph by analyzing function calls in the AST.
+        
+        Args:
+            max_depth: Maximum call depth to track (prevents infinite recursion)
+        
+        Returns:
+            dict: Call graph structure
+        """
+        call_graph = {}
+        summary = self.get_summary()
+        
+        # Build a map of all functions and methods for quick lookup
+        all_functions = {}
+        
+        # Add top-level functions
+        for func in summary["functions"]:
+            all_functions[func["name"]] = {
+                "type": "function",
+                "node": func,
+                "context": None
+            }
+        
+        # Add class methods
+        for cls in summary["classes"]:
+            for method in cls["methods"]:
+                all_methods_key = f"{cls['name']}.{method['name']}"
+                all_functions[method["name"]] = {
+                    "type": "method",
+                    "node": method,
+                    "context": cls["name"]
+                }
+                all_functions[all_methods_key] = {
+                    "type": "method",
+                    "node": method,
+                    "context": cls["name"]
+                }
+        
+        # Analyze calls in each function
+        for func_name, func_info in all_functions.items():
+            calls = self._extract_calls(func_info["node"], all_functions, max_depth)
+            call_graph[func_name] = calls
+        
+        return call_graph
+
+    def _extract_calls(self, func_node, all_functions, max_depth):
+        """
+        Extracts function calls from a function or method node.
+        
+        Args:
+            func_node: Function metadata dict
+            all_functions: Map of all available functions
+            max_depth: Maximum call depth to track
+        
+        Returns:
+            list: List of call information dicts
+        """
+        calls = []
+        
+        # Re-parse the function body to analyze calls
+        if "start_line" in func_node and "end_line" in func_node:
+            source = "\n".join(self.lines[func_node["start_line"] - 1 : func_node["end_line"]])
+            try:
+                func_tree = ast.parse(source)
+                
+                # Walk through the function's AST
+                for node in ast.walk(func_tree):
+                    if isinstance(node, ast.Call):
+                        call_info = self._analyze_call(node, all_functions)
+                        if call_info:
+                            calls.append(call_info)
+            except SyntaxError:
+                # If parsing fails, skip this function
+                pass
+        
+        return calls
+
+    def _analyze_call(self, call_node, all_functions):
+        """
+        Analyzes a single call node to determine what's being called.
+        
+        Args:
+            call_node: ast.Call node
+            all_functions: Map of all available functions
+        
+        Returns:
+            dict or None: Call information dict if it's a function call
+        """
+        callee_name = None
+        is_external = False
+        
+        # Get the function being called
+        func = call_node.func
+        
+        if isinstance(func, ast.Name):
+            # Simple call: function()
+            callee_name = func.id
+            if callee_name not in all_functions:
+                is_external = True
+                
+        elif isinstance(func, ast.Attribute):
+            # Attribute call: obj.method() or self.method()
+            if isinstance(func.value, ast.Name):
+                if func.value.id == "self":
+                    # self.method() - it's a method call in the same class
+                    callee_name = func.attr
+                    if callee_name not in all_functions:
+                        # Could be inherited method, mark as external but keep track
+                        is_external = True
+                else:
+                    # obj.method() - external method call
+                    callee_name = f"{func.value.id}.{func.attr}"
+                    is_external = True
+            elif isinstance(func.value, ast.Call):
+                # Chained call: obj().method()
+                # This is too complex, mark as external
+                callee_name = "<dynamic>"
+                is_external = True
+        
+        if callee_name and callee_name != "<dynamic>":
+            return {
+                "callee": callee_name,
+                "line_number": call_node.lineno,
+                "is_external": is_external,
+                "call_depth": 1  # Direct call, depth 1
+            }
+        
+        return None
 
 
 def map_file(file_path):
