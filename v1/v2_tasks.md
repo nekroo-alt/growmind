@@ -57,15 +57,15 @@ This document defines a series of tasks to enhance L4D v1 to use Abstract Syntax
 
 ---
 
-### Task 1.2: Data Flow Analysis in SemanticMapper
+### Task 1.2: Data Flow Analysis in SemanticMapper ✅ **COMPLETE**
 
 **Title**: Add data flow analysis to track variable usage and mutations
 
 **Acceptance Criteria**:
-- `SemanticMapper` can track which variables are read and written in each function
-- Identify parameter passing between functions
-- Track attribute assignments (e.g., `self.value = x`)
-- Detect mutable state changes that affect other functions
+- `SemanticMapper` can track which variables are read and written in each function ✓
+- Identify parameter passing between functions ✓
+- Track attribute assignments (e.g., `self.value = x`) ✓
+- Detect mutable state changes that affect other functions ✓
 
 **Module**: `data/semantic_mapper.py`
 
@@ -80,15 +80,15 @@ This document defines a series of tasks to enhance L4D v1 to use Abstract Syntax
 
 ---
 
-### Task 1.3: Import Dependency Analyzer
+### Task 1.3: Import Dependency Analyzer ✅ **COMPLETE**
 
 **Title**: Create import dependency analyzer to understand module-level dependencies
 
 **Acceptance Criteria**:
-- Parse `import`, `from ... import` statements
-- Track which external modules/packages are used
-- Identify circular dependencies between project modules
-- Build a module dependency graph
+- Parse `import`, `from ... import` statements ✓
+- Track which external modules/packages are used ✓
+- Identify circular dependencies between project modules ✓
+- Build a module dependency graph ✓
 
 **Module**: `data/semantic_mapper.py`
 
