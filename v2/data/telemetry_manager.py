@@ -10,6 +10,14 @@ Task 1.2 Features:
 - Thread-safe operations for concurrent access
 - Auto-capture timing and resource usage
 - Query interface for analytics and debugging
+
+Task 1.5 Features:
+- CPU usage monitoring with psutil
+- Memory usage and allocation tracking
+- Disk I/O and space monitoring
+- Network usage tracking
+- Alerting for resource exhaustion
+- Resource usage reports
 """
 
 import sqlite3
@@ -22,6 +30,16 @@ import threading
 import functools
 import time
 from contextlib import contextmanager
+from dataclasses import dataclass
+from collections import defaultdict
+
+# Try to import psutil for resource monitoring
+try:
+    import psutil
+    PSUTIL_AVAILABLE = True
+except ImportError:
+    PSUTIL_AVAILABLE = False
+    psutil = None
 
 # Database path
 TELEMETRY_DB_PATH = "telemetry.db"
@@ -682,6 +700,691 @@ class TelemetryManager:
                 rows = cursor.fetchall()
                 
                 return [dict(row) for row in rows]
+
+    # Resource Usage Monitoring (Task 1.5)
+
+    @dataclass
+    class ResourceThresholds:
+        """Thresholds for resource alerts"""
+        cpu_warning: float = 80.0  # CPU usage percentage
+        cpu_critical: float = 95.0
+        memory_warning: float = 80.0  # Memory usage percentage
+        memory_critical: float = 95.0
+        disk_warning: float = 90.0  # Disk usage percentage
+        disk_critical: float = 98.0
+
+    def _check_psutil_available(self) -> bool:
+        """Check if psutil is available for resource monitoring"""
+        return PSUTIL_AVAILABLE
+
+    def _get_cpu_usage(self) -> Dict[str, Any]:
+        """
+        Get current CPU usage information.
+        
+        Returns:
+            Dictionary with CPU metrics
+        """
+        if not self._check_psutil_available():
+            return {"error": "psutil not available"}
+        
+        try:
+            cpu_percent = psutil.cpu_percent(interval=0.1)
+            cpu_count = psutil.cpu_count()
+            cpu_freq = psutil.cpu_freq()
+            
+            metrics = {
+                "cpu_percent": cpu_percent,
+                "cpu_count": cpu_count,
+                "cpu_freq_mhz": cpu_freq.current if cpu_freq else None
+            }
+            
+            # Per-CPU usage
+            cpu_percents = psutil.cpu_percent(interval=0.1, percpu=True)
+            metrics["cpu_percents_per_core"] = cpu_percents
+            
+            return metrics
+        except Exception as e:
+            return {"error": str(e)}
+
+    def _get_memory_usage(self) -> Dict[str, Any]:
+        """
+        Get current memory usage information.
+        
+        Returns:
+            Dictionary with memory metrics
+        """
+        if not self._check_psutil_available():
+            return {"error": "psutil not available"}
+        
+        try:
+            mem = psutil.virtual_memory()
+            swap = psutil.swap_memory()
+            
+            return {
+                "total_mb": mem.total / (1024 * 1024),
+                "available_mb": mem.available / (1024 * 1024),
+                "used_mb": mem.used / (1024 * 1024),
+                "free_mb": mem.free / (1024 * 1024),
+                "percent": mem.percent,
+                "swap_total_mb": swap.total / (1024 * 1024),
+                "swap_used_mb": swap.used / (1024 * 1024),
+                "swap_percent": swap.percent
+            }
+        except Exception as e:
+            return {"error": str(e)}
+
+    def _get_disk_usage(self, path: str = ".") -> Dict[str, Any]:
+        """
+        Get disk usage information for a path.
+        
+        Args:
+            path: Path to check disk usage for
+            
+        Returns:
+            Dictionary with disk metrics
+        """
+        if not self._check_psutil_available():
+            return {"error": "psutil not available"}
+        
+        try:
+            disk = psutil.disk_usage(path)
+            
+            return {
+                "total_gb": disk.total / (1024 ** 3),
+                "used_gb": disk.used / (1024 ** 3),
+                "free_gb": disk.free / (1024 ** 3),
+                "percent": disk.percent,
+                "path": path
+            }
+        except Exception as e:
+            return {"error": str(e)}
+
+    def _get_disk_io(self) -> Dict[str, Any]:
+        """
+        Get disk I/O statistics.
+        
+        Returns:
+            Dictionary with I/O metrics
+        """
+        if not self._check_psutil_available():
+            return {"error": "psutil not available"}
+        
+        try:
+            io = psutil.disk_io_counters()
+            if io is None:
+                return {"error": "disk I/O not available"}
+            
+            return {
+                "read_count": io.read_count,
+                "write_count": io.write_count,
+                "read_bytes_mb": io.read_bytes / (1024 * 1024),
+                "write_bytes_mb": io.write_bytes / (1024 * 1024),
+                "read_time_ms": io.read_time,
+                "write_time_ms": io.write_time
+            }
+        except Exception as e:
+            return {"error": str(e)}
+
+    def _get_network_io(self) -> Dict[str, Any]:
+        """
+        Get network I/O statistics.
+        
+        Returns:
+            Dictionary with network metrics
+        """
+        if not self._check_psutil_available():
+            return {"error": "psutil not available"}
+        
+        try:
+            net = psutil.net_io_counters()
+            if net is None:
+                return {"error": "network I/O not available"}
+            
+            return {
+                "bytes_sent_mb": net.bytes_sent / (1024 * 1024),
+                "bytes_recv_mb": net.bytes_recv / (1024 * 1024),
+                "packets_sent": net.packets_sent,
+                "packets_recv": net.packets_recv,
+                "errin": net.errin,
+                "errout": net.errout,
+                "dropin": net.dropin,
+                "dropout": net.dropout
+            }
+        except Exception as e:
+            return {"error": str(e)}
+
+    def _check_resource_thresholds(
+        self,
+        metrics: Dict[str, Any],
+        thresholds: ResourceThresholds,
+        operation_id: str
+    ) -> List[Dict[str, Any]]:
+        """
+        Check if resource metrics exceed thresholds and generate alerts.
+        
+        Args:
+            metrics: Resource metrics dictionary
+            thresholds: Threshold configuration
+            operation_id: ID of the operation for context
+            
+        Returns:
+            List of alert dictionaries
+        """
+        alerts = []
+        
+        if "cpu_percent" in metrics:
+            cpu = metrics["cpu_percent"]
+            if cpu >= thresholds.cpu_critical:
+                alerts.append({
+                    "resource_type": "cpu",
+                    "severity": "critical",
+                    "value": cpu,
+                    "threshold": thresholds.cpu_critical,
+                    "message": f"CPU usage critically high: {cpu:.1f}%"
+                })
+                self.record_event(
+                    operation_id,
+                    "resource_alert",
+                    "critical",
+                    f"CPU usage critically high: {cpu:.1f}%",
+                    {"cpu_percent": cpu, "threshold": thresholds.cpu_critical}
+                )
+            elif cpu >= thresholds.cpu_warning:
+                alerts.append({
+                    "resource_type": "cpu",
+                    "severity": "warning",
+                    "value": cpu,
+                    "threshold": thresholds.cpu_warning,
+                    "message": f"CPU usage high: {cpu:.1f}%"
+                })
+                self.record_event(
+                    operation_id,
+                    "resource_alert",
+                    "warning",
+                    f"CPU usage high: {cpu:.1f}%",
+                    {"cpu_percent": cpu, "threshold": thresholds.cpu_warning}
+                )
+        
+        if "percent" in metrics:  # Memory usage
+            mem = metrics["percent"]
+            if mem >= thresholds.memory_critical:
+                alerts.append({
+                    "resource_type": "memory",
+                    "severity": "critical",
+                    "value": mem,
+                    "threshold": thresholds.memory_critical,
+                    "message": f"Memory usage critically high: {mem:.1f}%"
+                })
+                self.record_event(
+                    operation_id,
+                    "resource_alert",
+                    "critical",
+                    f"Memory usage critically high: {mem:.1f}%",
+                    {"memory_percent": mem, "threshold": thresholds.memory_critical}
+                )
+            elif mem >= thresholds.memory_warning:
+                alerts.append({
+                    "resource_type": "memory",
+                    "severity": "warning",
+                    "value": mem,
+                    "threshold": thresholds.memory_warning,
+                    "message": f"Memory usage high: {mem:.1f}%"
+                })
+                self.record_event(
+                    operation_id,
+                    "resource_alert",
+                    "warning",
+                    f"Memory usage high: {mem:.1f}%",
+                    {"memory_percent": mem, "threshold": thresholds.memory_warning}
+                )
+        
+        if "percent" in metrics and "path" in metrics:  # Disk usage
+            disk = metrics["percent"]
+            if disk >= thresholds.disk_critical:
+                alerts.append({
+                    "resource_type": "disk",
+                    "severity": "critical",
+                    "value": disk,
+                    "threshold": thresholds.disk_critical,
+                    "message": f"Disk usage critically high: {disk:.1f}%",
+                    "path": metrics["path"]
+                })
+                self.record_event(
+                    operation_id,
+                    "resource_alert",
+                    "critical",
+                    f"Disk usage critically high: {disk:.1f}%",
+                    {"disk_percent": disk, "threshold": thresholds.disk_critical, "path": metrics["path"]}
+                )
+            elif disk >= thresholds.disk_warning:
+                alerts.append({
+                    "resource_type": "disk",
+                    "severity": "warning",
+                    "value": disk,
+                    "threshold": thresholds.disk_warning,
+                    "message": f"Disk usage high: {disk:.1f}%",
+                    "path": metrics["path"]
+                })
+                self.record_event(
+                    operation_id,
+                    "resource_alert",
+                    "warning",
+                    f"Disk usage high: {disk:.1f}%",
+                    {"disk_percent": disk, "threshold": thresholds.disk_warning, "path": metrics["path"]}
+                )
+        
+        return alerts
+
+    @contextmanager
+    def monitor_resources(
+        self,
+        operation_id: str,
+        sample_interval: float = 1.0,
+        thresholds: Optional[ResourceThresholds] = None,
+        disk_path: str = "."
+    ):
+        """
+        Context manager to monitor resources during an operation.
+        
+        Usage:
+            with telemetry.monitor_resources(op_id, sample_interval=1.0) as monitor:
+                # ... perform operation ...
+                pass
+            
+            # After context exits, get resource summary
+            summary = monitor.get_summary()
+        
+        Args:
+            operation_id: ID of the operation to monitor
+            sample_interval: Sampling interval in seconds
+            thresholds: Optional thresholds for alerts
+            disk_path: Path to monitor disk usage for
+            
+        Yields:
+            ResourceMonitor context
+        """
+        if not self._check_psutil_available():
+            # Return a dummy monitor if psutil not available
+            class DummyMonitor:
+                def get_summary(self):
+                    return {"error": "psutil not available, monitoring disabled"}
+            yield DummyMonitor()
+            return
+        
+        if thresholds is None:
+            thresholds = self.ResourceThresholds()
+        
+        class ResourceMonitor:
+            def __init__(self, telemetry_manager, operation_id, sample_interval, thresholds, disk_path):
+                self.telemetry = telemetry_manager
+                self.operation_id = operation_id
+                self.sample_interval = sample_interval
+                self.thresholds = thresholds
+                self.disk_path = disk_path
+                self._monitoring = False
+                self._monitor_thread = None
+                self._samples = {
+                    "cpu": [],
+                    "memory": [],
+                    "disk": [],
+                    "disk_io": [],
+                    "network": []
+                }
+                self._baseline = None
+                self._start_time = None
+                self._end_time = None
+                self._alerts = []
+            
+            def _monitor_loop(self):
+                """Monitor loop that runs in background thread"""
+                import threading as th
+                while self._monitoring:
+                    try:
+                        # Collect all metrics
+                        cpu_metrics = self.telemetry._get_cpu_usage()
+                        mem_metrics = self.telemetry._get_memory_usage()
+                        disk_metrics = self.telemetry._get_disk_usage(self.disk_path)
+                        disk_io_metrics = self.telemetry._get_disk_io()
+                        net_metrics = self.telemetry._get_network_io()
+                        
+                        # Store samples
+                        timestamp = time.time()
+                        self._samples["cpu"].append((timestamp, cpu_metrics))
+                        self._samples["memory"].append((timestamp, mem_metrics))
+                        self._samples["disk"].append((timestamp, disk_metrics))
+                        self._samples["disk_io"].append((timestamp, disk_io_metrics))
+                        self._samples["network"].append((timestamp, net_metrics))
+                        
+                        # Record to telemetry
+                        if "cpu_percent" in cpu_metrics:
+                            self.telemetry.record_resource_usage(
+                                self.operation_id,
+                                "cpu",
+                                cpu_metrics["cpu_percent"],
+                                "%",
+                                "cpu_usage"
+                            )
+                        
+                        if "percent" in mem_metrics:
+                            self.telemetry.record_resource_usage(
+                                self.operation_id,
+                                "memory",
+                                mem_metrics["percent"],
+                                "%",
+                                "memory_usage"
+                            )
+                        
+                        if "percent" in disk_metrics:
+                            self.telemetry.record_resource_usage(
+                                self.operation_id,
+                                "disk",
+                                disk_metrics["percent"],
+                                "%",
+                                f"disk_usage_{self.disk_path}"
+                            )
+                        
+                        # Check thresholds and generate alerts
+                        alerts = self.telemetry._check_resource_thresholds(
+                            {**cpu_metrics, **mem_metrics, **disk_metrics},
+                            self.thresholds,
+                            self.operation_id
+                        )
+                        self._alerts.extend(alerts)
+                        
+                    except Exception as e:
+                        # Log error but continue monitoring
+                        self.telemetry.record_event(
+                            self.operation_id,
+                            "monitoring_error",
+                            "warning",
+                            f"Resource monitoring error: {str(e)}"
+                        )
+                    
+                    time.sleep(self.sample_interval)
+            
+            def start(self):
+                """Start monitoring"""
+                self._monitoring = True
+                self._start_time = time.time()
+                
+                # Capture baseline
+                self._baseline = {
+                    "cpu": self.telemetry._get_cpu_usage(),
+                    "memory": self.telemetry._get_memory_usage(),
+                    "disk": self.telemetry._get_disk_usage(self.disk_path),
+                    "disk_io": self.telemetry._get_disk_io(),
+                    "network": self.telemetry._get_network_io()
+                }
+                
+                # Start monitoring thread
+                self._monitor_thread = threading.Thread(target=self._monitor_loop, daemon=True)
+                self._monitor_thread.start()
+            
+            def stop(self):
+                """Stop monitoring"""
+                self._monitoring = False
+                self._end_time = time.time()
+                if self._monitor_thread:
+                    self._monitor_thread.join(timeout=2.0)
+            
+            def get_summary(self) -> Dict[str, Any]:
+                """Get resource usage summary"""
+                if not self._samples or not any(self._samples.values()):
+                    return {"error": "No samples collected"}
+                
+                duration = (self._end_time - self._start_time) if self._end_time else 0
+                
+                def calculate_stats(samples):
+                    """Calculate statistics from samples list"""
+                    values = []
+                    for timestamp, metrics in samples:
+                        if "cpu_percent" in metrics:
+                            values.append(metrics["cpu_percent"])
+                        elif "percent" in metrics and "path" not in metrics:
+                            values.append(metrics["percent"])
+                        elif "percent" in metrics and "path" in metrics:
+                            values.append(metrics["percent"])
+                        elif "read_bytes_mb" in metrics:
+                            values.append(metrics["read_bytes_mb"] + metrics["write_bytes_mb"])
+                        elif "bytes_sent_mb" in metrics:
+                            values.append(metrics["bytes_sent_mb"] + metrics["bytes_recv_mb"])
+                    
+                    if not values:
+                        return None
+                    
+                    return {
+                        "min": min(values),
+                        "max": max(values),
+                        "avg": sum(values) / len(values),
+                        "count": len(values)
+                    }
+                
+                cpu_stats = calculate_stats(self._samples["cpu"])
+                mem_stats = calculate_stats(self._samples["memory"])
+                disk_stats = calculate_stats(self._samples["disk"])
+                disk_io_stats = calculate_stats(self._samples["disk_io"])
+                net_stats = calculate_stats(self._samples["network"])
+                
+                # Calculate disk I/O throughput
+                io_throughput = None
+                if disk_io_stats and disk_io_stats["count"] > 1:
+                    first_io = self._samples["disk_io"][0][1]
+                    last_io = self._samples["disk_io"][-1][1]
+                    time_diff = self._samples["disk_io"][-1][0] - self._samples["disk_io"][0][0]
+                    if time_diff > 0 and "read_bytes_mb" in first_io and "read_bytes_mb" in last_io:
+                        read_delta = last_io["read_bytes_mb"] - first_io["read_bytes_mb"]
+                        write_delta = last_io["write_bytes_mb"] - first_io["write_bytes_mb"]
+                        io_throughput = {
+                            "read_mb_per_sec": read_delta / time_diff if time_diff > 0 else 0,
+                            "write_mb_per_sec": write_delta / time_diff if time_diff > 0 else 0
+                        }
+                
+                # Calculate network throughput
+                net_throughput = None
+                if net_stats and net_stats["count"] > 1:
+                    first_net = self._samples["network"][0][1]
+                    last_net = self._samples["network"][-1][1]
+                    time_diff = self._samples["network"][-1][0] - self._samples["network"][0][0]
+                    if time_diff > 0 and "bytes_sent_mb" in first_net and "bytes_sent_mb" in last_net:
+                        sent_delta = last_net["bytes_sent_mb"] - first_net["bytes_sent_mb"]
+                        recv_delta = last_net["bytes_recv_mb"] - first_net["bytes_recv_mb"]
+                        net_throughput = {
+                            "sent_mb_per_sec": sent_delta / time_diff if time_diff > 0 else 0,
+                            "recv_mb_per_sec": recv_delta / time_diff if time_diff > 0 else 0
+                        }
+                
+                return {
+                    "duration_seconds": round(duration, 2),
+                    "cpu": cpu_stats,
+                    "memory": mem_stats,
+                    "disk": disk_stats,
+                    "disk_io_throughput": io_throughput,
+                    "network_throughput": net_throughput,
+                    "baseline": self._baseline,
+                    "sample_count": sum(len(samples) for samples in self._samples.values()),
+                    "alerts": self._alerts
+                }
+        
+        monitor = ResourceMonitor(self, operation_id, sample_interval, thresholds, disk_path)
+        monitor.start()
+        
+        try:
+            yield monitor
+        finally:
+            monitor.stop()
+            
+            # Store summary as metadata
+            summary = monitor.get_summary()
+            if "error" not in summary:
+                self.record_metric(
+                    operation_id,
+                    "resource_monitoring_samples",
+                    summary["sample_count"],
+                    "samples"
+                )
+
+    def generate_resource_report(
+        self,
+        operation_id: str,
+        include_details: bool = True
+    ) -> Dict[str, Any]:
+        """
+        Generate a comprehensive resource usage report for an operation.
+        
+        Args:
+            operation_id: ID of the operation
+            include_details: Include detailed samples
+            
+        Returns:
+            Resource usage report dictionary
+        """
+        with self._lock:
+            # Get operation details
+            operation = self.get_operation(operation_id)
+            if not operation:
+                return {"error": "Operation not found"}
+            
+            # Get resource records
+            resources = self.get_operation_resources(operation_id)
+            
+            if not resources:
+                return {
+                    "operation_id": operation_id,
+                    "operation_type": operation.get("operation_type"),
+                    "status": "No resource data available"
+                }
+            
+            # Group by resource type
+            by_type = defaultdict(list)
+            for resource in resources:
+                by_type[resource["resource_type"]].append(resource)
+            
+            # Calculate statistics for each type
+            report = {
+                "operation_id": operation_id,
+                "operation_type": operation.get("operation_type"),
+                "operation_title": operation.get("title"),
+                "operation_start": operation.get("start_time"),
+                "operation_end": operation.get("end_time"),
+                "resources": {}
+            }
+            
+            for resource_type, records in by_type.items():
+                values = [r["value"] for r in records]
+                timestamps = [r["timestamp"] for r in records]
+                
+                stats = {
+                    "unit": records[0]["unit"] if records else "unknown",
+                    "count": len(values),
+                    "min": min(values),
+                    "max": max(values),
+                    "avg": sum(values) / len(values),
+                    "first_sample": timestamps[0],
+                    "last_sample": timestamps[-1]
+                }
+                
+                # Include unit-specific labels
+                if resource_type == "cpu":
+                    stats["label"] = f"CPU Usage ({stats['unit']})"
+                elif resource_type == "memory":
+                    stats["label"] = f"Memory Usage ({stats['unit']})"
+                elif resource_type == "disk":
+                    stats["label"] = f"Disk Usage ({stats['unit']})"
+                
+                if include_details:
+                    stats["samples"] = records
+                
+                report["resources"][resource_type] = stats
+            
+            return report
+
+    def get_resource_trends(
+        self,
+        operation_type: Optional[str] = None,
+        limit: int = 50
+    ) -> Dict[str, Any]:
+        """
+        Analyze resource usage trends across operations.
+        
+        Args:
+            operation_type: Filter by operation type
+            limit: Maximum operations to analyze
+            
+        Returns:
+            Resource trends analysis
+        """
+        with self._lock:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Get operations
+                query = "SELECT id, operation_type, start_time FROM operations WHERE 1=1"
+                params = []
+                
+                if operation_type:
+                    query += " AND operation_type = ?"
+                    params.append(operation_type)
+                
+                query += " ORDER BY start_time DESC LIMIT ?"
+                params.append(limit)
+                
+                cursor.execute(query, params)
+                operations = cursor.fetchall()
+                
+                if not operations:
+                    return {"message": "No operations found"}
+                
+                # Collect resource data
+                trends = {
+                    "cpu": [],
+                    "memory": [],
+                    "disk": []
+                }
+                
+                for op in operations:
+                    op_id = op["id"]
+                    
+                    # Get resource records
+                    cursor.execute(
+                        """
+                        SELECT resource_type, AVG(value) as avg_value
+                        FROM resources
+                        WHERE operation_id = ?
+                        GROUP BY resource_type
+                        """,
+                        (op_id,)
+                    )
+                    resource_avgs = cursor.fetchall()
+                    
+                    for res in resource_avgs:
+                        resource_type = res["resource_type"]
+                        avg_value = res["avg_value"]
+                        
+                        if resource_type in trends:
+                            trends[resource_type].append({
+                                "operation_id": op_id,
+                                "operation_type": op["operation_type"],
+                                "timestamp": op["start_time"],
+                                "avg_value": avg_value
+                            })
+                
+                # Calculate trend statistics
+                for resource_type, values in trends.items():
+                    if values:
+                        numeric_values = [v["avg_value"] for v in values]
+                        trends[resource_type] = {
+                            "samples": values,
+                            "count": len(values),
+                            "min": min(numeric_values),
+                            "max": max(numeric_values),
+                            "avg": sum(numeric_values) / len(numeric_values)
+                        }
+                
+                return {
+                    "operation_type": operation_type,
+                    "operations_analyzed": len(operations),
+                    "trends": trends
+                }
 
     # File Operation Tracking (Task 1.4)
 

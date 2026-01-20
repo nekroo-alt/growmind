@@ -160,17 +160,17 @@ This document defines a series of tasks to enhance L4D v2 with comprehensive tel
 
 ---
 
-### Task 1.5: Resource Usage Monitoring
+### Task 1.5: Resource Usage Monitoring ✅ **COMPLETE**
 
 **Title**: Implement resource usage monitoring (CPU, memory, disk)
 
 **Acceptance Criteria**:
-- Monitor CPU usage during operations
-- Track memory usage and allocation
-- Monitor disk I/O and space usage
-- Track network usage (for LLM API calls)
-- Alert on resource exhaustion
-- Generate resource usage reports
+- ✅ Monitor CPU usage during operations
+- ✅ Track memory usage and allocation
+- ✅ Monitor disk I/O and space usage
+- ✅ Track network usage (for LLM API calls)
+- ✅ Alert on resource exhaustion
+- ✅ Generate resource usage reports
 
 **Module**: `data/telemetry_manager.py` (enhance)
 
@@ -179,11 +179,11 @@ This document defines a series of tasks to enhance L4D v2 with comprehensive tel
 **Dependencies**: Task 1.2
 
 **Technical Notes**:
-- Use psutil for cross-platform monitoring
-- Sample at regular intervals (e.g., every 1 second)
-- Track peak and average usage
-- Correlate resource usage with operations
-- Set thresholds for warnings and alerts
+- ✅ Use psutil for cross-platform monitoring
+- ✅ Sample at regular intervals (e.g., every 1 second)
+- ✅ Track peak and average usage
+- ✅ Correlate resource usage with operations
+- ✅ Set thresholds for warnings and alerts
 
 ---
 
