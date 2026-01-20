@@ -35,6 +35,77 @@ class Implementor:
         else:
             snippet = raw_content
         return f"LLM did not return any file changes in the expected format. Response: {snippet}"
+    
+    def _analyze_context_quality(self, context: str) -> dict:
+        """
+        Analyze the quality of the collected context.
+        
+        Returns metrics about context relevance, dependency coverage, and size.
+        
+        Args:
+            context: The context string collected from ContextEngine
+        
+        Returns:
+            dict: Quality metrics including:
+                - size: Number of characters in context
+                - file_count: Number of files in context
+                - avg_relevance: Average relevance score of files
+                - dependency_coverage: Whether dependency chain info is present
+                - quality_score: Overall quality score (0-1)
+        """
+        metrics = {
+            "size": len(context),
+            "file_count": 0,
+            "avg_relevance": 0.0,
+            "dependency_coverage": False,
+            "quality_score": 0.0
+        }
+        
+        if not context:
+            return metrics
+        
+        # Count files and extract relevance scores
+        lines = context.split("\n")
+        relevance_scores = []
+        has_dependency_info = False
+        
+        for line in lines:
+            # Look for file markers with relevance scores
+            if line.strip().startswith("--- File:") and "Relevance:" in line:
+                metrics["file_count"] += 1
+                
+                # Extract relevance score (format: "Relevance: 0.85")
+                try:
+                    relevance_str = line.split("Relevance:")[1].split(",")[0].strip()
+                    relevance = float(relevance_str)
+                    relevance_scores.append(relevance)
+                except (IndexError, ValueError):
+                    # Fallback to default score
+                    relevance_scores.append(0.5)
+            
+            # Check for dependency chain information
+            if "dependency" in line.lower() or "impact" in line.lower():
+                has_dependency_info = True
+        
+        # Calculate average relevance
+        if relevance_scores:
+            metrics["avg_relevance"] = sum(relevance_scores) / len(relevance_scores)
+        
+        # Check if dependency coverage is present
+        metrics["dependency_coverage"] = has_dependency_info
+        
+        # Calculate overall quality score
+        # Quality = (average relevance * 0.6) + (file_count_factor * 0.3) + (dependency_factor * 0.1)
+        file_count_factor = min(metrics["file_count"] / 10.0, 1.0)  # Max benefit at 10 files
+        dependency_factor = 1.0 if has_dependency_info else 0.0
+        
+        metrics["quality_score"] = (
+            (metrics["avg_relevance"] * 0.6) +
+            (file_count_factor * 0.3) +
+            (dependency_factor * 0.1)
+        )
+        
+        return metrics
 
     @fcid_mapping("ACT-100")
     def execute_tdd_cycle(self, task):
@@ -44,21 +115,59 @@ class Implementor:
         """
         task_id = task["id"]
         task_title = task["title"]
+        acceptance_criteria = task.get("acceptance_criteria", "")
 
-        # Context Injection
+        # Context Injection with AST-based analysis
+        # Use enhanced ContextEngine with task title and acceptance criteria
+        # for intelligent file scoping and dependency-aware context selection
         v1_files = glob.glob(
             os.path.join(self.workspace_root, "v1/**/*.py"), recursive=True
         )
         v1_files = [os.path.relpath(f, self.workspace_root) for f in v1_files]
-        context = self.context_engine.get_pruned_context(task_title, v1_files)
-
+        
+        # Get pruned context with smart scoping enabled (V2 enhancement)
+        context = self.context_engine.get_pruned_context(
+            task_query=task_title,
+            files=v1_files,
+            use_smart_scoping=True,
+            task_title=task_title,
+            acceptance_criteria=acceptance_criteria,
+            force_refresh=False
+        )
+        
+        # Analyze context quality metrics
+        quality_metrics = self._analyze_context_quality(context)
+        
+        # Log detailed context information including quality metrics
         log_activity(
             summary=f"Starting TDD Cycle: {task_title}",
             action="TDD Start",
             status="Success",
-            cot_blob=f"Beginning implementation for task ID {task_id}. Context gathered: {len(context)} chars.",
+            cot_blob=(
+                f"Beginning implementation for task ID {task_id}. "
+                f"Context gathered: {len(context)} chars, "
+                f"{quality_metrics['file_count']} files, "
+                f"avg relevance: {quality_metrics['avg_relevance']:.2f}, "
+                f"quality score: {quality_metrics['quality_score']:.2f}, "
+                f"dependency coverage: {quality_metrics['dependency_coverage']}"
+            ),
             notify_telemetry=False,  # We use log_task_start via orchestrator/task_context
         )
+        
+        # Log telemetry for context quality monitoring
+        telemetry.track_step(
+            f"Context collected: {quality_metrics['file_count']} files, "
+            f"quality score: {quality_metrics['quality_score']:.2f}"
+        )
+        
+        # Warn if context quality is low
+        if quality_metrics['quality_score'] < 0.3:
+            telemetry.warning(
+                f"Low context quality detected (score: {quality_metrics['quality_score']:.2f}). "
+                f"This may affect implementation accuracy. "
+                f"Avg relevance: {quality_metrics['avg_relevance']:.2f}, "
+                f"Dependency coverage: {quality_metrics['dependency_coverage']}"
+            )
 
         # Red Phase: Write a failing test
         telemetry.track_step("Red Phase: Writing failing test")
