@@ -1,13 +1,31 @@
+"""
+LLM Provider - Task 1.3: LLM Call Telemetry Integration
+
+This module implements comprehensive telemetry tracking for all LLM calls.
+It integrates with the V3 telemetry system to track request/response details,
+latency, retry attempts, errors, and fallbacks.
+
+Task 1.3 Features:
+- Track all LLM calls with request/response details
+- Record prompt size, response size, and token counts
+- Track latency and retry attempts
+- Log model, temperature, and other parameters
+- Capture errors and fallbacks
+- Support streaming call metrics
+"""
+
 import os
 import json
 import re
-from v1.core.telemetry import telemetry
+import time
+from typing import Optional, Dict, Any
+from v2.data.telemetry_manager import get_telemetry_manager
 
 
 class LLMProvider:
     """
-    Simple wrapper for LLM calls to abstract prompts from logic.
-    Supports OpenAI and Anthropic, with a mock fallback for MVP development.
+    LLM provider wrapper with comprehensive telemetry tracking.
+    Supports OpenAI, Anthropic, and Google with automatic telemetry.
     """
 
     def __init__(self, provider=None, model=None, providers=None):
@@ -20,6 +38,7 @@ class LLMProvider:
 
         self.current_index = 0
         self._update_active_provider()
+        self._telemetry = get_telemetry_manager()
 
     def _update_active_provider(self):
         """Sets the current provider state based on current_index."""
@@ -105,14 +124,59 @@ class LLMProvider:
 
     def call(self, system_prompt, user_prompt, temperature=0.7, max_tokens=4096):
         """
-        Executes an LLM call with retry/failover logic across multiple providers.
+        Executes an LLM call with retry/failover logic and comprehensive telemetry.
         Returns a dictionary with 'content', 'usage', and 'cost'.
         """
+        # Start telemetry operation
+        operation_id = self._telemetry.start_operation(
+            operation_type="llm_call",
+            title=f"LLM call to {self.provider}",
+            metadata={
+                "provider": self.provider,
+                "model": self.model,
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+                "prompt_size_chars": len(system_prompt) + len(user_prompt)
+            }
+        )
+
+        # Record call parameters
+        self._telemetry.record_event(
+            operation_id,
+            "call_started",
+            "info",
+            f"Starting LLM call to {self.provider}/{self.model}",
+            {
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+                "system_prompt_length": len(system_prompt),
+                "user_prompt_length": len(user_prompt)
+            }
+        )
+
         max_attempts = len(self.providers)
         last_error = ""
+        attempt_count = 0
+        start_time = time.time()
 
-        for _ in range(max_attempts):
+        for attempt in range(max_attempts):
+            attempt_count += 1
             self._update_active_provider()
+
+            # Record retry attempt if not first
+            if attempt > 0:
+                self._telemetry.record_event(
+                    operation_id,
+                    "retry_attempt",
+                    "warning",
+                    f"Retry attempt {attempt} with {self.provider}",
+                    {
+                        "attempt": attempt,
+                        "provider": self.provider,
+                        "model": self.model,
+                        "last_error": last_error
+                    }
+                )
 
             if not self.api_key:
                 last_error = f"Error: Missing API key for {self.provider}"
@@ -120,15 +184,15 @@ class LLMProvider:
                     content = self._mock_call(system_prompt, user_prompt)
                     prompt_tokens = self.count_tokens(system_prompt + user_prompt)
                     completion_tokens = self.count_tokens(content)
-                    telemetry.log_llm_usage(
-                        prompt_tokens + completion_tokens,
-                        0.0,
-                        prompt_tokens,
-                        completion_tokens,
+                    cost = 0.0
+                    
+                    # Record successful mock call
+                    self._record_llm_call_metrics(
+                        operation_id, content, prompt_tokens, completion_tokens,
+                        cost, start_time, attempt_count, None
                     )
-                    telemetry.log_llm_interaction(
-                        self.provider, self.model, system_prompt, user_prompt, content
-                    )
+                    
+                    self._telemetry.end_operation(operation_id, "completed")
                     return {
                         "content": content,
                         "usage": {
@@ -160,10 +224,14 @@ class LLMProvider:
                     raise ValueError(f"Unsupported provider '{self.provider}'")
 
                 cost = self.calculate_cost(p_tokens, c_tokens)
-                telemetry.log_llm_usage(p_tokens + c_tokens, cost, p_tokens, c_tokens)
-                telemetry.log_llm_interaction(
-                    self.provider, self.model, system_prompt, user_prompt, content
+                
+                # Record successful call
+                self._record_llm_call_metrics(
+                    operation_id, content, p_tokens, c_tokens,
+                    cost, start_time, attempt_count, None
                 )
+                
+                self._telemetry.end_operation(operation_id, "completed")
                 return {
                     "content": content,
                     "usage": {
@@ -175,18 +243,122 @@ class LLMProvider:
                 }
             except Exception as e:
                 last_error = f"Error calling {self.provider}: {str(e)}"
+                
+                # Record error
+                self._telemetry.record_event(
+                    operation_id,
+                    "call_failed",
+                    "error",
+                    f"LLM call failed on {self.provider}: {str(e)}",
+                    {
+                        "attempt": attempt,
+                        "provider": self.provider,
+                        "model": self.model,
+                        "exception_type": type(e).__name__,
+                        "exception_message": str(e)
+                    }
+                )
+                
                 # Switch to next provider for next attempt
                 self.current_index = (self.current_index + 1) % max_attempts
 
+        # All providers failed
         error_content = f"Error: All LLM providers failed. Last error: {last_error}"
-        telemetry.log_llm_interaction(
-            "None", "None", system_prompt, user_prompt, error_content
+        
+        # Record final failure
+        self._telemetry.record_event(
+            operation_id,
+            "all_providers_failed",
+            "critical",
+            f"All {max_attempts} LLM providers failed",
+            {
+                "total_attempts": attempt_count,
+                "last_error": last_error
+            }
         )
+        
+        self._telemetry.end_operation(operation_id, "failed", {
+            "error": last_error,
+            "total_attempts": attempt_count
+        })
+        
         return {
             "content": error_content,
             "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
             "cost": 0.0,
         }
+
+    def _record_llm_call_metrics(
+        self,
+        operation_id: str,
+        content: str,
+        prompt_tokens: int,
+        completion_tokens: int,
+        cost: float,
+        start_time: float,
+        attempt_count: int,
+        error: Optional[str]
+    ):
+        """
+        Record comprehensive metrics for an LLM call.
+        
+        Args:
+            operation_id: Telemetry operation ID
+            content: Response content
+            prompt_tokens: Number of prompt tokens
+            completion_tokens: Number of completion tokens
+            cost: Estimated cost in USD
+            start_time: Call start timestamp
+            attempt_count: Number of retry attempts
+            error: Error message if call failed
+        """
+        latency = time.time() - start_time
+        total_tokens = prompt_tokens + completion_tokens
+        response_size = len(content)
+        
+        # Record token metrics
+        self._telemetry.record_metric(operation_id, "prompt_tokens", prompt_tokens, "tokens")
+        self._telemetry.record_metric(operation_id, "completion_tokens", completion_tokens, "tokens")
+        self._telemetry.record_metric(operation_id, "total_tokens", total_tokens, "tokens")
+        self._telemetry.record_metric(operation_id, "cost", cost, "USD")
+        
+        # Record latency
+        self._telemetry.record_metric(operation_id, "latency_seconds", round(latency, 3), "seconds")
+        
+        # Record size metrics
+        self._telemetry.record_metric(operation_id, "response_size_chars", response_size, "chars")
+        
+        # Record retry count
+        if attempt_count > 1:
+            self._telemetry.record_metric(operation_id, "retry_count", attempt_count - 1, "attempts")
+        
+        # Record success/failure
+        if error:
+            self._telemetry.record_event(
+                operation_id,
+                "call_completed",
+                "warning",
+                f"Call completed with error after {latency:.2f}s",
+                {
+                    "error": error,
+                    "latency": latency
+                }
+            )
+        else:
+            self._telemetry.record_event(
+                operation_id,
+                "call_completed",
+                "info",
+                f"Call completed successfully in {latency:.2f}s",
+                {
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": completion_tokens,
+                    "total_tokens": total_tokens,
+                    "cost": cost,
+                    "response_size": response_size,
+                    "latency": latency
+                }
+            )
 
     def _call_openai(self, system_prompt, user_prompt, temperature, max_tokens):
         try:
@@ -286,7 +458,7 @@ class LLMProvider:
         Fallback mock response for testing when no API key is provided.
         Returns a format that's often expected by the planner/implementor.
         """
-        if "Break down the given requirements" in system_prompt:
+        if "Break down" in system_prompt and "requirements" in system_prompt:
             # Return a JSON list if it looks like a planning request
             return json.dumps(
                 [
