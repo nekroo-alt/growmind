@@ -1,5 +1,6 @@
 import os
-from typing import List, Dict, Optional, Tuple
+import hashlib
+from typing import List, Dict, Optional, Tuple, Set
 from v1.data.semantic_mapper import SemanticMapper
 from v1.logic.task_impact_analyzer import TaskImpactAnalyzer
 from v1.logic.dependency_traverser import DependencyTraverser
@@ -9,12 +10,23 @@ class ContextEngine:
     """
     Context Engine responsible for pruning and selecting relevant code snippets
     based on the task scope.
+    
+    Enhanced with context memoization to cache and reuse context collections
+    for similar tasks, reducing redundant AST parsing and context generation.
     """
 
     def __init__(self, workspace_root="."):
         self.root = workspace_root
+        
+        # Memoization cache for context collections
+        self._context_cache: Dict[str, Dict] = {}
+        
+        # Cache statistics
+        self._cache_hits = 0
+        self._cache_misses = 0
+        self._cache_updates = 0
 
-    def get_pruned_context(self, task_query, files, use_smart_scoping=True, task_title="", acceptance_criteria=""):
+    def get_pruned_context(self, task_query, files, use_smart_scoping=True, task_title="", acceptance_criteria="", force_refresh=False):
         """
         Returns a string containing relevant code snippets or summaries for the given files.
         
@@ -28,6 +40,20 @@ class ContextEngine:
         Returns:
             str: Formatted context with relevant code snippets
         """
+        # Generate cache key for memoization
+        cache_key = self._generate_cache_key(
+            task_query, files, use_smart_scoping, task_title, acceptance_criteria
+        )
+        
+        # Check cache if not forcing refresh
+        if not force_refresh and cache_key in self._context_cache:
+            self._cache_hits += 1
+            cached_entry = self._context_cache[cache_key]
+            return cached_entry["context"]
+        
+        # Cache miss - generate new context
+        self._cache_misses += 1
+        
         # Use smart file scoping if enabled and task information is provided
         if use_smart_scoping and task_title:
             scored_files = self.get_smart_file_scope(
@@ -101,7 +127,19 @@ class ContextEngine:
                 summ_str = "\n".join(summ_parts)
                 context.append(f"--- File: {path} (Summary) ---\n{summ_str}")
 
-        return "\n\n".join(context)
+        final_context = "\n\n".join(context)
+        
+        # Store in cache for future reuse
+        self._cache_context(
+            cache_key,
+            final_context,
+            task_query,
+            task_title,
+            files,
+            use_smart_scoping
+        )
+        
+        return final_context
 
     def get_smart_file_scope(
         self,
@@ -374,5 +412,282 @@ class ContextEngine:
             if key.endswith(f".{name}"):
                 return key
         
-        # If no match found, return original
         return name
+    
+    def _generate_cache_key(
+        self,
+        task_query: str,
+        files: List[str],
+        use_smart_scoping: bool,
+        task_title: str,
+        acceptance_criteria: str
+    ) -> str:
+        """
+        Generate a unique cache key for context memoization.
+        
+        The key is based on:
+        - Task keywords (extracted from query and title)
+        - Set of files being analyzed
+        - Smart scoping mode
+        
+        Args:
+            task_query: Task query string
+            files: List of file paths
+            use_smart_scoping: Whether smart scoping is enabled
+            task_title: Task title
+            acceptance_criteria: Acceptance criteria
+        
+        Returns:
+            str: Unique cache key (MD5 hash)
+        """
+        # Extract keywords from task_query and task_title
+        keywords = self._extract_keywords(task_query, task_title)
+        keywords_str = "|".join(sorted(keywords))
+        
+        # Create normalized file set string
+        files_str = "|".join(sorted(files))
+        
+        # Combine all factors
+        key_components = [
+            keywords_str,
+            files_str,
+            str(use_smart_scoping)
+        ]
+        
+        key_string = "::".join(key_components)
+        
+        # Generate MD5 hash for compact key
+        return hashlib.md5(key_string.encode()).hexdigest()
+    
+    def _extract_keywords(self, task_query: str, task_title: str) -> Set[str]:
+        """
+        Extract meaningful keywords from task query and title.
+        
+        Args:
+            task_query: Task query string
+            task_title: Task title
+        
+        Returns:
+            Set of keywords (lowercase, >2 chars)
+        """
+        keywords = set()
+        
+        # Extract from task_query
+        for word in task_query.lower().replace("_", " ").split():
+            if len(word) > 2:
+                keywords.add(word)
+        
+        # Extract from task_title
+        for word in task_title.lower().replace("_", " ").split():
+            if len(word) > 2:
+                keywords.add(word)
+        
+        return keywords
+    
+    def _cache_context(
+        self,
+        cache_key: str,
+        context: str,
+        task_query: str,
+        task_title: str,
+        files: List[str],
+        use_smart_scoping: bool
+    ) -> None:
+        """
+        Store context collection in memoization cache.
+        
+        Args:
+            cache_key: Unique cache key
+            context: Context string to cache
+            task_query: Task query for metadata
+            task_title: Task title for metadata
+            files: List of files for metadata
+            use_smart_scoping: Whether smart scoping was used
+        """
+        self._context_cache[cache_key] = {
+            "context": context,
+            "task_query": task_query,
+            "task_title": task_title,
+            "files": sorted(files),
+            "use_smart_scoping": use_smart_scoping,
+            "timestamp": self._get_file_modification_time(files),
+            "context_size": len(context)
+        }
+    
+    def _get_file_modification_time(self, files: List[str]) -> float:
+        """
+        Get the latest modification time among all files.
+        
+        Used for cache invalidation when files change.
+        
+        Args:
+            files: List of file paths (relative to root)
+        
+        Returns:
+            float: Latest modification timestamp
+        """
+        latest_time = 0.0
+        
+        for file_path in files:
+            full_path = os.path.join(self.root, file_path)
+            if os.path.exists(full_path):
+                mtime = os.path.getmtime(full_path)
+                latest_time = max(latest_time, mtime)
+        
+        return latest_time
+    
+    def invalidate_cache_for_files(self, modified_files: List[str]) -> int:
+        """
+        Invalidate cache entries that reference modified files.
+        
+        Should be called after git commits to keep cache consistent.
+        
+        Args:
+            modified_files: List of file paths that were modified
+        
+        Returns:
+            int: Number of cache entries invalidated
+        """
+        invalidated_count = 0
+        keys_to_remove = []
+        
+        # Find cache entries that reference modified files
+        for cache_key, entry in self._context_cache.items():
+            entry_files = set(entry["files"])
+            modified_set = set(modified_files)
+            
+            # Check if any file in cache entry was modified
+            if entry_files & modified_set:
+                keys_to_remove.append(cache_key)
+        
+        # Remove invalidated entries
+        for key in keys_to_remove:
+            del self._context_cache[key]
+            invalidated_count += 1
+        
+        return invalidated_count
+    
+    def get_similar_cached_context(
+        self,
+        task_query: str,
+        task_title: str,
+        similarity_threshold: float = 0.6
+    ) -> Optional[Dict]:
+        """
+        Find cached context with similar task keywords (fuzzy matching).
+        
+        Useful for reusing context from similar tasks even when exact match fails.
+        
+        Args:
+            task_query: Task query string
+            task_title: Task title
+            similarity_threshold: Minimum similarity score (0-1)
+        
+        Returns:
+            Dictionary with cached context and similarity info, or None
+        """
+        target_keywords = self._extract_keywords(task_query, task_title)
+        
+        best_match = None
+        best_similarity = 0.0
+        
+        for cache_key, entry in self._context_cache.items():
+            cached_keywords = self._extract_keywords(
+                entry["task_query"],
+                entry["task_title"]
+            )
+            
+            # Calculate Jaccard similarity
+            intersection = len(target_keywords & cached_keywords)
+            union = len(target_keywords | cached_keywords)
+            
+            if union > 0:
+                similarity = intersection / union
+                
+                if similarity > best_similarity and similarity >= similarity_threshold:
+                    best_similarity = similarity
+                    best_match = {
+                        "context": entry["context"],
+                        "similarity": similarity,
+                        "cache_key": cache_key,
+                        "original_task": entry["task_title"],
+                        "shared_keywords": target_keywords & cached_keywords
+                    }
+        
+        return best_match
+    
+    def update_context_incrementally(
+        self,
+        modified_files: List[str],
+        task_title: str,
+        acceptance_criteria: str = ""
+    ) -> None:
+        """
+        Update cached contexts incrementally after task completion.
+        
+        For cache entries that reference modified files, re-analyze only
+        those files and update the context.
+        
+        Args:
+            modified_files: List of files that were modified
+            task_title: Title of the completed task
+            acceptance_criteria: Acceptance criteria (for smart scoping)
+        """
+        self._cache_updates += 1
+        
+        # Find cache entries affected by modified files
+        for cache_key, entry in self._context_cache.items():
+            entry_files = set(entry["files"])
+            modified_set = set(modified_files)
+            
+            # Check if this cache entry is affected
+            if entry_files & modified_set:
+                # Re-generate context for affected entry
+                # This will use updated semantic maps if caching is properly integrated
+                new_context = self.get_pruned_context(
+                    entry["task_query"],
+                    entry["files"],
+                    entry["use_smart_scoping"],
+                    entry["task_title"],
+                    "",
+                    force_refresh=True
+                )
+                
+                # Update the cache entry
+                entry["context"] = new_context
+                entry["timestamp"] = self._get_file_modification_time(entry["files"])
+                entry["context_size"] = len(new_context)
+    
+    def get_cache_stats(self) -> Dict[str, int]:
+        """
+        Get cache performance statistics.
+        
+        Returns:
+            Dictionary with cache hit/miss/update counts and rates
+        """
+        total_requests = self._cache_hits + self._cache_misses
+        
+        if total_requests == 0:
+            hit_rate = 0.0
+        else:
+            hit_rate = self._cache_hits / total_requests
+        
+        return {
+            "cache_hits": self._cache_hits,
+            "cache_misses": self._cache_misses,
+            "cache_updates": self._cache_updates,
+            "cache_entries": len(self._context_cache),
+            "hit_rate": round(hit_rate, 3),
+            "total_requests": total_requests
+        }
+    
+    def clear_cache(self) -> None:
+        """
+        Clear all cached contexts.
+        
+        Useful for testing or when cache becomes stale.
+        """
+        self._context_cache.clear()
+        self._cache_hits = 0
+        self._cache_misses = 0
+        self._cache_updates = 0
