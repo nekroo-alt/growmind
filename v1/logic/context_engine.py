@@ -35,15 +35,34 @@ class ContextEngine:
         """
         Returns a string containing relevant code snippets or summaries for the given files.
         
+        Enhanced in V2 to use AST-based impact analysis via TaskImpactAnalyzer for more
+        precise context collection. This replaces the V1 keyword matching approach with
+        intelligent dependency-aware context selection.
+        
         Args:
-            task_query: Query string to match against code
+            task_query: Query string to match against code (legacy, used for fallback)
             files: List of file paths to analyze
             use_smart_scoping: If True, use AST-based impact analysis (default: True)
-            task_title: Title of the task (for smart scoping)
-            acceptance_criteria: Acceptance criteria for the task (for smart scoping)
+            task_title: Title of the task (required for smart scoping)
+            acceptance_criteria: Acceptance criteria for the task (enhances impact analysis)
+            force_refresh: If True, bypass cache and regenerate context
         
         Returns:
-            str: Formatted context with relevant code snippets
+            str: Formatted context with relevant code snippets and summaries
+        
+        Examples:
+            >>> engine = ContextEngine(workspace_root=".")
+            >>> context = engine.get_pruned_context(
+            ...     task_query="cache invalidation",
+            ...     files=["v1/data/cache_manager.py"],
+            ...     task_title="Implement cache invalidation",
+            ...     acceptance_criteria="Cache must be invalidated when source files change"
+            ... )
+        
+        Note:
+            - For best results, provide both task_title and acceptance_criteria
+            - Smart scoping (V2) is enabled by default and uses TaskImpactAnalyzer
+            - Legacy keyword matching is used only as fallback when smart scoping is disabled
         """
         # Generate cache key for memoization
         cache_key = self._generate_cache_key(
@@ -59,20 +78,34 @@ class ContextEngine:
         # Cache miss - generate new context
         self._cache_misses += 1
         
-        # Use smart file scoping if enabled and task information is provided
+        # V2 Enhancement: Use smart file scoping with AST-based impact analysis
         if use_smart_scoping and task_title:
+            # Use TaskImpactAnalyzer to score files by relevance
             scored_files = self.get_smart_file_scope(
                 task_title, acceptance_criteria, files
             )
-            # Filter files by relevance score (threshold: 0.05 to be more inclusive)
-            files = [f["file_path"] for f in scored_files if f["relevance_score"] >= 0.05]
+            
+            # Filter files by relevance score (more inclusive threshold: 0.05)
+            # This ensures borderline dependencies are included
+            filtered_files = [f for f in scored_files if f["relevance_score"] >= 0.05]
+            
+            # Extract file paths with relevance info for context generation
+            files_with_scores = [
+                (f["file_path"], f["relevance_score"], f["match_details"])
+                for f in filtered_files
+            ]
+        else:
+            # Legacy V1 behavior: Use all files with uniform scoring
+            files_with_scores = [(f, 1.0, {"reason": "Legacy keyword mode"}) for f in files]
         
         context = []
+        
+        # Extract keywords for fallback matching (legacy support)
         keywords = {
             w for w in task_query.lower().replace("_", " ").split() if len(w) > 2
         }
 
-        for path in files:
+        for path, relevance_score, match_details in files_with_scores:
             full_path = os.path.join(self.root, path)
             if not os.path.exists(full_path):
                 continue
@@ -86,7 +119,8 @@ class ContextEngine:
                 snippet = file_content[:1000] + (
                     "..." if len(file_content) > 1000 else ""
                 )
-                context.append(f"--- File: {path} (Content) ---\n{snippet}")
+                reason = match_details.get("reason", "Non-Python file")
+                context.append(f"--- File: {path} (Relevance: {relevance_score:.2f}, {reason}) ---\n{snippet}")
                 continue
 
             try:
@@ -96,30 +130,95 @@ class ContextEngine:
                     "..." if len(file_content) > 1000 else ""
                 )
                 context.append(
-                    f"--- File: {path} (Raw Content due to SyntaxError) ---\n{snippet}"
+                    f"--- File: {path} (Raw Content due to SyntaxError, Relevance: {relevance_score:.2f}) ---\n{snippet}"
                 )
                 continue
 
             summary = mapper.get_summary()
             matches = []
 
-            # Check top-level functions
-            for func in summary["functions"]:
-                if any(kw in func["name"].lower() for kw in keywords):
-                    matches.append(func["name"])
-
-            # Check classes and their methods
-            for cls in summary["classes"]:
-                if any(kw in cls["name"].lower() for kw in keywords):
-                    matches.append(cls["name"])
-                else:
-                    for method in cls["methods"]:
-                        if any(kw in method["name"].lower() for kw in keywords):
+            # V2: If smart scoping is active and we have direct matches from impact analysis
+            # Use those matches instead of keyword matching
+            if use_smart_scoping and match_details.get("direct_matches"):
+                # Use direct matches from TaskImpactAnalyzer
+                direct_matches = match_details["direct_matches"]
+                
+                # Process function matches
+                for func_name in direct_matches.get("functions", []):
+                    # Handle both simple names and qualified names (Class.method)
+                    if "." in func_name:
+                        # Qualified name - add as-is
+                        matches.append(func_name)
+                    else:
+                        # Simple name - check if it's a top-level function
+                        for func in summary["functions"]:
+                            if func["name"] == func_name:
+                                matches.append(func_name)
+                
+                # Process class matches
+                for class_name in direct_matches.get("classes", []):
+                    matches.append(class_name)
+                    # Add all methods for matched classes
+                    for cls in summary["classes"]:
+                        if cls["name"] == class_name:
+                            for method in cls["methods"]:
+                                matches.append(method["name"])
+                
+                # Process module matches (include entire file)
+                if direct_matches.get("modules"):
+                    # If module matches, include all top-level items
+                    for func in summary["functions"]:
+                        matches.append(func["name"])
+                    for cls in summary["classes"]:
+                        matches.append(cls["name"])
+                        for method in cls["methods"]:
                             matches.append(method["name"])
+                
+                # Also include keyword matches for broader coverage
+                for keyword in direct_matches.get("keywords", []):
+                    # Try to find functions/methods containing this keyword
+                    for func in summary["functions"]:
+                        if keyword.lower() in func["name"].lower():
+                            matches.append(func["name"])
+                    for cls in summary["classes"]:
+                        if keyword.lower() in cls["name"].lower():
+                            matches.append(cls["name"])
+                        for method in cls["methods"]:
+                            if keyword.lower() in method["name"].lower():
+                                matches.append(method["name"])
+                
+                # If still no matches, fall back to keyword matching
+                if not matches:
+                    for func in summary["functions"]:
+                        if any(kw in func["name"].lower() for kw in keywords):
+                            matches.append(func["name"])
+                    for cls in summary["classes"]:
+                        if any(kw in cls["name"].lower() for kw in keywords):
+                            matches.append(cls["name"])
+                        else:
+                            for method in cls["methods"]:
+                                if any(kw in method["name"].lower() for kw in keywords):
+                                    matches.append(method["name"])
+            else:
+                # Legacy V1: Fallback to keyword matching
+                # Check top-level functions
+                for func in summary["functions"]:
+                    if any(kw in func["name"].lower() for kw in keywords):
+                        matches.append(func["name"])
+
+                # Check classes and their methods
+                for cls in summary["classes"]:
+                    if any(kw in cls["name"].lower() for kw in keywords):
+                        matches.append(cls["name"])
+                    else:
+                        for method in cls["methods"]:
+                            if any(kw in method["name"].lower() for kw in keywords):
+                                matches.append(method["name"])
 
             if matches:
                 snippets = mapper.get_relevant_nodes(list(set(matches)))
-                context.append(f"--- File: {path} ---\n{snippets}")
+                reason = match_details.get("reason", "Matched by keywords")
+                context.append(f"--- File: {path} (Relevance: {relevance_score:.2f}, {reason}) ---\n{snippets}")
             else:
                 # Provide a shallow summary if no direct matches found
                 summ_parts = []
@@ -130,7 +229,8 @@ class ContextEngine:
                     summ_parts.append(f"Function: {func['name']}")
 
                 summ_str = "\n".join(summ_parts)
-                context.append(f"--- File: {path} (Summary) ---\n{summ_str}")
+                reason = match_details.get("reason", "Summary only - no direct matches")
+                context.append(f"--- File: {path} (Relevance: {relevance_score:.2f}, {reason}) ---\n{summ_str}")
 
         final_context = "\n\n".join(context)
         
