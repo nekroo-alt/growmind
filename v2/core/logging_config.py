@@ -30,6 +30,209 @@ DEFAULT_BACKUP_COUNT = 5
 DEFAULT_LOG_LEVEL = logging.INFO
 
 
+# ============================================================================
+# Standardized Log Message Templates
+# ============================================================================
+
+"""
+Log Message Format Conventions:
+
+All log messages should follow these patterns for consistency:
+
+1. Operation Start/End:
+   - "{operation_type} started" - when an operation begins
+   - "{operation_type} completed" - when an operation succeeds
+   - "{operation_type} failed" - when an operation fails
+
+2. Action Verbs:
+   - Use consistent verbs: started, completed, failed, processing, skipped, retried
+   - Example: "Task breakdown started", "Test generation completed"
+
+3. Required Context:
+   - operation_id: UUID of the current operation
+   - task_id: Task ID (if applicable)
+   - file_path: File being processed (if applicable)
+   - module/function: Calling module and function
+
+4. Message Templates:
+   - Use {} placeholders for dynamic values
+   - Example: "Task {task_id} implementation started"
+
+5. Error Messages:
+   - Include error type and message
+   - Include stack trace for errors
+   - Example: "Task implementation failed: {error_type}: {error_message}"
+"""
+
+
+class LogMessageTemplates:
+    """
+    Standardized log message templates for different operation types.
+    
+    Ensures consistent log format across all modules.
+    """
+    
+    # Operation lifecycle templates
+    OPERATION_STARTED = "{operation_type} started"
+    OPERATION_COMPLETED = "{operation_type} completed"
+    OPERATION_FAILED = "{operation_type} failed: {error}"
+    OPERATION_SKIPPED = "{operation_type} skipped: {reason}"
+    
+    # Task-specific templates
+    TASK_STARTED = "Task {task_id} started: {task_title}"
+    TASK_COMPLETED = "Task {task_id} completed"
+    TASK_FAILED = "Task {task_id} failed: {error}"
+    TASK_SKIPPED = "Task {task_id} skipped: {reason}"
+    
+    # Implementation templates
+    TEST_GENERATION_STARTED = "Test generation started for {target}"
+    TEST_GENERATION_COMPLETED = "Test generation completed: {num_tests} tests"
+    IMPLEMENTATION_STARTED = "Implementation started for {target}"
+    IMPLEMENTATION_COMPLETED = "Implementation completed: {num_lines} lines"
+    
+    # Context collection templates
+    CONTEXT_COLLECTION_STARTED = "Context collection started for task {task_id}"
+    CONTEXT_COLLECTION_COMPLETED = "Context collection completed: {num_files} files, {num_tokens} tokens"
+    CONTEXT_CACHE_HIT = "Context cache hit for {file_path}"
+    CONTEXT_CACHE_MISS = "Context cache miss for {file_path}"
+    
+    # Telemetry templates
+    TELEMETRY_OPERATION_TRACKED = "Telemetry tracked: {operation_type} (id: {operation_id})"
+    TELEMETRY_EVENT_RECORDED = "Event recorded: {event_type} - {message}"
+    TELEMETRY_METRIC_RECORDED = "Metric recorded: {metric_name} = {metric_value}"
+    
+    # Checkpoint templates
+    CHECKPOINT_CREATED = "Checkpoint created: {checkpoint_id} ({reason})"
+    CHECKPOINT_RESTORED = "Checkpoint restored: {checkpoint_id}"
+    CHECKPOINT_FAILED = "Checkpoint restore failed: {error}"
+    
+    # Error templates
+    RETRY_ATTEMPT = "Retry attempt {attempt}/{max_attempts} for {operation}"
+    ERROR_RECOVERY_STARTED = "Error recovery started for {error_type}"
+    ERROR_RECOVERY_SUCCEEDED = "Error recovery succeeded for {error_type}"
+    ERROR_RECOVERY_FAILED = "Error recovery failed for {error_type}"
+    
+    # Git operation templates
+    GIT_COMMIT_CREATED = "Git commit created: {commit_hash} - {message}"
+    GIT_OPERATION_FAILED = "Git operation failed: {operation} - {error}"
+    
+    # Resource monitoring templates
+    RESOURCE_WARNING = "Resource warning: {resource_type} at {value}"
+    RESOURCE_ERROR = "Resource error: {resource_type} exceeded limit: {value}"
+
+
+def format_log_message(template: str, **kwargs) -> str:
+    """
+    Format a log message template with provided parameters.
+    
+    Args:
+        template: Message template with {} placeholders
+        **kwargs: Key-value pairs to substitute in template
+        
+    Returns:
+        Formatted log message
+        
+    Example:
+        >>> format_log_message(LogMessageTemplates.TASK_STARTED, 
+        ...                  task_id=42, task_title="Add authentication")
+        "Task 42 started: Add authentication"
+    """
+    try:
+        return template.format(**kwargs)
+    except KeyError as e:
+        # If a placeholder is missing, return template with placeholders
+        return template.format(**{k: f"{{{k}}}" for k in kwargs})
+    except Exception as e:
+        # Fallback to template if formatting fails
+        return template
+
+
+def log_operation_started(logger: logging.Logger, operation_type: str, **context) -> None:
+    """Log operation started event."""
+    message = format_log_message(
+        LogMessageTemplates.OPERATION_STARTED,
+        operation_type=operation_type
+    )
+    logger.info(message, extra=context)
+
+
+def log_operation_completed(logger: logging.Logger, operation_type: str, **context) -> None:
+    """Log operation completed event."""
+    message = format_log_message(
+        LogMessageTemplates.OPERATION_COMPLETED,
+        operation_type=operation_type
+    )
+    logger.info(message, extra=context)
+
+
+def log_operation_failed(logger: logging.Logger, operation_type: str, error: str, **context) -> None:
+    """Log operation failed event."""
+    message = format_log_message(
+        LogMessageTemplates.OPERATION_FAILED,
+        operation_type=operation_type,
+        error=error
+    )
+    logger.error(message, extra=context)
+
+
+def log_task_started(logger: logging.Logger, task_id: int, task_title: str, **context) -> None:
+    """Log task started event."""
+    message = format_log_message(
+        LogMessageTemplates.TASK_STARTED,
+        task_id=task_id,
+        task_title=task_title
+    )
+    logger.info(message, extra=context)
+
+
+def log_task_completed(logger: logging.Logger, task_id: int, **context) -> None:
+    """Log task completed event."""
+    message = format_log_message(
+        LogMessageTemplates.TASK_COMPLETED,
+        task_id=task_id
+    )
+    logger.info(message, extra=context)
+
+
+def log_task_failed(logger: logging.Logger, task_id: int, error: str, **context) -> None:
+    """Log task failed event."""
+    message = format_log_message(
+        LogMessageTemplates.TASK_FAILED,
+        task_id=task_id,
+        error=error
+    )
+    logger.error(message, extra=context)
+
+
+def log_error_with_context(logger: logging.Logger, error: Exception, **context) -> None:
+    """
+    Log an error with full context and stack trace.
+    
+    Args:
+        logger: Logger instance
+        error: Exception object
+        **context: Additional context to include
+        
+    Example:
+        >>> try:
+        ...     risky_operation()
+        ... except Exception as e:
+        ...     log_error_with_context(logger, e, operation_id="abc-123", task_id=42)
+    """
+    error_type = type(error).__name__
+    error_message = str(error)
+    
+    logger.error(
+        f"{error_type}: {error_message}",
+        exc_info=True,  # Include stack trace
+        extra={
+            **context,
+            'error_type': error_type,
+            'error_message': error_message
+        }
+    )
+
+
 class LoggingConfig:
     """
     Centralized logging configuration for L4D V3.
