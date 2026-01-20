@@ -5,6 +5,7 @@ from typing import Dict, List, Optional
 from v1.data.db_manager import log_task, log_activity, fcid_mapping, task_exists
 from v1.logic.context_engine import ContextEngine
 from v1.logic.task_impact_analyzer import TaskImpactAnalyzer
+from v1.logic.complexity_estimator import ComplexityEstimator
 from v1.data.semantic_mapper import SemanticMapper
 from v1.llm_base.provider import LLMProvider
 
@@ -116,11 +117,28 @@ class Planner:
                 )
                 new_tasks_added += 1
 
+        # Calculate context size metrics
+        context_size_chars = len(pruned_context)
+        context_size_lines = pruned_context.count('\n')
+        
+        # Calculate average complexity score
+        avg_complexity = sum(
+            t.get("complexity_score", 0) for t in context_aware_subtasks
+        ) / len(context_aware_subtasks) if context_aware_subtasks else 0
+        
         log_activity(
             summary="Task Breakdown",
             action="PLANNING",
             status="Success",
-            cot_blob=f"Broke down {'project' if not task_to_break else task_to_break['title']} into {len(subtasks)} tasks. Added {new_tasks_added} new tasks. AST analysis identified {len(impact_analysis['affected_files'])} relevant files with {len(impact_analysis['target_classes'])} classes and {len(impact_analysis['target_functions'])} functions.",
+            cot_blob=(
+                f"Broke down {'project' if not task_to_break else task_to_break['title']} into {len(subtasks)} tasks. "
+                f"Added {new_tasks_added} new tasks. "
+                f"AST analysis identified {len(impact_analysis['affected_files'])} relevant files with "
+                f"{len(impact_analysis['target_classes'])} classes and {len(impact_analysis['target_functions'])} functions. "
+                f"Context size: {context_size_chars} chars ({context_size_lines} lines). "
+                f"Average task complexity: {avg_complexity:.1f}. "
+                f"Token usage: {result['usage']['total_tokens']} (prompt: {result['usage']['prompt_tokens']}, completion: {result['usage']['completion_tokens']})."
+            ),
             tokens_used=result["usage"]["total_tokens"],
             prompt_tokens=result["usage"]["prompt_tokens"],
             completion_tokens=result["usage"]["completion_tokens"],
@@ -142,6 +160,8 @@ class Planner:
                     source_code = f.read()
                 
                 mapper = SemanticMapper(source_code)
+                # Also create complexity estimator for each mapper
+                mapper.complexity_estimator = ComplexityEstimator(mapper)
                 self.semantic_mappers[file_path] = mapper
             except Exception:
                 # Skip files that cannot be parsed
@@ -337,6 +357,8 @@ class Planner:
         """
         Validate subtasks for overlap and estimate token impact.
         
+        Enhanced with ComplexityEstimator to validate 30-line limit using AST metrics.
+        
         Args:
             subtasks_data: List of subtasks from LLM
             impact_analysis: Impact analysis result
@@ -357,19 +379,109 @@ class Planner:
             
             task_targets.add(task_key)
             
-            # Ensure estimated_lines is present
-            if "estimated_lines" not in task:
-                # Default estimate based on complexity
-                task["estimated_lines"] = 25
+            # Use ComplexityEstimator to validate 30-line limit
+            validation_result = self._validate_task_complexity(task, impact_analysis)
             
-            # Validate line limit
-            if task["estimated_lines"] > 30:
-                task["estimated_lines"] = 30
-                task["validation_warning"] = "Adjusted to 30-line limit"
+            # Apply validation results
+            task["estimated_lines"] = validation_result["estimated_lines"]
+            task["complexity_score"] = validation_result["complexity_score"]
+            
+            if validation_result["needs_breakdown"]:
+                task["validation_warning"] = validation_result["reasoning"]
+                if task["estimated_lines"] > 30:
+                    task["validation_warning"] += " | Requires breakdown"
             
             validated_tasks.append(task)
         
         return validated_tasks
+    
+    def _validate_task_complexity(
+        self, 
+        task: Dict,
+        impact_analysis: Dict
+    ) -> Dict:
+        """
+        Validate task complexity using ComplexityEstimator.
+        
+        Args:
+            task: Task dictionary from LLM
+            impact_analysis: Impact analysis result
+        
+        Returns:
+            dict: Validation result with:
+                - estimated_lines: Validated line estimate
+                - complexity_score: AST-based complexity score
+                - needs_breakdown: Boolean if task needs breaking down
+                - reasoning: Explanation of validation decision
+        """
+        # Extract target entities for complexity analysis
+        target_entities = []
+        
+        target_class = task.get("target_class")
+        target_function = task.get("target_function")
+        module = task.get("module", "")
+        
+        if target_class:
+            target_entities.append(target_class)
+        if target_function:
+            target_entities.append(target_function)
+        
+        # If no explicit targets, try to infer from title and impact analysis
+        if not target_entities:
+            title = task.get("title", "").lower()
+            
+            # Check against target classes/functions from impact analysis
+            for cls in impact_analysis["target_classes"]:
+                if cls.lower() in title:
+                    target_entities.append(cls)
+                    break
+            
+            for func in impact_analysis["target_functions"]:
+                if func.lower() in title:
+                    target_entities.append(func)
+                    break
+        
+        # Use LLM's estimate as baseline
+        llm_estimate = task.get("estimated_lines", 25)
+        
+        # If we have semantic mappers and target entities, validate with AST
+        if target_entities and self.semantic_mappers:
+            # Find the appropriate semantic mapper
+            semantic_mapper = None
+            for file_info in impact_analysis["affected_files"]:
+                file_path = os.path.join(self.workspace_root, file_info["file_path"])
+                if file_path in self.semantic_mappers:
+                    semantic_mapper = self.semantic_mappers[file_path]
+                    break
+            
+            if semantic_mapper and hasattr(semantic_mapper, 'complexity_estimator'):
+                estimator = semantic_mapper.complexity_estimator
+                
+                # Check if task will exceed 30-line limit
+                limit_check = estimator.will_exceed_line_limit(target_entities, threshold=30)
+                
+                return {
+                    "estimated_lines": min(int(limit_check["estimated_lines"]), 30),
+                    "complexity_score": limit_check["total_complexity"],
+                    "needs_breakdown": limit_check["will_exceed"],
+                    "reasoning": limit_check["reasoning"]
+                }
+        
+        # Fallback: Use LLM estimate with basic validation
+        if llm_estimate > 30:
+            return {
+                "estimated_lines": 30,
+                "complexity_score": 15,  # Conservative estimate
+                "needs_breakdown": True,
+                "reasoning": f"LLM estimate ({llm_estimate} lines) exceeds 30-line limit"
+            }
+        
+        return {
+            "estimated_lines": llm_estimate,
+            "complexity_score": 5,  # Assume simple if no AST data
+            "needs_breakdown": False,
+            "reasoning": "Using LLM estimate (within acceptable range)"
+        }
     
     def _create_task_key(self, task: Dict, impact_analysis: Dict) -> tuple:
         """
