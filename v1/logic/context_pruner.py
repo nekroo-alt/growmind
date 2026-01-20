@@ -1,5 +1,5 @@
 import ast
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional, Set, Tuple
 from dataclasses import dataclass
 
 
@@ -26,23 +26,28 @@ class ContextPruner:
     while excluding implementation details that don't affect the task.
     """
     
-    def __init__(self, workspace_root: str = "."):
+    def __init__(self, workspace_root: str = ".", max_tokens_per_task: int = 8000):
         """
         Initialize the ContextPruner.
         
         Args:
             workspace_root: Root directory of the project
+            max_tokens_per_task: Maximum tokens allowed per task (default: 8000)
         """
         self.workspace_root = workspace_root
+        self.max_tokens_per_task = max_tokens_per_task
+        self.token_usage_tracker = {}  # Track token usage per task
     
     def prune_context(
         self,
         semantic_mappers: Dict[str, object],
         target_entities: List[Dict],
-        dependency_chain: Optional[List[Dict]] = None
+        dependency_chain: Optional[List[Dict]] = None,
+        task_complexity: str = "medium",
+        task_id: Optional[str] = None
     ) -> Dict[str, PrunedContext]:
         """
-        Generate pruned context for target entities.
+        Generate pruned context for target entities with adaptive compression.
         
         Args:
             semantic_mappers: Dictionary mapping file paths to SemanticMapper instances
@@ -52,6 +57,8 @@ class ContextPruner:
                 - file_path: Path to the file
                 - relevance_score: Optional relevance score (0-1)
             dependency_chain: Optional list of dependency nodes from DependencyTraverser
+            task_complexity: Task complexity level ("low", "medium", "high")
+            task_id: Optional task ID for tracking token usage
         
         Returns:
             Dict mapping entity names to PrunedContext objects
@@ -77,17 +84,26 @@ class ContextPruner:
             # Prune based on entity type
             if entity_type == "class":
                 pruned = self._prune_class(
-                    mapper, entity_name, file_path, dep_entities
+                    mapper, entity_name, file_path, dep_entities, task_complexity
                 )
             elif entity_type == "function":
                 pruned = self._prune_function(
-                    mapper, entity_name, file_path, dep_entities
+                    mapper, entity_name, file_path, dep_entities, task_complexity
                 )
             else:
                 continue
             
             if pruned:
                 pruned_contexts[entity_name] = pruned
+        
+        # Apply context budgeting - remove low importance items if over budget
+        pruned_contexts = self._apply_context_budget(
+            pruned_contexts, task_complexity, task_id
+        )
+        
+        # Track token usage if task_id provided
+        if task_id:
+            self._track_token_usage(task_id, pruned_contexts)
         
         return pruned_contexts
     
@@ -96,7 +112,8 @@ class ContextPruner:
         mapper: object,
         function_name: str,
         file_path: str,
-        dep_entities: Set[str]
+        dep_entities: Set[str],
+        task_complexity: str = "medium"
     ) -> Optional[PrunedContext]:
         """
         Extract minimal, informative code for a function.
@@ -155,7 +172,7 @@ class ContextPruner:
         
         # For functions, include signature, docstring, and key logic
         pruned_code = self._build_function_snippet(
-            lines, func_info, key_lines
+            lines, func_info, key_lines, task_complexity
         )
         
         return PrunedContext(
@@ -173,7 +190,8 @@ class ContextPruner:
         mapper: object,
         class_name: str,
         file_path: str,
-        dep_entities: Set[str]
+        dep_entities: Set[str],
+        task_complexity: str = "medium"
     ) -> Optional[PrunedContext]:
         """
         Extract minimal, informative code for a class.
@@ -208,7 +226,7 @@ class ContextPruner:
         
         # Build class snippet
         pruned_code = self._build_class_snippet(
-            lines, class_info, methods_to_include
+            lines, class_info, methods_to_include, task_complexity
         )
         
         # Determine importance and reason
@@ -397,21 +415,27 @@ class ContextPruner:
         self,
         lines: List[str],
         func_info: Dict,
-        key_lines: Dict
+        key_lines: Dict,
+        task_complexity: str = "medium"
     ) -> str:
         """
-        Build a pruned function code snippet.
+        Build a pruned function code snippet with adaptive compression.
         
         Args:
             lines: List of source code lines
             func_info: Function metadata
             key_lines: Key lines info from _extract_key_function_lines
+            task_complexity: Task complexity level for adaptive pruning
         
         Returns:
             Pruned function code as string
         """
         start_line = func_info["start_line"]
         end_line = func_info["end_line"]
+        
+        # For low complexity tasks, use summarized version for well-understood code
+        if task_complexity == "low" and self._is_well_understood_function(func_info):
+            return self._create_function_summary(func_info)
         
         # Always include signature (first line(s) until :)
         signature_lines = []
@@ -426,12 +450,13 @@ class ContextPruner:
         if func_info.get("docstring"):
             docstring_lines.append(func_info["docstring"])
         
-        # Select key logic lines
+        # Select key logic lines - adaptive based on task complexity
         body_lines = []
         key_line_nums = key_lines["key_logic_lines"]
         
-        # Include lines near key logic lines (context window of 2 lines)
-        context_window = 2
+        # Context window varies by task complexity
+        context_window = self._get_context_window(task_complexity)
+        
         for line_num in key_line_nums:
             for offset in range(-context_window, context_window + 1):
                 adj_line = line_num + offset
@@ -460,20 +485,26 @@ class ContextPruner:
         self,
         lines: List[str],
         class_info: Dict,
-        methods_to_include: List[Dict]
+        methods_to_include: List[Dict],
+        task_complexity: str = "medium"
     ) -> str:
         """
-        Build a pruned class code snippet.
+        Build a pruned class code snippet with adaptive compression.
         
         Args:
             lines: List of source code lines
             class_info: Class metadata
             methods_to_include: List of methods to include
+            task_complexity: Task complexity level for adaptive pruning
         
         Returns:
             Pruned class code as string
         """
         start_line = class_info["start_line"]
+        
+        # For low complexity tasks, use summarized version for well-understood classes
+        if task_complexity == "low" and self._is_well_understood_class(class_info):
+            return self._create_class_summary(class_info, methods_to_include)
         
         # Get class definition line
         class_line = lines[start_line - 1]
@@ -489,6 +520,13 @@ class ContextPruner:
         for method in methods_to_include:
             method_start = method["start_line"]
             method_end = method["end_line"]
+            
+            # For low/medium complexity, summarize trivial methods
+            if task_complexity in ["low", "medium"] and self._is_trivial_method(method):
+                summary = self._create_method_summary(method)
+                snippet_lines.append("")
+                snippet_lines.append(f"    # {summary}")
+                continue
             
             # Add blank line before method
             snippet_lines.append("")
@@ -600,3 +638,261 @@ class ContextPruner:
                 )
         
         return result
+    
+    def _apply_context_budget(
+        self,
+        pruned_contexts: Dict[str, PrunedContext],
+        task_complexity: str,
+        task_id: Optional[str]
+    ) -> Dict[str, PrunedContext]:
+        """
+        Apply context budgeting by removing low importance items if over budget.
+        
+        Args:
+            pruned_contexts: Dict of PrunedContext objects
+            task_complexity: Task complexity level
+            task_id: Optional task ID for tracking
+        
+        Returns:
+            Filtered dict of PrunedContext objects within budget
+        """
+        # Calculate current token estimate
+        token_estimate = self._estimate_tokens_from_contexts(pruned_contexts)
+        
+        # Get budget threshold based on task complexity
+        budget_threshold = self._get_budget_threshold(task_complexity)
+        
+        if token_estimate <= budget_threshold:
+            return pruned_contexts
+        
+        # Need to prune - remove low importance items first
+        sorted_contexts = sorted(
+            pruned_contexts.items(),
+            key=lambda x: {
+                "high": 0,
+                "medium": 1,
+                "low": 2
+            }.get(x[1].importance, 3)
+        )
+        
+        filtered_contexts = {}
+        current_tokens = 0
+        
+        for entity_name, ctx in sorted_contexts:
+            ctx_tokens = len(ctx.code) // 4  # Rough token estimation
+            
+            if current_tokens + ctx_tokens <= budget_threshold:
+                filtered_contexts[entity_name] = ctx
+                current_tokens += ctx_tokens
+            elif ctx.importance == "high":
+                # Keep high importance items even if slightly over budget
+                filtered_contexts[entity_name] = ctx
+                current_tokens += ctx_tokens
+        
+        return filtered_contexts
+    
+    def _track_token_usage(self, task_id: str, pruned_contexts: Dict[str, PrunedContext]):
+        """
+        Track token usage for a task.
+        
+        Args:
+            task_id: Task identifier
+            pruned_contexts: Dict of PrunedContext objects
+        """
+        token_estimate = self._estimate_tokens_from_contexts(pruned_contexts)
+        
+        if task_id not in self.token_usage_tracker:
+            self.token_usage_tracker[task_id] = {
+                "total_tokens": 0,
+                "context_count": 0,
+                "high_importance": 0,
+                "medium_importance": 0,
+                "low_importance": 0
+            }
+        
+        self.token_usage_tracker[task_id]["total_tokens"] += token_estimate
+        self.token_usage_tracker[task_id]["context_count"] += len(pruned_contexts)
+        
+        for ctx in pruned_contexts.values():
+            if ctx.importance == "high":
+                self.token_usage_tracker[task_id]["high_importance"] += 1
+            elif ctx.importance == "medium":
+                self.token_usage_tracker[task_id]["medium_importance"] += 1
+            else:
+                self.token_usage_tracker[task_id]["low_importance"] += 1
+    
+    def get_token_usage_stats(self, task_id: str) -> Optional[Dict[str, int]]:
+        """
+        Get token usage statistics for a task.
+        
+        Args:
+            task_id: Task identifier
+        
+        Returns:
+            Dict with token usage stats or None if task not tracked
+        """
+        return self.token_usage_tracker.get(task_id)
+    
+    def _estimate_tokens_from_contexts(self, pruned_contexts: Dict[str, PrunedContext]) -> int:
+        """
+        Estimate total tokens from pruned contexts.
+        
+        Args:
+            pruned_contexts: Dict of PrunedContext objects
+        
+        Returns:
+            Estimated token count
+        """
+        # Rough estimation: ~4 characters per token
+        total_chars = sum(len(ctx.code) for ctx in pruned_contexts.values())
+        return total_chars // 4
+    
+    def _get_budget_threshold(self, task_complexity: str) -> int:
+        """
+        Get token budget threshold based on task complexity.
+        
+        Args:
+            task_complexity: Task complexity level
+        
+        Returns:
+            Token budget threshold
+        """
+        if task_complexity == "low":
+            return self.max_tokens_per_task * 0.5  # 50% of max
+        elif task_complexity == "medium":
+            return self.max_tokens_per_task * 0.75  # 75% of max
+        else:  # high
+            return self.max_tokens_per_task  # 100% of max
+    
+    def _get_context_window(self, task_complexity: str) -> int:
+        """
+        Get context window size based on task complexity.
+        
+        Args:
+            task_complexity: Task complexity level
+        
+        Returns:
+            Context window size (lines of context)
+        """
+        if task_complexity == "low":
+            return 1
+        elif task_complexity == "medium":
+            return 2
+        else:  # high
+            return 3
+    
+    def _is_well_understood_function(self, func_info: Dict) -> bool:
+        """
+        Check if a function is well-understood and can be summarized.
+        
+        Args:
+            func_info: Function metadata
+        
+        Returns:
+            True if function can be summarized
+        """
+        # Small functions with simple logic can be summarized
+        line_count = func_info["end_line"] - func_info["start_line"]
+        
+        # Getter/setter patterns
+        name = func_info["name"].lower()
+        if (name.startswith("get_") or name.startswith("set_") or
+            name.startswith("is_") or name.startswith("has_")):
+            return line_count <= 5
+        
+        # Small, simple functions
+        return line_count <= 8
+    
+    def _is_well_understood_class(self, class_info: Dict) -> bool:
+        """
+        Check if a class is well-understood and can be summarized.
+        
+        Args:
+            class_info: Class metadata
+        
+        Returns:
+            True if class can be summarized
+        """
+        # Classes with few methods and small size
+        method_count = len(class_info.get("methods", []))
+        line_count = class_info["end_line"] - class_info["start_line"]
+        
+        return method_count <= 3 and line_count <= 30
+    
+    def _is_trivial_method(self, method: Dict) -> bool:
+        """
+        Check if a method is trivial and can be summarized.
+        
+        Args:
+            method: Method metadata
+        
+        Returns:
+            True if method is trivial
+        """
+        name = method["name"].lower()
+        line_count = method["end_line"] - method["start_line"]
+        
+        # Getter/setter patterns
+        if (name.startswith("get_") or name.startswith("set_") or
+            name.startswith("is_") or name.startswith("has_")):
+            return line_count <= 5
+        
+        # __str__, __repr__, etc.
+        if name.startswith("__") and name.endswith("__"):
+            return line_count <= 5
+        
+        return False
+    
+    def _create_function_summary(self, func_info: Dict) -> str:
+        """
+        Create a summarized version of a function.
+        
+        Args:
+            func_info: Function metadata
+        
+        Returns:
+            Function summary string
+        """
+        name = func_info["name"]
+        docstring = func_info.get("docstring", f"Function {name}")
+        
+        return f"""# Function: {name}
+# Purpose: {docstring[:100]}
+# Type: Well-understood helper - full implementation omitted for brevity"""
+
+    def _create_class_summary(self, class_info: Dict, methods_to_include: List[Dict]) -> str:
+        """
+        Create a summarized version of a class.
+        
+        Args:
+            class_info: Class metadata
+            methods_to_include: List of methods to include
+        
+        Returns:
+            Class summary string
+        """
+        name = class_info["name"]
+        docstring = class_info.get("docstring", f"Class {name}")
+        
+        method_names = [m["name"] for m in methods_to_include]
+        methods_summary = ", ".join(method_names)
+        
+        return f"""# Class: {name}
+# Purpose: {docstring[:100]}
+# Methods: {methods_summary}
+# Type: Well-understood class - full implementation omitted for brevity"""
+
+    def _create_method_summary(self, method: Dict) -> str:
+        """
+        Create a summarized version of a method.
+        
+        Args:
+            method: Method metadata
+        
+        Returns:
+            Method summary string
+        """
+        name = method["name"]
+        docstring = method.get("docstring", f"Method {name}")
+        
+        return f"Method {name}: {docstring[:80]}..."
