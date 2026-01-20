@@ -125,6 +125,24 @@ class TelemetryManager:
                 """
             )
 
+            # File operations table - tracks file I/O operations (Task 1.4)
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS file_operations (
+                    id TEXT PRIMARY KEY,
+                    operation_id TEXT NOT NULL,
+                    operation_type TEXT NOT NULL,
+                    file_path TEXT,
+                    file_size INTEGER,
+                    content_hash TEXT,
+                    diff_summary TEXT,
+                    timestamp DATETIME NOT NULL,
+                    metadata TEXT,
+                    FOREIGN KEY (operation_id) REFERENCES operations (id) ON DELETE CASCADE
+                )
+                """
+            )
+
             # Create indexes for fast queries
             cursor.execute(
                 """
@@ -160,6 +178,24 @@ class TelemetryManager:
                 """
                 CREATE INDEX IF NOT EXISTS idx_resources_operation 
                 ON resources(operation_id)
+                """
+            )
+            cursor.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_file_operations_operation 
+                ON file_operations(operation_id)
+                """
+            )
+            cursor.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_file_operations_path 
+                ON file_operations(file_path)
+                """
+            )
+            cursor.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_file_operations_timestamp 
+                ON file_operations(timestamp)
                 """
             )
 
@@ -646,6 +682,372 @@ class TelemetryManager:
                 rows = cursor.fetchall()
                 
                 return [dict(row) for row in rows]
+
+    # File Operation Tracking (Task 1.4)
+
+    def record_file_read(
+        self,
+        operation_id: str,
+        file_path: str,
+        file_size: int = None,
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> str:
+        """
+        Record a file read operation.
+        
+        Args:
+            operation_id: ID of the operation
+            file_path: Path to the file that was read
+            file_size: Size of the file in bytes
+            metadata: Additional metadata
+            
+        Returns:
+            File operation ID (UUID string)
+        """
+        with self._lock:
+            import hashlib
+            file_op_id = str(uuid.uuid4())
+            timestamp = datetime.utcnow().isoformat()
+            
+            # Get file size if not provided
+            if file_size is None and os.path.exists(file_path):
+                try:
+                    file_size = os.path.getsize(file_path)
+                except (OSError, IOError):
+                    file_size = 0
+            
+            # Calculate content hash for verification
+            content_hash = None
+            if os.path.exists(file_path):
+                try:
+                    with open(file_path, 'rb') as f:
+                        content_hash = hashlib.sha256(f.read()).hexdigest()[:16]
+                except (OSError, IOError):
+                    pass
+            
+            metadata_json = json.dumps(metadata) if metadata else None
+
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    INSERT INTO file_operations 
+                    (id, operation_id, operation_type, file_path, file_size, content_hash, timestamp, metadata)
+                    VALUES (?, ?, 'read', ?, ?, ?, ?, ?)
+                    """,
+                    (file_op_id, operation_id, file_path, file_size, content_hash, timestamp, metadata_json)
+                )
+                conn.commit()
+
+            return file_op_id
+
+    def record_file_write(
+        self,
+        operation_id: str,
+        file_path: str,
+        file_size: int = None,
+        content_hash: str = None,
+        diff_summary: str = None,
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> str:
+        """
+        Record a file write operation.
+        
+        Args:
+            operation_id: ID of the operation
+            file_path: Path to the file that was written
+            file_size: Size of the file in bytes
+            content_hash: Hash of the file content for verification
+            diff_summary: Summary of changes made to the file
+            metadata: Additional metadata
+            
+        Returns:
+            File operation ID (UUID string)
+        """
+        with self._lock:
+            file_op_id = str(uuid.uuid4())
+            timestamp = datetime.utcnow().isoformat()
+            metadata_json = json.dumps(metadata) if metadata else None
+
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    INSERT INTO file_operations 
+                    (id, operation_id, operation_type, file_path, file_size, content_hash, diff_summary, timestamp, metadata)
+                    VALUES (?, ?, 'write', ?, ?, ?, ?, ?, ?)
+                    """,
+                    (file_op_id, operation_id, file_path, file_size, content_hash, diff_summary, timestamp, metadata_json)
+                )
+                conn.commit()
+
+            return file_op_id
+
+    def record_file_delete(
+        self,
+        operation_id: str,
+        file_path: str,
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> str:
+        """
+        Record a file delete operation.
+        
+        Args:
+            operation_id: ID of the operation
+            file_path: Path to the file that was deleted
+            metadata: Additional metadata
+            
+        Returns:
+            File operation ID (UUID string)
+        """
+        with self._lock:
+            file_op_id = str(uuid.uuid4())
+            timestamp = datetime.utcnow().isoformat()
+            metadata_json = json.dumps(metadata) if metadata else None
+
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    INSERT INTO file_operations 
+                    (id, operation_id, operation_type, file_path, timestamp, metadata)
+                    VALUES (?, ?, 'delete', ?, ?, ?)
+                    """,
+                    (file_op_id, operation_id, file_path, timestamp, metadata_json)
+                )
+                conn.commit()
+
+            return file_op_id
+
+    def record_git_operation(
+        self,
+        operation_id: str,
+        git_op_type: str,
+        details: Optional[Dict[str, Any]] = None,
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> str:
+        """
+        Record a git operation (add, commit, checkout, etc.).
+        
+        Args:
+            operation_id: ID of the operation
+            git_op_type: Type of git operation ('add', 'commit', 'checkout', 'branch', 'merge')
+            details: Operation details (files added, commit hash, etc.)
+            metadata: Additional metadata
+            
+        Returns:
+            File operation ID (UUID string)
+        """
+        with self._lock:
+            file_op_id = str(uuid.uuid4())
+            timestamp = datetime.utcnow().isoformat()
+            
+            # Combine details and metadata
+            combined_metadata = {}
+            if details:
+                combined_metadata.update(details)
+            if metadata:
+                combined_metadata.update(metadata)
+            metadata_json = json.dumps(combined_metadata) if combined_metadata else None
+
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    INSERT INTO file_operations 
+                    (id, operation_id, operation_type, file_path, timestamp, metadata)
+                    VALUES (?, ?, 'git_' || ?, NULL, ?, ?)
+                    """,
+                    (file_op_id, operation_id, git_op_type, timestamp, metadata_json)
+                )
+                conn.commit()
+
+            return file_op_id
+
+    def get_file_operations(
+        self,
+        operation_id: str
+    ) -> List[Dict[str, Any]]:
+        """
+        Get all file operations for an operation.
+        
+        Args:
+            operation_id: ID of the operation
+            
+        Returns:
+            List of file operation dictionaries ordered by timestamp
+        """
+        with self._lock:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    SELECT * FROM file_operations WHERE operation_id = ? ORDER BY timestamp ASC
+                    """,
+                    (operation_id,)
+                )
+                rows = cursor.fetchall()
+                
+                file_ops = []
+                for row in rows:
+                    op = dict(row)
+                    if op["metadata"]:
+                        op["metadata"] = json.loads(op["metadata"])
+                    file_ops.append(op)
+                
+                return file_ops
+
+    def get_file_operations_by_path(
+        self,
+        file_path: str,
+        operation_type: Optional[str] = None,
+        limit: int = 100
+    ) -> List[Dict[str, Any]]:
+        """
+        Get file operations for a specific file path.
+        
+        Args:
+            file_path: Path to the file
+            operation_type: Filter by operation type (read, write, delete, git_*)
+            limit: Maximum results
+            
+        Returns:
+            List of file operation dictionaries ordered by timestamp
+        """
+        with self._lock:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                
+                query = "SELECT * FROM file_operations WHERE file_path = ?"
+                params = [file_path]
+                
+                if operation_type:
+                    if operation_type.startswith('git_'):
+                        query += " AND operation_type = ?"
+                    else:
+                        query += " AND operation_type = ?"
+                    params.append(operation_type)
+                
+                query += " ORDER BY timestamp DESC LIMIT ?"
+                params.append(limit)
+                
+                cursor.execute(query, params)
+                rows = cursor.fetchall()
+                
+                file_ops = []
+                for row in rows:
+                    op = dict(row)
+                    if op["metadata"]:
+                        op["metadata"] = json.loads(op["metadata"])
+                    file_ops.append(op)
+                
+                return file_ops
+
+    def get_modified_files(
+        self,
+        operation_id: str
+    ) -> List[str]:
+        """
+        Get list of files modified during an operation.
+        
+        Args:
+            operation_id: ID of the operation
+            
+        Returns:
+            List of unique file paths
+        """
+        with self._lock:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    SELECT DISTINCT file_path 
+                    FROM file_operations 
+                    WHERE operation_id = ? 
+                    AND file_path IS NOT NULL 
+                    AND operation_type IN ('read', 'write', 'delete')
+                    """,
+                    (operation_id,)
+                )
+                rows = cursor.fetchall()
+                
+                return [row["file_path"] for row in rows if row["file_path"]]
+
+    # File I/O Wrappers for Automatic Telemetry
+
+    @contextmanager
+    def track_file_read(self, operation_id: str, file_path: str, metadata: Optional[Dict[str, Any]] = None):
+        """
+        Context manager to automatically track file reads.
+        
+        Usage:
+            with telemetry.track_file_read(op_id, "file.txt") as f:
+                content = f.read()
+        
+        Args:
+            operation_id: ID of the operation
+            file_path: Path to the file
+            metadata: Additional metadata
+            
+        Yields:
+            File handle
+        """
+        file_size = 0
+        try:
+            if os.path.exists(file_path):
+                file_size = os.path.getsize(file_path)
+            
+            with open(file_path, 'r') as f:
+                yield f
+                self.record_file_read(
+                    operation_id=operation_id,
+                    file_path=file_path,
+                    file_size=file_size,
+                    metadata=metadata
+                )
+        except Exception as e:
+            # Record failed read attempt
+            self.record_file_read(
+                operation_id=operation_id,
+                file_path=file_path,
+                file_size=file_size,
+                metadata={**(metadata or {}), "error": str(e)}
+            )
+            raise
+
+    def tracked_write_file(
+        self,
+        operation_id: str,
+        file_path: str,
+        content: str,
+        metadata: Optional[Dict[str, Any]] = None
+    ):
+        """
+        Write to a file and automatically track the operation.
+        
+        Args:
+            operation_id: ID of the operation
+            file_path: Path to the file
+            content: Content to write
+            metadata: Additional metadata
+        """
+        import hashlib
+        
+        # Calculate content hash
+        content_hash = hashlib.sha256(content.encode()).hexdigest()[:16]
+        
+        # Write file
+        with open(file_path, 'w') as f:
+            f.write(content)
+        
+        # Record operation
+        self.record_file_write(
+            operation_id=operation_id,
+            file_path=file_path,
+            file_size=len(content.encode()),
+            content_hash=content_hash,
+            metadata=metadata
+        )
 
     # Migration Management
 
