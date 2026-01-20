@@ -1,16 +1,27 @@
 """
-Telemetry Manager - Task 1.1: Telemetry Data Schema Design
+Telemetry Manager - Task 1.1 & 1.2: Telemetry Data Schema & Manager Implementation
 
 This module implements the telemetry database schema for comprehensive operation tracking.
 It includes tables for operations, events, metrics, and resources with hierarchical support.
+
+Task 1.2 Features:
+- Context manager API for automatic operation tracking
+- Decorator support for function tracking
+- Thread-safe operations for concurrent access
+- Auto-capture timing and resource usage
+- Query interface for analytics and debugging
 """
 
 import sqlite3
 import uuid
 from datetime import datetime
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Callable
 import json
 import os
+import threading
+import functools
+import time
+from contextlib import contextmanager
 
 # Database path
 TELEMETRY_DB_PATH = "telemetry.db"
@@ -19,6 +30,13 @@ TELEMETRY_DB_PATH = "telemetry.db"
 class TelemetryManager:
     """
     Manages telemetry data storage and retrieval for operation tracking.
+    
+    Features:
+    - Thread-safe operations using locks
+    - Context manager API for automatic tracking
+    - Decorator support for function tracking
+    - Auto-capture timing and metrics
+    - Query interface for analytics
     """
 
     def __init__(self, db_path: str = TELEMETRY_DB_PATH):
@@ -29,6 +47,8 @@ class TelemetryManager:
             db_path: Path to the telemetry database file
         """
         self.db_path = db_path
+        self._lock = threading.RLock()  # Reentrant lock for thread safety
+        self._operation_stack = []  # Track active operations for auto-timing
         self._init_schema()
 
     def _init_schema(self):
@@ -163,7 +183,7 @@ class TelemetryManager:
         Returns:
             SQLite connection object
         """
-        conn = sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.db_path, check_same_thread=False)
         conn.row_factory = sqlite3.Row
         return conn
 
@@ -175,7 +195,8 @@ class TelemetryManager:
         title: str,
         parent_id: Optional[str] = None,
         activity_id: Optional[int] = None,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
+        auto_track: bool = True
     ) -> str:
         """
         Start a new operation and return its ID.
@@ -186,27 +207,37 @@ class TelemetryManager:
             parent_id: ID of parent operation for hierarchy
             activity_id: ID of corresponding activity record
             metadata: Additional metadata as dictionary
+            auto_track: If True, automatically track timing for this operation
             
         Returns:
             Operation ID (UUID string)
         """
-        operation_id = str(uuid.uuid4())
-        start_time = datetime.utcnow().isoformat()
-        metadata_json = json.dumps(metadata) if metadata else None
+        with self._lock:
+            operation_id = str(uuid.uuid4())
+            start_time = datetime.utcnow().isoformat()
+            metadata_json = json.dumps(metadata) if metadata else None
 
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                """
-                INSERT INTO operations 
-                (id, parent_id, operation_type, title, status, start_time, metadata, activity_id)
-                VALUES (?, ?, ?, ?, 'started', ?, ?, ?)
-                """,
-                (operation_id, parent_id, operation_type, title, start_time, metadata_json, activity_id)
-            )
-            conn.commit()
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    INSERT INTO operations 
+                    (id, parent_id, operation_type, title, status, start_time, metadata, activity_id)
+                    VALUES (?, ?, ?, ?, 'started', ?, ?, ?)
+                    """,
+                    (operation_id, parent_id, operation_type, title, start_time, metadata_json, activity_id)
+                )
+                conn.commit()
 
-        return operation_id
+            # Track operation for auto-timing
+            if auto_track:
+                self._operation_stack.append({
+                    'id': operation_id,
+                    'start_time': time.time(),
+                    'type': operation_type
+                })
+
+            return operation_id
 
     def end_operation(
         self,
@@ -222,45 +253,58 @@ class TelemetryManager:
             status: Final status ('completed', 'failed', 'interrupted')
             metadata: Optional metadata to add at end
         """
-        end_time = datetime.utcnow().isoformat()
+        with self._lock:
+            end_time = datetime.utcnow().isoformat()
+            
+            # Calculate duration if auto-tracked
+            elapsed_time = None
+            for i, op in enumerate(self._operation_stack):
+                if op['id'] == operation_id:
+                    elapsed_time = time.time() - op['start_time']
+                    self._operation_stack.pop(i)
+                    break
 
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            
-            if metadata:
-                cursor.execute(
-                    """
-                    SELECT metadata FROM operations WHERE id = ?
-                    """,
-                    (operation_id,)
-                )
-                row = cursor.fetchone()
-                if row and row["metadata"]:
-                    existing_metadata = json.loads(row["metadata"])
-                    existing_metadata.update(metadata)
-                    metadata_json = json.dumps(existing_metadata)
-                else:
-                    metadata_json = json.dumps(metadata)
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
                 
-                cursor.execute(
-                    """
-                    UPDATE operations 
-                    SET status = ?, end_time = ?, metadata = ?
-                    WHERE id = ?
-                    """,
-                    (status, end_time, metadata_json, operation_id)
-                )
-            else:
-                cursor.execute(
-                    """
-                    UPDATE operations 
-                    SET status = ?, end_time = ?
-                    WHERE id = ?
-                    """,
-                    (status, end_time, operation_id)
-                )
-            
-            conn.commit()
+                # Auto-record time_elapsed metric
+                if elapsed_time is not None:
+                    self.record_metric(operation_id, 'time_elapsed', elapsed_time, 'seconds')
+                
+                if metadata:
+                    cursor.execute(
+                        """
+                        SELECT metadata FROM operations WHERE id = ?
+                        """,
+                        (operation_id,)
+                    )
+                    row = cursor.fetchone()
+                    if row and row["metadata"]:
+                        existing_metadata = json.loads(row["metadata"])
+                        existing_metadata.update(metadata)
+                        metadata_json = json.dumps(existing_metadata)
+                    else:
+                        metadata_json = json.dumps(metadata)
+                    
+                    cursor.execute(
+                        """
+                        UPDATE operations 
+                        SET status = ?, end_time = ?, metadata = ?
+                        WHERE id = ?
+                        """,
+                        (status, end_time, metadata_json, operation_id)
+                    )
+                else:
+                    cursor.execute(
+                        """
+                        UPDATE operations 
+                        SET status = ?, end_time = ?
+                        WHERE id = ?
+                        """,
+                        (status, end_time, operation_id)
+                    )
+                
+                conn.commit()
 
     def cancel_operation(self, operation_id: str):
         """
@@ -269,7 +313,8 @@ class TelemetryManager:
         Args:
             operation_id: ID of the operation to cancel
         """
-        self.end_operation(operation_id, "cancelled")
+        with self._lock:
+            self.end_operation(operation_id, "cancelled")
 
     def get_operation(self, operation_id: str) -> Optional[Dict[str, Any]]:
         """
@@ -281,29 +326,31 @@ class TelemetryManager:
         Returns:
             Dictionary with operation details or None if not found
         """
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                """
-                SELECT * FROM operations WHERE id = ?
-                """,
-                (operation_id,)
-            )
-            row = cursor.fetchone()
-            
-            if row:
-                operation = dict(row)
-                if operation["metadata"]:
-                    operation["metadata"] = json.loads(operation["metadata"])
-                return operation
-            return None
+        with self._lock:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    SELECT * FROM operations WHERE id = ?
+                    """,
+                    (operation_id,)
+                )
+                row = cursor.fetchone()
+                
+                if row:
+                    operation = dict(row)
+                    if operation["metadata"]:
+                        operation["metadata"] = json.loads(operation["metadata"])
+                    return operation
+                return None
 
     def list_operations(
         self,
         operation_type: Optional[str] = None,
         status: Optional[str] = None,
         parent_id: Optional[str] = None,
-        limit: int = 100
+        limit: int = 100,
+        offset: int = 0
     ) -> List[Dict[str, Any]]:
         """
         List operations with optional filters.
@@ -313,42 +360,44 @@ class TelemetryManager:
             status: Filter by status
             parent_id: Filter by parent operation ID
             limit: Maximum number of operations to return
+            offset: Number of operations to skip (for pagination)
             
         Returns:
             List of operation dictionaries
         """
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            
-            query = "SELECT * FROM operations WHERE 1=1"
-            params = []
-            
-            if operation_type:
-                query += " AND operation_type = ?"
-                params.append(operation_type)
-            
-            if status:
-                query += " AND status = ?"
-                params.append(status)
-            
-            if parent_id:
-                query += " AND parent_id = ?"
-                params.append(parent_id)
-            
-            query += " ORDER BY start_time DESC LIMIT ?"
-            params.append(limit)
-            
-            cursor.execute(query, params)
-            rows = cursor.fetchall()
-            
-            operations = []
-            for row in rows:
-                operation = dict(row)
-                if operation["metadata"]:
-                    operation["metadata"] = json.loads(operation["metadata"])
-                operations.append(operation)
-            
-            return operations
+        with self._lock:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                
+                query = "SELECT * FROM operations WHERE 1=1"
+                params = []
+                
+                if operation_type:
+                    query += " AND operation_type = ?"
+                    params.append(operation_type)
+                
+                if status:
+                    query += " AND status = ?"
+                    params.append(status)
+                
+                if parent_id:
+                    query += " AND parent_id = ?"
+                    params.append(parent_id)
+                
+                query += " ORDER BY start_time DESC LIMIT ? OFFSET ?"
+                params.extend([limit, offset])
+                
+                cursor.execute(query, params)
+                rows = cursor.fetchall()
+                
+                operations = []
+                for row in rows:
+                    operation = dict(row)
+                    if operation["metadata"]:
+                        operation["metadata"] = json.loads(operation["metadata"])
+                    operations.append(operation)
+                
+                return operations
 
     def get_child_operations(self, parent_id: str) -> List[Dict[str, Any]]:
         """
@@ -360,7 +409,8 @@ class TelemetryManager:
         Returns:
             List of child operation dictionaries
         """
-        return self.list_operations(parent_id=parent_id, limit=1000)
+        with self._lock:
+            return self.list_operations(parent_id=parent_id, limit=1000)
 
     # Event Management
 
@@ -385,23 +435,24 @@ class TelemetryManager:
         Returns:
             Event ID (UUID string)
         """
-        event_id = str(uuid.uuid4())
-        timestamp = datetime.utcnow().isoformat()
-        context_json = json.dumps(context) if context else None
+        with self._lock:
+            event_id = str(uuid.uuid4())
+            timestamp = datetime.utcnow().isoformat()
+            context_json = json.dumps(context) if context else None
 
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                """
-                INSERT INTO events 
-                (id, operation_id, event_type, severity, timestamp, message, context)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                """,
-                (event_id, operation_id, event_type, severity, timestamp, message, context_json)
-            )
-            conn.commit()
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    INSERT INTO events 
+                    (id, operation_id, event_type, severity, timestamp, message, context)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (event_id, operation_id, event_type, severity, timestamp, message, context_json)
+                )
+                conn.commit()
 
-        return event_id
+            return event_id
 
     def get_operation_events(self, operation_id: str) -> List[Dict[str, Any]]:
         """
@@ -413,24 +464,25 @@ class TelemetryManager:
         Returns:
             List of event dictionaries ordered by timestamp
         """
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                """
-                SELECT * FROM events WHERE operation_id = ? ORDER BY timestamp ASC
-                """,
-                (operation_id,)
-            )
-            rows = cursor.fetchall()
-            
-            events = []
-            for row in rows:
-                event = dict(row)
-                if event["context"]:
-                    event["context"] = json.loads(event["context"])
-                events.append(event)
-            
-            return events
+        with self._lock:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    SELECT * FROM events WHERE operation_id = ? ORDER BY timestamp ASC
+                    """,
+                    (operation_id,)
+                )
+                rows = cursor.fetchall()
+                
+                events = []
+                for row in rows:
+                    event = dict(row)
+                    if event["context"]:
+                        event["context"] = json.loads(event["context"])
+                    events.append(event)
+                
+                return events
 
     # Metrics Management
 
@@ -453,22 +505,23 @@ class TelemetryManager:
         Returns:
             Metric ID (UUID string)
         """
-        metric_id = str(uuid.uuid4())
-        timestamp = datetime.utcnow().isoformat()
+        with self._lock:
+            metric_id = str(uuid.uuid4())
+            timestamp = datetime.utcnow().isoformat()
 
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                """
-                INSERT INTO metrics 
-                (id, operation_id, metric_name, metric_value, unit, timestamp)
-                VALUES (?, ?, ?, ?, ?, ?)
-                """,
-                (metric_id, operation_id, metric_name, metric_value, unit, timestamp)
-            )
-            conn.commit()
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    INSERT INTO metrics 
+                    (id, operation_id, metric_name, metric_value, unit, timestamp)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (metric_id, operation_id, metric_name, metric_value, unit, timestamp)
+                )
+                conn.commit()
 
-        return metric_id
+            return metric_id
 
     def get_operation_metrics(self, operation_id: str) -> List[Dict[str, Any]]:
         """
@@ -480,17 +533,18 @@ class TelemetryManager:
         Returns:
             List of metric dictionaries
         """
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                """
-                SELECT * FROM metrics WHERE operation_id = ? ORDER BY timestamp ASC
-                """,
-                (operation_id,)
-            )
-            rows = cursor.fetchall()
-            
-            return [dict(row) for row in rows]
+        with self._lock:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    SELECT * FROM metrics WHERE operation_id = ? ORDER BY timestamp ASC
+                    """,
+                    (operation_id,)
+                )
+                rows = cursor.fetchall()
+                
+                return [dict(row) for row in rows]
 
     def get_metric_summary(
         self,
@@ -507,26 +561,27 @@ class TelemetryManager:
         Returns:
             Dictionary with count, sum, avg, min, max or None if no metrics found
         """
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                """
-                SELECT 
-                    COUNT(*) as count,
-                    SUM(metric_value) as total,
-                    AVG(metric_value) as avg,
-                    MIN(metric_value) as min,
-                    MAX(metric_value) as max
-                FROM metrics 
-                WHERE operation_id = ? AND metric_name = ?
-                """,
-                (operation_id, metric_name)
-            )
-            row = cursor.fetchone()
-            
-            if row and row["count"] > 0:
-                return dict(row)
-            return None
+        with self._lock:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    SELECT 
+                        COUNT(*) as count,
+                        SUM(metric_value) as total,
+                        AVG(metric_value) as avg,
+                        MIN(metric_value) as min,
+                        MAX(metric_value) as max
+                    FROM metrics 
+                    WHERE operation_id = ? AND metric_name = ?
+                    """,
+                    (operation_id, metric_name)
+                )
+                row = cursor.fetchone()
+                
+                if row and row["count"] > 0:
+                    return dict(row)
+                return None
 
     # Resource Management
 
@@ -551,22 +606,23 @@ class TelemetryManager:
         Returns:
             Resource ID (UUID string)
         """
-        resource_id = str(uuid.uuid4())
-        timestamp = datetime.utcnow().isoformat()
+        with self._lock:
+            resource_id = str(uuid.uuid4())
+            timestamp = datetime.utcnow().isoformat()
 
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                """
-                INSERT INTO resources 
-                (id, operation_id, resource_type, resource_name, value, unit, timestamp)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                """,
-                (resource_id, operation_id, resource_type, resource_name, value, unit, timestamp)
-            )
-            conn.commit()
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    INSERT INTO resources 
+                    (id, operation_id, resource_type, resource_name, value, unit, timestamp)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (resource_id, operation_id, resource_type, resource_name, value, unit, timestamp)
+                )
+                conn.commit()
 
-        return resource_id
+            return resource_id
 
     def get_operation_resources(self, operation_id: str) -> List[Dict[str, Any]]:
         """
@@ -578,17 +634,18 @@ class TelemetryManager:
         Returns:
             List of resource dictionaries ordered by timestamp
         """
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                """
-                SELECT * FROM resources WHERE operation_id = ? ORDER BY timestamp ASC
-                """,
-                (operation_id,)
-            )
-            rows = cursor.fetchall()
-            
-            return [dict(row) for row in rows]
+        with self._lock:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    SELECT * FROM resources WHERE operation_id = ? ORDER BY timestamp ASC
+                    """,
+                    (operation_id,)
+                )
+                rows = cursor.fetchall()
+                
+                return [dict(row) for row in rows]
 
     # Migration Management
 
@@ -601,30 +658,31 @@ class TelemetryManager:
             description: Human-readable description of migration
             migration_sql: SQL to execute for the migration
         """
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            
-            # Check if migration already applied
-            cursor.execute(
-                "SELECT 1 FROM migrations WHERE version = ?",
-                (version,)
-            )
-            if cursor.fetchone():
-                return  # Already applied
-            
-            # Execute migration
-            cursor.executescript(migration_sql)
-            
-            # Record migration
-            cursor.execute(
-                """
-                INSERT INTO migrations (version, description)
-                VALUES (?, ?)
-                """,
-                (version, description)
-            )
-            
-            conn.commit()
+        with self._lock:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Check if migration already applied
+                cursor.execute(
+                    "SELECT 1 FROM migrations WHERE version = ?",
+                    (version,)
+                )
+                if cursor.fetchone():
+                    return  # Already applied
+                
+                # Execute migration
+                cursor.executescript(migration_sql)
+                
+                # Record migration
+                cursor.execute(
+                    """
+                    INSERT INTO migrations (version, description)
+                    VALUES (?, ?)
+                    """,
+                    (version, description)
+                )
+                
+                conn.commit()
 
     def get_migration_version(self) -> int:
         """
@@ -633,25 +691,343 @@ class TelemetryManager:
         Returns:
             Highest migration version applied
         """
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT MAX(version) FROM migrations")
-            row = cursor.fetchone()
-            return row[0] if row[0] else 0
+        with self._lock:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT MAX(version) FROM migrations")
+                row = cursor.fetchone()
+                return row[0] if row[0] else 0
+
+    # Context Manager API
+
+    @contextmanager
+    def track_operation(
+        self,
+        operation_type: str,
+        title: str,
+        parent_id: Optional[str] = None,
+        activity_id: Optional[int] = None,
+        metadata: Optional[Dict[str, Any]] = None
+    ):
+        """
+        Context manager for automatic operation tracking.
+        
+        Usage:
+            with telemetry.track_operation("implementation", "Task 42") as op:
+                op.record_event("test_generation", "info", "Starting test generation")
+                # ... perform work ...
+                op.record_metric("tokens_used", 1250)
+        
+        Args:
+            operation_type: Type of operation
+            title: Human-readable title
+            parent_id: Optional parent operation ID
+            activity_id: Optional activity ID
+            metadata: Optional metadata
+            
+        Yields:
+            Operation context manager
+        """
+        operation_id = self.start_operation(
+            operation_type=operation_type,
+            title=title,
+            parent_id=parent_id,
+            activity_id=activity_id,
+            metadata=metadata
+        )
+        
+        class OperationContext:
+            def __init__(self, telemetry_manager, operation_id):
+                self.telemetry = telemetry_manager
+                self.operation_id = operation_id
+            
+            def record_event(self, event_type, severity, message, context=None):
+                """Record an event for this operation"""
+                self.telemetry.record_event(
+                    self.operation_id, event_type, severity, message, context
+                )
+            
+            def record_metric(self, metric_name, metric_value, unit=None):
+                """Record a metric for this operation"""
+                self.telemetry.record_metric(
+                    self.operation_id, metric_name, metric_value, unit
+                )
+            
+            def record_resource(self, resource_type, value, unit, name=None):
+                """Record resource usage for this operation"""
+                self.telemetry.record_resource_usage(
+                    self.operation_id, resource_type, value, unit, name
+                )
+        
+        op_context = OperationContext(self, operation_id)
+        
+        try:
+            yield op_context
+            self.end_operation(operation_id, "completed")
+        except Exception as e:
+            self.record_event(
+                operation_id,
+                "failed",
+                "error",
+                f"Operation failed: {str(e)}",
+                {"exception_type": type(e).__name__}
+            )
+            self.end_operation(operation_id, "failed", {"error": str(e)})
+            raise
+
+    # Decorator Support
+
+    def track_decorator(self, operation_type: Optional[str] = None):
+        """
+        Decorator for automatic function tracking.
+        
+        Usage:
+            @telemetry.track_decorator()
+            def my_function():
+                pass
+            
+            @telemetry.track_decorator(operation_type="custom_type")
+            def my_function():
+                pass
+        
+        Args:
+            operation_type: Optional operation type (defaults to function name)
+            
+        Returns:
+            Decorator function
+        """
+        def decorator(func: Callable):
+            @functools.wraps(func)
+            def wrapper(*args, **kwargs):
+                # Determine operation type
+                op_type = operation_type or func.__name__
+                title = f"{func.__name__}"
+                
+                # Start operation
+                operation_id = self.start_operation(
+                    operation_type=op_type,
+                    title=title,
+                    metadata={
+                        "function": func.__name__,
+                        "module": func.__module__
+                    }
+                )
+                
+                try:
+                    result = func(*args, **kwargs)
+                    self.end_operation(operation_id, "completed")
+                    return result
+                except Exception as e:
+                    self.record_event(
+                        operation_id,
+                        "failed",
+                        "error",
+                        f"Function failed: {str(e)}",
+                        {"exception_type": type(e).__name__}
+                    )
+                    self.end_operation(operation_id, "failed", {"error": str(e)})
+                    raise
+            
+            return wrapper
+        return decorator
+
+    # Query Interface for Analytics
+
+    def query_operations(
+        self,
+        operation_type: Optional[str] = None,
+        status: Optional[str] = None,
+        start_time: Optional[str] = None,
+        end_time: Optional[str] = None,
+        limit: int = 100
+    ) -> List[Dict[str, Any]]:
+        """
+        Query operations with advanced filters for analytics.
+        
+        Args:
+            operation_type: Filter by operation type
+            status: Filter by status
+            start_time: Start time filter (ISO format)
+            end_time: End time filter (ISO format)
+            limit: Maximum results
+            
+        Returns:
+            List of operation dictionaries
+        """
+        with self._lock:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                
+                query = "SELECT * FROM operations WHERE 1=1"
+                params = []
+                
+                if operation_type:
+                    query += " AND operation_type = ?"
+                    params.append(operation_type)
+                
+                if status:
+                    query += " AND status = ?"
+                    params.append(status)
+                
+                if start_time:
+                    query += " AND start_time >= ?"
+                    params.append(start_time)
+                
+                if end_time:
+                    query += " AND start_time <= ?"
+                    params.append(end_time)
+                
+                query += " ORDER BY start_time DESC LIMIT ?"
+                params.append(limit)
+                
+                cursor.execute(query, params)
+                rows = cursor.fetchall()
+                
+                operations = []
+                for row in rows:
+                    operation = dict(row)
+                    if operation["metadata"]:
+                        operation["metadata"] = json.loads(operation["metadata"])
+                    operations.append(operation)
+                
+                return operations
+
+    def get_operation_stats(
+        self,
+        operation_type: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Get statistics for operations by type.
+        
+        Args:
+            operation_type: Filter by operation type (optional)
+            
+        Returns:
+            Dictionary with statistics: count, avg_duration, success_rate, etc.
+        """
+        with self._lock:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                
+                query = "SELECT COUNT(*) as count FROM operations WHERE 1=1"
+                params = []
+                
+                if operation_type:
+                    query += " AND operation_type = ?"
+                    params.append(operation_type)
+                
+                cursor.execute(query, params)
+                count = cursor.fetchone()["count"]
+                
+                if count == 0:
+                    return {"count": 0}
+                
+                # Get completion status breakdown
+                status_query = "SELECT status, COUNT(*) as count FROM operations WHERE 1=1"
+                status_params = list(params)
+                status_query += " GROUP BY status"
+                cursor.execute(status_query, status_params)
+                status_rows = cursor.fetchall()
+                
+                status_breakdown = {row["status"]: row["count"] for row in status_rows}
+                
+                # Calculate success rate
+                success_count = status_breakdown.get("completed", 0)
+                success_rate = (success_count / count) * 100 if count > 0 else 0
+                
+                # Get average duration
+                duration_query = """
+                    SELECT AVG(
+                        CAST((julianday(end_time) - julianday(start_time)) * 86400 AS REAL)
+                    ) as avg_duration
+                    FROM operations
+                    WHERE end_time IS NOT NULL
+                """
+                duration_params = []
+                if operation_type:
+                    duration_query += " AND operation_type = ?"
+                    duration_params.append(operation_type)
+                
+                cursor.execute(duration_query, duration_params)
+                duration_row = cursor.fetchone()
+                avg_duration = duration_row["avg_duration"] if duration_row["avg_duration"] else 0
+                
+                return {
+                    "count": count,
+                    "avg_duration_seconds": round(avg_duration, 2),
+                    "success_rate_percent": round(success_rate, 2),
+                    "status_breakdown": status_breakdown
+                }
+
+    def search_events(
+        self,
+        event_type: Optional[str] = None,
+        severity: Optional[str] = None,
+        message_contains: Optional[str] = None,
+        limit: int = 100
+    ) -> List[Dict[str, Any]]:
+        """
+        Search events by various criteria.
+        
+        Args:
+            event_type: Filter by event type
+            severity: Filter by severity
+            message_contains: Filter by message content
+            limit: Maximum results
+            
+        Returns:
+            List of event dictionaries
+        """
+        with self._lock:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                
+                query = "SELECT * FROM events WHERE 1=1"
+                params = []
+                
+                if event_type:
+                    query += " AND event_type = ?"
+                    params.append(event_type)
+                
+                if severity:
+                    query += " AND severity = ?"
+                    params.append(severity)
+                
+                if message_contains:
+                    query += " AND message LIKE ?"
+                    params.append(f"%{message_contains}%")
+                
+                query += " ORDER BY timestamp DESC LIMIT ?"
+                params.append(limit)
+                
+                cursor.execute(query, params)
+                rows = cursor.fetchall()
+                
+                events = []
+                for row in rows:
+                    event = dict(row)
+                    if event["context"]:
+                        event["context"] = json.loads(event["context"])
+                    events.append(event)
+                
+                return events
 
 
 # Global telemetry manager instance
 _telemetry_manager = None
+_telemetry_lock = threading.Lock()
 
 
 def get_telemetry_manager() -> TelemetryManager:
     """
-    Get the global telemetry manager instance.
+    Get the global telemetry manager instance (thread-safe singleton).
     
     Returns:
         TelemetryManager instance
     """
     global _telemetry_manager
     if _telemetry_manager is None:
-        _telemetry_manager = TelemetryManager()
+        with _telemetry_lock:
+            if _telemetry_manager is None:
+                _telemetry_manager = TelemetryManager()
     return _telemetry_manager
