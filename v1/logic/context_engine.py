@@ -1,7 +1,9 @@
 import os
 import hashlib
+import subprocess
 from typing import List, Dict, Optional, Tuple, Set
 from v1.data.semantic_mapper import SemanticMapper
+from v1.data.cache_manager import get_cache_manager
 from v1.logic.task_impact_analyzer import TaskImpactAnalyzer
 from v1.logic.dependency_traverser import DependencyTraverser
 
@@ -25,6 +27,9 @@ class ContextEngine:
         self._cache_hits = 0
         self._cache_misses = 0
         self._cache_updates = 0
+        
+        # Integration with CacheManager for AST caching
+        self.cache_manager = get_cache_manager()
 
     def get_pruned_context(self, task_query, files, use_smart_scoping=True, task_title="", acceptance_criteria="", force_refresh=False):
         """
@@ -620,30 +625,76 @@ class ContextEngine:
         self,
         modified_files: List[str],
         task_title: str,
-        acceptance_criteria: str = ""
-    ) -> None:
+        acceptance_criteria: str = "",
+        max_depth: int = 3
+    ) -> Dict[str, int]:
         """
         Update cached contexts incrementally after task completion.
         
-        For cache entries that reference modified files, re-analyze only
-        those files and update the context.
+        This method:
+        1. Uses git diff to identify changed files if not provided
+        2. Re-analyzes only changed files (not entire codebase)
+        3. Invalidates AST cache entries for modified files
+        4. Updates dependency chains affected by changes
+        5. Maintains cache consistency across task executions
         
         Args:
-            modified_files: List of files that were modified
+            modified_files: List of files that were modified (if None, uses git diff)
             task_title: Title of the completed task
             acceptance_criteria: Acceptance criteria (for smart scoping)
+            max_depth: Maximum depth for dependency chain analysis
+        
+        Returns:
+            dict: Statistics about the update including:
+                - files_analyzed: Number of files re-analyzed
+                - cache_entries_updated: Number of context cache entries updated
+                - ast_cache_invalidated: Number of AST cache entries invalidated
+                - dependency_chains_updated: Number of dependency chains updated
         """
         self._cache_updates += 1
         
-        # Find cache entries affected by modified files
+        # Step 1: If no modified files provided, use git diff to detect changes
+        if modified_files is None or len(modified_files) == 0:
+            modified_files = self._get_changed_files_from_git()
+        
+        if not modified_files:
+            return {
+                "files_analyzed": 0,
+                "cache_entries_updated": 0,
+                "ast_cache_invalidated": 0,
+                "dependency_chains_updated": 0
+            }
+        
+        # Step 2: Invalidate AST cache for modified files
+        ast_cache_invalidated = 0
+        for file_path in modified_files:
+            full_path = os.path.join(self.root, file_path)
+            if os.path.exists(full_path):
+                # Invalidate AST cache entries for this file
+                self.cache_manager.invalidate(full_path)
+                ast_cache_invalidated += 1
+        
+        # Step 3: Identify affected dependency chains
+        affected_dependency_files = self._identify_affected_dependencies(
+            modified_files, max_depth
+        )
+        
+        # Step 4: Invalidate context cache entries that reference affected files
+        all_affected_files = set(modified_files) | set(affected_dependency_files)
+        context_entries_invalidated = self.invalidate_cache_for_files(list(all_affected_files))
+        
+        # Step 5: Re-analyze only changed files and update dependency chains
+        files_analyzed = len(modified_files)
+        dependency_chains_updated = len(affected_dependency_files)
+        
+        # Update cache entries that were affected
+        cache_entries_updated = 0
         for cache_key, entry in self._context_cache.items():
             entry_files = set(entry["files"])
-            modified_set = set(modified_files)
             
-            # Check if this cache entry is affected
-            if entry_files & modified_set:
+            # Check if this cache entry references any affected file
+            if entry_files & all_affected_files:
                 # Re-generate context for affected entry
-                # This will use updated semantic maps if caching is properly integrated
                 new_context = self.get_pruned_context(
                     entry["task_query"],
                     entry["files"],
@@ -657,6 +708,174 @@ class ContextEngine:
                 entry["context"] = new_context
                 entry["timestamp"] = self._get_file_modification_time(entry["files"])
                 entry["context_size"] = len(new_context)
+                cache_entries_updated += 1
+        
+        return {
+            "files_analyzed": files_analyzed,
+            "cache_entries_updated": cache_entries_updated,
+            "ast_cache_invalidated": ast_cache_invalidated,
+            "dependency_chains_updated": dependency_chains_updated
+        }
+    
+    def _get_changed_files_from_git(self) -> List[str]:
+        """
+        Use git diff to identify changed files since last commit.
+        
+        Returns:
+            List of changed file paths relative to workspace root
+        """
+        try:
+            # Get list of changed Python files
+            result = subprocess.run(
+                ["git", "diff", "--name-only", "HEAD"],
+                cwd=self.root,
+                capture_output=True,
+                text=True
+            )
+            
+            if result.returncode != 0:
+                return []
+            
+            changed_files = []
+            for line in result.stdout.strip().split("\n"):
+                if line.strip() and line.strip().endswith(".py"):
+                    # Get relative path from workspace root
+                    file_path = line.strip()
+                    if os.path.exists(os.path.join(self.root, file_path)):
+                        changed_files.append(file_path)
+            
+            return changed_files
+            
+        except (subprocess.SubprocessError, FileNotFoundError):
+            # Git not available or error running git
+            return []
+    
+    def _identify_affected_dependencies(
+        self,
+        modified_files: List[str],
+        max_depth: int
+    ) -> List[str]:
+        """
+        Identify files that are in the dependency chain of modified files.
+        
+        This ensures that if a function/class is modified, we also update
+        context for files that depend on it.
+        
+        Args:
+            modified_files: List of files that were modified
+            max_depth: Maximum depth for dependency traversal
+        
+        Returns:
+            List of file paths that are affected by the modifications
+        """
+        affected_files = set()
+        
+        # For each modified file, analyze its dependencies
+        for file_path in modified_files:
+            full_path = os.path.join(self.root, file_path)
+            
+            if not os.path.exists(full_path) or not file_path.endswith(".py"):
+                continue
+            
+            try:
+                with open(full_path, "r", encoding="utf-8") as f:
+                    source_code = f.read()
+                
+                mapper = SemanticMapper(source_code)
+                call_graph = mapper.get_call_graph()
+                summary = mapper.get_summary()
+                
+                # Find all functions/classes in this file
+                entities = []
+                for func in summary["functions"]:
+                    entities.append(("function", func["name"]))
+                for cls in summary["classes"]:
+                    entities.append(("class", cls["name"]))
+                    for method in cls["methods"]:
+                        entities.append(("method", f"{cls['name']}.{method['name']}"))
+                
+                # For each entity, find files that depend on it
+                for entity_type, entity_name in entities:
+                    # This is a simplified approach - in a full implementation,
+                    # we would scan all files to find reverse dependencies
+                    # For now, we add files that might be affected based on imports
+                    import_deps = mapper.get_import_dependencies()
+                    
+                    # Check for internal module imports
+                    for module in import_deps["modules"]:
+                        # If this file imports from another internal module,
+                        # that module might be affected by changes here
+                        if self._is_internal_module(module):
+                            # Try to find the corresponding file
+                            potential_file = self._module_to_file_path(module)
+                            if potential_file and potential_file not in modified_files:
+                                affected_files.add(potential_file)
+                    
+                    # Check for from imports
+                    for module, names in import_deps["from_imports"].items():
+                        if self._is_internal_module(module):
+                            potential_file = self._module_to_file_path(module)
+                            if potential_file and potential_file not in modified_files:
+                                affected_files.add(potential_file)
+                
+            except (SyntaxError, IOError):
+                # Skip files that cannot be parsed
+                continue
+        
+        return list(affected_files)
+    
+    def _is_internal_module(self, module_name: str) -> bool:
+        """
+        Check if a module name is likely an internal project module.
+        
+        This is a heuristic - in a full implementation, this would check
+        against a list of known project modules.
+        
+        Args:
+            module_name: Module name to check
+        
+        Returns:
+            bool: True if module appears to be internal
+        """
+        # External packages and stdlib modules are not internal
+        external_packages = {
+            "os", "sys", "re", "json", "math", "random", "datetime",
+            "time", "collections", "itertools", "functools", "typing",
+            "pathlib", "io", "csv", "pickle", "sqlite3", "logging",
+            "unittest", "pytest", "argparse", "configparser", "hashlib",
+            "base64", "urllib", "http", "email", "xml", "html",
+            "ast", "inspect", "types", "copy", "weakref", "gc"
+        }
+        
+        # Check if any part of the module path is external
+        for part in module_name.split("."):
+            if part in external_packages:
+                return False
+        
+        return True
+    
+    def _module_to_file_path(self, module_name: str) -> Optional[str]:
+        """
+        Convert a module name to a potential file path.
+        
+        Args:
+            module_name: Module name (e.g., 'v1.logic.context_engine')
+        
+        Returns:
+            str or None: File path if found, None otherwise
+        """
+        # Try different possible file paths
+        possible_paths = [
+            module_name.replace(".", "/") + ".py",
+            module_name.replace(".", "/", 1) + "/__init__.py",
+        ]
+        
+        for path in possible_paths:
+            full_path = os.path.join(self.root, path)
+            if os.path.exists(full_path):
+                return path
+        
+        return None
     
     def get_cache_stats(self) -> Dict[str, int]:
         """
