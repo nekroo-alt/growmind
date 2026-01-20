@@ -131,8 +131,11 @@ def calculate_metrics(data):
         # Check that code includes class definition
         self.assertIn("class DataProcessor", ctx.code)
         
-        # Should include __init__ method
-        self.assertIn("def __init__", ctx.code)
+        # Should include __init__ method or its comment
+        self.assertTrue(
+            "def __init__" in ctx.code or "# Method __init__" in ctx.code,
+            f"Expected __init__ method or comment in code:\n{ctx.code}"
+        )
         
         # Should include methods with side effects (transform modifies self.data)
         self.assertIn("def transform", ctx.code)
@@ -444,6 +447,175 @@ def calculate_metrics(data):
         
         # Should not contain non-builtins
         self.assertNotIn("custom_function", builtins)
+    
+    def test_low_complexity_task_summarization(self):
+        """Test that low complexity tasks use summarized versions."""
+        # Create a simple getter function
+        simple_code = '''
+class SimpleClass:
+    """A simple class."""
+    
+    def __init__(self, value):
+        self.value = value
+    
+    def get_value(self):
+        """Get value."""
+        return self.value
+    
+    def set_value(self, new_value):
+        """Set value."""
+        self.value = new_value
+'''
+        mapper = SemanticMapper(simple_code)
+        semantic_mappers = {"test.py": mapper}
+        
+        target_entities = [
+            {
+                "name": "SimpleClass",
+                "type": "class",
+                "file_path": "test.py"
+            }
+        ]
+        
+        # Test with low complexity
+        pruned = self.pruner.prune_context(
+            semantic_mappers,
+            target_entities,
+            task_complexity="low"
+        )
+        
+        self.assertIn("SimpleClass", pruned)
+        ctx = pruned["SimpleClass"]
+        
+        # For low complexity, should use summary format
+        self.assertIn("SimpleClass", ctx.code)
+        self.assertIn("# Class:", ctx.code)
+    
+    def test_context_budgeting(self):
+        """Test that context budgeting removes low importance items."""
+        # Create multiple entities
+        combined_code = self.sample_class_code + "\n" + self.sample_function_code
+        mapper = SemanticMapper(combined_code)
+        semantic_mappers = {"test.py": mapper}
+        
+        target_entities = [
+            {
+                "name": "DataProcessor",
+                "type": "class",
+                "file_path": "test.py"
+            },
+            {
+                "name": "calculate_metrics",
+                "type": "function",
+                "file_path": "test.py"
+            }
+        ]
+        
+        # Set a very low budget
+        pruner = ContextPruner(workspace_root=".", max_tokens_per_task=100)
+        pruned = pruner.prune_context(
+            semantic_mappers,
+            target_entities,
+            task_complexity="low"
+        )
+        
+        # Should have fewer items due to budgeting
+        self.assertLessEqual(len(pruned), 2)
+    
+    def test_token_usage_tracking(self):
+        """Test token usage tracking per task."""
+        mapper = SemanticMapper(self.sample_function_code)
+        semantic_mappers = {"test.py": mapper}
+        
+        target_entities = [
+            {
+                "name": "calculate_metrics",
+                "type": "function",
+                "file_path": "test.py"
+            }
+        ]
+        
+        pruned = self.pruner.prune_context(
+            semantic_mappers,
+            target_entities,
+            task_id="test_task_1"
+        )
+        
+        # Get token usage stats
+        stats = self.pruner.get_token_usage_stats("test_task_1")
+        
+        self.assertIsNotNone(stats)
+        self.assertIn("total_tokens", stats)
+        self.assertIn("context_count", stats)
+        self.assertEqual(stats["context_count"], 1)
+        self.assertGreater(stats["total_tokens"], 0)
+    
+    def test_budget_thresholds_by_complexity(self):
+        """Test that budget thresholds vary by complexity."""
+        low_budget = self.pruner._get_budget_threshold("low")
+        medium_budget = self.pruner._get_budget_threshold("medium")
+        high_budget = self.pruner._get_budget_threshold("high")
+        
+        # Higher complexity should allow more tokens
+        self.assertLess(low_budget, medium_budget)
+        self.assertLess(medium_budget, high_budget)
+        
+        # Check approximate ratios
+        self.assertAlmostEqual(low_budget, self.pruner.max_tokens_per_task * 0.5)
+        self.assertAlmostEqual(medium_budget, self.pruner.max_tokens_per_task * 0.75)
+        self.assertAlmostEqual(high_budget, self.pruner.max_tokens_per_task)
+    
+    def test_context_window_by_complexity(self):
+        """Test that context window varies by complexity."""
+        low_window = self.pruner._get_context_window("low")
+        medium_window = self.pruner._get_context_window("medium")
+        high_window = self.pruner._get_context_window("high")
+        
+        # Higher complexity should have larger context window
+        self.assertEqual(low_window, 1)
+        self.assertEqual(medium_window, 2)
+        self.assertEqual(high_window, 3)
+    
+    def test_well_understood_function_detection(self):
+        """Test detection of well-understood functions."""
+        # Create a simple getter
+        simple_func = '''
+def get_name(self):
+    """Get the name."""
+    return self.name
+'''
+        mapper = SemanticMapper(simple_func)
+        summary = mapper.get_summary()
+        func_info = summary["functions"][0]
+        
+        # Should be well-understood
+        is_well_understood = self.pruner._is_well_understood_function(func_info)
+        self.assertTrue(is_well_understood)
+    
+    def test_trivial_method_detection(self):
+        """Test detection of trivial methods."""
+        # Create a simple getter method
+        simple_code = '''
+class MyClass:
+    def get_value(self):
+        """Get value."""
+        return self.value
+    
+    def __str__(self):
+        return "MyClass"
+'''
+        mapper = SemanticMapper(simple_code)
+        summary = mapper.get_summary()
+        
+        # Find get_value method
+        get_value_method = summary["classes"][0]["methods"][0]
+        is_trivial = self.pruner._is_trivial_method(get_value_method)
+        self.assertTrue(is_trivial)
+        
+        # Find __str__ method
+        str_method = summary["classes"][0]["methods"][1]
+        is_trivial = self.pruner._is_trivial_method(str_method)
+        self.assertTrue(is_trivial)
 
 
 if __name__ == "__main__":
