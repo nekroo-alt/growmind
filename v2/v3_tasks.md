@@ -454,7 +454,7 @@ This document defines a series of tasks to enhance L4D v2 with comprehensive tel
 
 ---
 
-### Task 3.6: Automatic Checkpoint Policy
+### Task 3.6: Automatic Checkpoint Policy ✅ **COMPLETE**
 
 **Title**: Define and implement automatic checkpoint policy
 
