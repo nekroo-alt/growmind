@@ -3,12 +3,24 @@ Error Classification and Taxonomy for L4D V3
 
 This module defines a comprehensive error taxonomy for better error handling,
 categorization, and recovery strategies across the L4D system.
+
+It also implements retry logic with exponential backoff for transient errors.
 """
 
 from enum import Enum
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Callable, TypeVar, List, Tuple
 from datetime import datetime
 import traceback
+import time
+import random
+import logging
+from functools import wraps
+from threading import RLock
+
+# Set up logger
+logger = logging.getLogger(__name__)
+
+T = TypeVar('T')
 
 
 class ErrorCategory(Enum):
@@ -356,6 +368,510 @@ class SystemResourceExhaustedError(L4DError):
             recovery_strategy="Free up resources or close other applications",
             **kwargs
         )
+
+
+class MaxRetriesExceededError(L4DError):
+    """Error raised when max retry attempts are exceeded."""
+    
+    def __init__(self, message: str = "Max retry attempts exceeded", **kwargs):
+        super().__init__(
+            message=message,
+            code=ErrorCode.UNKNOWN_ERROR,
+            category=ErrorCategory.PERMANENT,
+            source=ErrorSource.SYSTEM,
+            severity=ErrorSeverity.ERROR,
+            recovery_strategy="Check underlying error and adjust retry policy",
+            **kwargs
+        )
+
+
+# ============================================================================
+# Retry Logic with Exponential Backoff
+# ============================================================================
+
+class RetryConfig:
+    """Configuration for retry behavior."""
+    
+    def __init__(
+        self,
+        max_attempts: int = 3,
+        base_delay: float = 1.0,
+        max_delay: float = 60.0,
+        exponential_base: float = 2.0,
+        jitter: bool = True,
+        jitter_factor: float = 0.5,
+        retry_on_errors: Optional[List[ErrorCode]] = None,
+        retry_on_categories: Optional[List[ErrorCategory]] = None
+    ):
+        """
+        Initialize retry configuration.
+        
+        Args:
+            max_attempts: Maximum number of retry attempts (including first attempt)
+            base_delay: Base delay in seconds before first retry
+            max_delay: Maximum delay in seconds between retries
+            exponential_base: Base for exponential backoff (default: 2.0)
+            jitter: Whether to add random jitter to delays
+            jitter_factor: Jitter factor (0.5 = ±50%)
+            retry_on_errors: List of specific error codes to retry on (None = all retryable)
+            retry_on_categories: List of error categories to retry on (None = all retryable)
+        """
+        self.max_attempts = max_attempts
+        self.base_delay = base_delay
+        self.max_delay = max_delay
+        self.exponential_base = exponential_base
+        self.jitter = jitter
+        self.jitter_factor = jitter_factor
+        self.retry_on_errors = retry_on_errors or []
+        self.retry_on_categories = retry_on_categories or []
+        self._lock = RLock()
+    
+    def should_retry(self, error: L4DError) -> bool:
+        """
+        Determine if an error should be retried.
+        
+        Args:
+            error: The error to check
+            
+        Returns:
+            True if error should be retried, False otherwise
+        """
+        with self._lock:
+            # Check if error is retryable by category
+            if self.retry_on_categories:
+                if error.category not in self.retry_on_categories:
+                    return False
+            elif not is_retryable(error):
+                return False
+            
+            # Check if error code is in retry list
+            if self.retry_on_errors:
+                return error.code in self.retry_on_errors
+            
+            return True
+    
+    def calculate_delay(self, attempt: int) -> float:
+        """
+        Calculate delay for a retry attempt using exponential backoff.
+        
+        Args:
+            attempt: Attempt number (0-based)
+            
+        Returns:
+            Delay in seconds
+        """
+        with self._lock:
+            # Calculate exponential backoff delay
+            delay = min(
+                self.base_delay * (self.exponential_base ** attempt),
+                self.max_delay
+            )
+            
+            # Add jitter if enabled
+            if self.jitter:
+                jitter_amount = delay * self.jitter_factor
+                jittered = delay + random.uniform(-jitter_amount, jitter_amount)
+                return max(0, jittered)
+            
+            return delay
+
+
+class CircuitBreaker:
+    """
+    Circuit breaker pattern to prevent cascading failures.
+    
+    Opens the circuit when failure threshold is reached, preventing
+    further calls until reset after cooldown period.
+    """
+    
+    def __init__(
+        self,
+        failure_threshold: int = 5,
+        cooldown_period: float = 60.0,
+        half_open_max_calls: int = 3
+    ):
+        """
+        Initialize circuit breaker.
+        
+        Args:
+            failure_threshold: Number of failures before opening circuit
+            cooldown_period: Time in seconds to wait before attempting recovery
+            half_open_max_calls: Number of calls allowed in half-open state
+        """
+        self.failure_threshold = failure_threshold
+        self.cooldown_period = cooldown_period
+        self.half_open_max_calls = half_open_max_calls
+        
+        self._lock = RLock()
+        self._state = "closed"  # closed, open, half-open
+        self._failure_count = 0
+        self._last_failure_time = 0.0
+        self._half_open_call_count = 0
+    
+    def can_call(self) -> bool:
+        """
+        Check if a call can proceed through the circuit breaker.
+        
+        Returns:
+            True if call can proceed, False if circuit is open
+        """
+        with self._lock:
+            now = time.time()
+            
+            if self._state == "closed":
+                return True
+            
+            elif self._state == "open":
+                # Check if cooldown period has elapsed
+                if now - self._last_failure_time >= self.cooldown_period:
+                    logger.info("Circuit breaker entering half-open state")
+                    self._state = "half-open"
+                    self._half_open_call_count = 0
+                    return True
+                return False
+            
+            elif self._state == "half-open":
+                # Allow limited calls in half-open state
+                return self._half_open_call_count < self.half_open_max_calls
+            
+            return False
+    
+    def record_success(self):
+        """Record a successful call."""
+        with self._lock:
+            if self._state == "half-open":
+                self._half_open_call_count += 1
+                if self._half_open_call_count >= self.half_open_max_calls:
+                    logger.info("Circuit breaker closing after successful calls")
+                    self._state = "closed"
+                    self._failure_count = 0
+            elif self._state == "closed":
+                self._failure_count = 0
+    
+    def record_failure(self):
+        """Record a failed call."""
+        with self._lock:
+            self._failure_count += 1
+            self._last_failure_time = time.time()
+            
+            if self._state == "half-open":
+                logger.warning("Circuit breaker opening due to failure in half-open state")
+                self._state = "open"
+                self._half_open_call_count = 0
+            elif self._failure_count >= self.failure_threshold:
+                logger.warning(
+                    f"Circuit breaker opening after {self._failure_count} failures"
+                )
+                self._state = "open"
+    
+    def reset(self):
+        """Reset circuit breaker to closed state."""
+        with self._lock:
+            logger.info("Circuit breaker reset to closed state")
+            self._state = "closed"
+            self._failure_count = 0
+            self._last_failure_time = 0.0
+            self._half_open_call_count = 0
+
+
+class RetryMetrics:
+    """Track retry statistics for monitoring and analysis."""
+    
+    def __init__(self):
+        """Initialize retry metrics."""
+        self._lock = RLock()
+        self._total_calls: int = 0
+        self._successful_calls: int = 0
+        self._failed_calls: int = 0
+        self._total_retries: int = 0
+        self._retry_attempts_by_error: Dict[str, int] = {}
+        self._total_retry_time: float = 0.0
+    
+    def record_call(self):
+        """Record a function call."""
+        with self._lock:
+            self._total_calls += 1
+    
+    def record_success(self, retries: int = 0):
+        """Record a successful call."""
+        with self._lock:
+            self._successful_calls += 1
+            self._total_retries += retries
+    
+    def record_failure(self, error: L4DError, retries: int):
+        """Record a failed call."""
+        with self._lock:
+            self._failed_calls += 1
+            self._total_retries += retries
+            
+            # Track retries by error code
+            error_key = error.code.value
+            self._retry_attempts_by_error[error_key] = \
+                self._retry_attempts_by_error.get(error_key, 0) + retries
+    
+    def record_retry_time(self, delay: float):
+        """Record time spent in retry delays."""
+        with self._lock:
+            self._total_retry_time += delay
+    
+    def get_stats(self) -> Dict[str, Any]:
+        """Get retry statistics."""
+        with self._lock:
+            success_rate = (
+                self._successful_calls / self._total_calls * 100
+                if self._total_calls > 0 else 0.0
+            )
+            
+            avg_retries = (
+                self._total_retries / self._total_calls
+                if self._total_calls > 0 else 0.0
+            )
+            
+            return {
+                "total_calls": self._total_calls,
+                "successful_calls": self._successful_calls,
+                "failed_calls": self._failed_calls,
+                "success_rate": round(success_rate, 2),
+                "total_retries": self._total_retries,
+                "avg_retries_per_call": round(avg_retries, 2),
+                "total_retry_time": round(self._total_retry_time, 2),
+                "retry_attempts_by_error": self._retry_attempts_by_error.copy()
+            }
+    
+    def reset(self):
+        """Reset all metrics."""
+        with self._lock:
+            self._total_calls = 0
+            self._successful_calls = 0
+            self._failed_calls = 0
+            self._total_retries = 0
+            self._retry_attempts_by_error.clear()
+            self._total_retry_time = 0.0
+
+
+# Global retry metrics
+_global_retry_metrics = RetryMetrics()
+
+
+def retry_with_config(
+    retry_config: Optional[RetryConfig] = None,
+    circuit_breaker: Optional[CircuitBreaker] = None,
+    on_retry_callback: Optional[Callable[[L4DError, int, float], None]] = None,
+    record_metrics: bool = True
+) -> Callable:
+    """
+    Decorator for retrying functions with exponential backoff.
+    
+    Args:
+        retry_config: Retry configuration (uses defaults if None)
+        circuit_breaker: Circuit breaker instance (disabled if None)
+        on_retry_callback: Optional callback called before each retry
+        record_metrics: Whether to record retry metrics globally
+        
+    Returns:
+        Decorator function
+        
+    Example:
+        @retry_with_config(
+            retry_config=RetryConfig(max_attempts=3, base_delay=2.0),
+            circuit_breaker=CircuitBreaker(failure_threshold=5)
+        )
+        def call_llm():
+            ...
+    """
+    if retry_config is None:
+        retry_config = RetryConfig()
+    
+    metrics = _global_retry_metrics if record_metrics else None
+    
+    def decorator(func: Callable[..., T]) -> Callable[..., T]:
+        @wraps(func)
+        def wrapper(*args, **kwargs) -> T:
+            if metrics:
+                metrics.record_call()
+            
+            if circuit_breaker and not circuit_breaker.can_call():
+                logger.warning("Circuit breaker is open, rejecting call")
+                raise L4DError(
+                    message="Circuit breaker is open, call rejected",
+                    code=ErrorCode.UNKNOWN_ERROR,
+                    category=ErrorCategory.PERMANENT,
+                    severity=ErrorSeverity.ERROR,
+                    recovery_strategy="Wait for circuit breaker cooldown or reset"
+                )
+            
+            last_exception = None
+            total_delay = 0.0
+            
+            for attempt in range(retry_config.max_attempts):
+                try:
+                    result = func(*args, **kwargs)
+                    
+                    if circuit_breaker:
+                        circuit_breaker.record_success()
+                    
+                    if metrics:
+                        metrics.record_success(retries=attempt)
+                    
+                    if attempt > 0:
+                        logger.info(
+                            f"Function '{func.__name__}' succeeded after {attempt} retries"
+                        )
+                    
+                    return result
+                
+                except Exception as e:
+                    # Classify exception
+                    l4d_error = classify_exception(e) if not isinstance(e, L4DError) else e
+                    last_exception = l4d_error
+                    
+                    # Check if we should retry
+                    if attempt < retry_config.max_attempts - 1 and \
+                       retry_config.should_retry(l4d_error):
+                        
+                        delay = retry_config.calculate_delay(attempt)
+                        total_delay += delay
+                        
+                        logger.warning(
+                            f"Attempt {attempt + 1}/{retry_config.max_attempts} failed "
+                            f"for '{func.__name__}': {l4d_error.message}. "
+                            f"Retrying in {delay:.2f} seconds..."
+                        )
+                        
+                        # Call retry callback if provided
+                        if on_retry_callback:
+                            on_retry_callback(l4d_error, attempt, delay)
+                        
+                        # Record retry time
+                        if metrics:
+                            metrics.record_retry_time(delay)
+                        
+                        # Wait before retry
+                        time.sleep(delay)
+                    else:
+                        # Record failure
+                        if metrics:
+                            metrics.record_failure(l4d_error, attempt)
+                        
+                        if circuit_breaker:
+                            circuit_breaker.record_failure()
+                        
+                        # Raise error with retry context
+                        if attempt > 0:
+                            logger.error(
+                                f"Function '{func.__name__}' failed after {attempt} retries"
+                            )
+                        
+                        raise l4d_error from e
+            
+            # Should not reach here, but just in case
+            raise MaxRetriesExceededError(
+                message=f"Max retry attempts exceeded for '{func.__name__}'",
+                context={"attempts": retry_config.max_attempts, "total_delay": total_delay},
+                cause=last_exception
+            )
+        
+        return wrapper
+    return decorator
+
+
+def retry(
+    max_attempts: int = 3,
+    base_delay: float = 1.0,
+    max_delay: float = 60.0,
+    exponential_base: float = 2.0,
+    jitter: bool = True,
+    on_retry: Optional[Callable[[L4DError, int, float], None]] = None,
+    enable_circuit_breaker: bool = False,
+    circuit_failure_threshold: int = 5,
+    circuit_cooldown: float = 60.0
+) -> Callable:
+    """
+    Simplified decorator for retrying functions with exponential backoff.
+    
+    Args:
+        max_attempts: Maximum number of retry attempts (including first attempt)
+        base_delay: Base delay in seconds before first retry
+        max_delay: Maximum delay in seconds between retries
+        exponential_base: Base for exponential backoff (default: 2.0)
+        jitter: Whether to add random jitter to delays
+        on_retry: Optional callback called before each retry
+        enable_circuit_breaker: Whether to enable circuit breaker pattern
+        circuit_failure_threshold: Failure threshold for circuit breaker
+        circuit_cooldown: Cooldown period for circuit breaker
+        
+    Returns:
+        Decorator function
+        
+    Example:
+        @retry(max_attempts=3, base_delay=2.0)
+        def call_llm():
+            ...
+    """
+    retry_config = RetryConfig(
+        max_attempts=max_attempts,
+        base_delay=base_delay,
+        max_delay=max_delay,
+        exponential_base=exponential_base,
+        jitter=jitter
+    )
+    
+    circuit_breaker = None
+    if enable_circuit_breaker:
+        circuit_breaker = CircuitBreaker(
+            failure_threshold=circuit_failure_threshold,
+            cooldown_period=circuit_cooldown
+        )
+    
+    return retry_with_config(
+        retry_config=retry_config,
+        circuit_breaker=circuit_breaker,
+        on_retry_callback=on_retry
+    )
+
+
+def get_retry_metrics() -> Dict[str, Any]:
+    """
+    Get global retry metrics.
+    
+    Returns:
+        Dictionary containing retry statistics
+    """
+    return _global_retry_metrics.get_stats()
+
+
+def reset_retry_metrics():
+    """Reset global retry metrics."""
+    _global_retry_metrics.reset()
+
+
+# Pre-configured retry policies for common use cases
+RETRY_POLICY_LLAPI = RetryConfig(
+    max_attempts=3,
+    base_delay=2.0,
+    max_delay=30.0,
+    exponential_base=2.0,
+    jitter=True,
+    retry_on_categories=[ErrorCategory.TRANSIENT, ErrorCategory.RETRYABLE]
+)
+
+RETRY_POLICY_DATABASE = RetryConfig(
+    max_attempts=3,
+    base_delay=0.5,
+    max_delay=10.0,
+    exponential_base=2.0,
+    jitter=True,
+    retry_on_categories=[ErrorCategory.RETRYABLE]
+)
+
+RETRY_POLICY_NETWORK = RetryConfig(
+    max_attempts=5,
+    base_delay=1.0,
+    max_delay=60.0,
+    exponential_base=2.0,
+    jitter=True,
+    retry_on_categories=[ErrorCategory.TRANSIENT]
+)
 
 
 # Recovery Strategies
