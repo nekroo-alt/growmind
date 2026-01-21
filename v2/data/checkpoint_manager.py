@@ -224,7 +224,9 @@ class CheckpointManager:
         restore_git: bool = True,
         restore_cache: bool = True,
         validate_before: bool = True,
-        validate_after: bool = True
+        validate_after: bool = True,
+        dry_run: bool = False,
+        preserve_user_work: bool = True
     ) -> bool:
         """
         Restore system state from a checkpoint.
@@ -237,11 +239,13 @@ class CheckpointManager:
             restore_cache: Whether to restore cache state
             validate_before: Validate checkpoint integrity before restore
             validate_after: Validate state integrity after restore
+            dry_run: Preview changes without actually restoring
+            preserve_user_work: Warn about user work that would be lost
             
         Returns:
-            True if restore was successful
+            True if restore was successful (or dry-run completed)
         """
-        telemetry.info(f"Starting restore from checkpoint: {snapshot_id}")
+        telemetry.info(f"Starting restore from checkpoint: {snapshot_id} (dry_run={dry_run})")
         
         # Validate checkpoint exists
         checkpoint = self.get(snapshot_id)
@@ -254,30 +258,37 @@ class CheckpointManager:
             if not self.validate(snapshot_id):
                 telemetry.error(f"Checkpoint validation failed for checkpoint: {snapshot_id}")
                 return False
+        
+        # Warn about user work that would be lost
+        if preserve_user_work and not dry_run:
+            self._warn_about_user_work_loss(checkpoint)
                 
         try:
             # Restore databases
             if restore_databases:
-                self._restore_database_state(snapshot_id)
+                self._restore_database_state(snapshot_id, dry_run=dry_run)
                 
             # Restore file system
             if restore_files:
-                self._restore_file_system_state(snapshot_id)
+                self._restore_file_system_state(snapshot_id, dry_run=dry_run, preserve_user_work=preserve_user_work)
                 
             # Restore git state
             if restore_git:
-                self._restore_git_state(snapshot_id)
+                self._restore_git_state(snapshot_id, dry_run=dry_run, preserve_user_work=preserve_user_work)
                 
             # Restore cache
             if restore_cache:
-                self._restore_cache_state(snapshot_id)
+                self._restore_cache_state(snapshot_id, dry_run=dry_run)
                 
             # Validate after restore
-            if validate_after:
+            if not dry_run and validate_after:
                 if not self._validate_system_state():
                     telemetry.warning(f"System validation after restore failed, but restore completed: {snapshot_id}")
-                    
-            telemetry.info(f"Successfully restored from checkpoint: {snapshot_id}")
+            
+            if dry_run:
+                telemetry.info(f"Dry-run completed for checkpoint: {snapshot_id}")
+            else:
+                telemetry.info(f"Successfully restored from checkpoint: {snapshot_id}")
             return True
             
         except Exception as e:
@@ -479,8 +490,20 @@ class CheckpointManager:
                 )
             
     def _capture_file_system_state(self, cursor, snapshot_id: str):
-        """Capture file system state for snapshot."""
-        # Get list of modified Python files
+        """
+        Capture file system state for snapshot.
+        
+        Captures modified, added, deleted, and untracked files with full content.
+        """
+        # Create backup directory for this snapshot
+        backup_dir = os.path.join(
+            os.path.dirname(SNAPSHOTS_DB_PATH),
+            'checkpoints',
+            snapshot_id,
+            'files'
+        )
+        os.makedirs(backup_dir, exist_ok=True)
+        
         try:
             result = subprocess.run(
                 ['git', 'status', '--porcelain'],
@@ -496,11 +519,24 @@ class CheckpointManager:
                 status_code = line[:2]
                 file_path = line[3:]
                 
-                # Only track relevant files
-                if not file_path.endswith('.py') and not file_path.endswith('.md'):
+                # Track all relevant files (Python, Markdown, config files)
+                if not self._is_trackable_file(file_path):
                     continue
                     
-                if os.path.exists(file_path):
+                file_data = {
+                    'file_path': file_path,
+                    'file_status': status_code,
+                    'backup_path': None
+                }
+                
+                # Handle different file states
+                if 'D' in status_code:
+                    # File was deleted - mark for deletion on restore
+                    file_data['deleted'] = True
+                    file_data['file_hash'] = 'DELETED'
+                    file_data['file_size'] = 0
+                elif os.path.exists(file_path):
+                    # File exists - capture it
                     file_hash = self._calculate_file_hash(file_path)
                     file_size = os.path.getsize(file_path)
                     
@@ -517,20 +553,73 @@ class CheckpointManager:
                             git_diff = diff_result.stdout
                         except Exception:
                             pass
-                            
-                    cursor.execute(
-                        """
-                        INSERT INTO snapshot_file_state (
-                            snapshot_id, file_path, file_hash, file_size, 
-                            file_status, git_diff
-                        )
-                        VALUES (?, ?, ?, ?, ?, ?)
-                        """,
-                        (snapshot_id, file_path, file_hash, file_size, status_code, git_diff)
+                    
+                    # Create a backup of the file
+                    safe_filename = file_path.replace('/', '_').replace('\\', '_')
+                    backup_path = os.path.join(backup_dir, safe_filename)
+                    shutil.copy2(file_path, backup_path)
+                    
+                    file_data.update({
+                        'file_hash': file_hash,
+                        'file_size': file_size,
+                        'git_diff': git_diff,
+                        'backup_path': backup_path
+                    })
+                else:
+                    # File doesn't exist (possibly untracked but not yet created)
+                    file_data['file_hash'] = 'MISSING'
+                    file_data['file_size'] = 0
+                
+                # Store file state in database
+                cursor.execute(
+                    """
+                    INSERT INTO snapshot_file_state (
+                        snapshot_id, file_path, file_hash, file_size, 
+                        file_status, git_diff, backup_path
                     )
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        snapshot_id,
+                        file_data['file_path'],
+                        file_data.get('file_hash', ''),
+                        file_data.get('file_size', 0),
+                        file_data['file_status'],
+                        file_data.get('git_diff', ''),
+                        file_data.get('backup_path')
+                    )
+                )
+                    
+            telemetry.info(f"Captured file system state with {len(result.stdout.splitlines())} files")
                     
         except Exception as e:
             telemetry.warning(f"Failed to capture file system state: {str(e)}")
+            
+    def _is_trackable_file(self, file_path: str) -> bool:
+        """
+        Determine if a file should be tracked in checkpoints.
+        
+        Args:
+            file_path: Path to the file
+            
+        Returns:
+            True if file should be tracked
+        """
+        # Track code and documentation files
+        extensions = ['.py', '.md', '.txt', '.json', '.yaml', '.yml', '.toml', '.cfg', '.ini']
+        
+        # Check extension
+        for ext in extensions:
+            if file_path.endswith(ext):
+                return True
+        
+        # Track files in specific directories
+        tracked_dirs = ['v2/', 'meta/', 'tests/', 'docs/']
+        for directory in tracked_dirs:
+            if file_path.startswith(directory):
+                return True
+        
+        return False
             
     def _capture_git_state(self, cursor, snapshot_id: str):
         """Capture git state for snapshot."""
@@ -632,13 +721,15 @@ class CheckpointManager:
         )
         return [dict(row) for row in cursor.fetchall()]
         
-    def _restore_database_state(self, snapshot_id: str):
+    def _restore_database_state(self, snapshot_id: str, dry_run: bool = False):
         """
         Restore database state from snapshot.
         
-        Restores all databases captured in the checkpoint.
+        Args:
+            snapshot_id: Checkpoint ID to restore from
+            dry_run: Preview changes without actually restoring
         """
-        telemetry.info(f"Restoring database state from checkpoint: {snapshot_id}")
+        telemetry.info(f"Restoring database state from checkpoint: {snapshot_id} (dry_run={dry_run})")
         
         checkpoint = self.get(snapshot_id)
         if not checkpoint:
@@ -678,6 +769,10 @@ class CheckpointManager:
                     telemetry.warning(f"Unknown database: {db_name}")
                     continue
                 
+                if dry_run:
+                    telemetry.info(f"[DRY-RUN] Would restore database: {db_name}")
+                    continue
+                
                 # Restore from backup
                 self._restore_sqlite_backup(backup_path, target_path)
                 
@@ -691,32 +786,268 @@ class CheckpointManager:
                 telemetry.error(f"Failed to restore database {db_name}: {str(e)}")
                 raise
         
-    def _restore_file_system_state(self, snapshot_id: str):
+    def _restore_file_system_state(
+        self,
+        snapshot_id: str,
+        dry_run: bool = False,
+        preserve_user_work: bool = True
+    ):
         """
         Restore file system state from snapshot.
         
-        Note: Full file system restore will be implemented in Task 3.4.
-        This is a placeholder that validates state exists.
+        Args:
+            snapshot_id: Checkpoint ID to restore from
+            dry_run: Preview changes without actually restoring
+            preserve_user_work: Warn about conflicts with user work
         """
-        telemetry.info(f"File system state restore requested for {snapshot_id} (to be fully implemented in Task 3.4)")
+        telemetry.info(f"Restoring file system state from checkpoint: {snapshot_id} (dry_run={dry_run})")
         
-    def _restore_git_state(self, snapshot_id: str):
+        checkpoint = self.get(snapshot_id)
+        if not checkpoint:
+            raise ValueError(f"Checkpoint not found: {snapshot_id}")
+        
+        file_state_list = checkpoint.get('file_state', [])
+        
+        if not file_state_list:
+            telemetry.info(f"No file system state found in checkpoint: {snapshot_id}")
+            return
+        
+        # Track files that would be affected
+        affected_files = []
+        conflicts = []
+        
+        for file_state in file_state_list:
+            file_path = file_state['file_path']
+            file_status = file_state['file_status']
+            backup_path = file_state.get('backup_path')
+            
+            # Check for conflicts
+            if preserve_user_work:
+                conflict_info = self._check_file_conflict(file_state)
+                if conflict_info:
+                    conflicts.append(conflict_info)
+            
+            affected_files.append(file_path)
+            
+            if dry_run:
+                if 'D' in file_status:
+                    telemetry.info(f"[DRY-RUN] Would delete file: {file_path}")
+                else:
+                    telemetry.info(f"[DRY-RUN] Would restore file: {file_path}")
+                continue
+            
+            # Restore the file
+            if 'D' in file_status:
+                # File was deleted in checkpoint - delete it now
+                if os.path.exists(file_path):
+                    os.remove(file_path)
+                    telemetry.info(f"Deleted file: {file_path}")
+            elif backup_path and os.path.exists(backup_path):
+                # Restore file from backup
+                # Create parent directory if it doesn't exist
+                parent_dir = os.path.dirname(file_path)
+                if parent_dir and not os.path.exists(parent_dir):
+                    os.makedirs(parent_dir, exist_ok=True)
+                
+                shutil.copy2(backup_path, file_path)
+                telemetry.info(f"Restored file: {file_path}")
+        
+        if conflicts:
+            telemetry.warning(f"Found {len(conflicts)} file conflicts during restore:")
+            for conflict in conflicts:
+                telemetry.warning(f"  - {conflict['file']}: {conflict['reason']}")
+        
+        telemetry.info(f"Restored {len(affected_files)} files from checkpoint")
+        
+    def _restore_git_state(
+        self,
+        snapshot_id: str,
+        dry_run: bool = False,
+        preserve_user_work: bool = True
+    ):
         """
         Restore git state from snapshot.
         
-        Note: Full git restore will be implemented in Task 3.4.
-        This is a placeholder that validates state exists.
+        Args:
+            snapshot_id: Checkpoint ID to restore from
+            dry_run: Preview changes without actually restoring
+            preserve_user_work: Warn about conflicts with user work
         """
-        telemetry.info(f"Git state restore requested for {snapshot_id} (to be fully implemented in Task 3.4)")
+        telemetry.info(f"Restoring git state from checkpoint: {snapshot_id} (dry_run={dry_run})")
         
-    def _restore_cache_state(self, snapshot_id: str):
+        checkpoint = self.get(snapshot_id)
+        if not checkpoint:
+            raise ValueError(f"Checkpoint not found: {snapshot_id}")
+        
+        git_state_list = checkpoint.get('git_state', [])
+        
+        if not git_state_list:
+            telemetry.warning(f"No git state found in checkpoint: {snapshot_id}")
+            return
+        
+        git_state = git_state_list[0]
+        target_branch = git_state['branch']
+        target_commit = git_state['commit_hash']
+        target_status = git_state['git_status']
+        
+        if dry_run:
+            telemetry.info(f"[DRY-RUN] Would checkout branch: {target_branch}")
+            telemetry.info(f"[DRY-RUN] Would checkout commit: {target_commit}")
+            return
+        
+        try:
+            # Get current git state
+            current_branch = subprocess.run(
+                ['git', 'branch', '--show-current'],
+                capture_output=True,
+                text=True,
+                check=False
+            ).stdout.strip()
+            
+            current_commit = subprocess.run(
+                ['git', 'rev-parse', 'HEAD'],
+                capture_output=True,
+                text=True,
+                check=False
+            ).stdout.strip()
+            
+            # Check if we're already on the target branch/commit
+            if current_branch == target_branch and current_commit == target_commit:
+                telemetry.info(f"Already on target branch {target_branch} and commit {target_commit}")
+            else:
+                # Checkout the target branch
+                telemetry.info(f"Checking out branch: {target_branch}")
+                subprocess.run(
+                    ['git', 'checkout', target_branch],
+                    capture_output=True,
+                    text=True,
+                    check=True
+                )
+                
+                # Checkout the specific commit
+                telemetry.info(f"Checking out commit: {target_commit}")
+                subprocess.run(
+                    ['git', 'checkout', target_commit],
+                    capture_output=True,
+                    text=True,
+                    check=True
+                )
+            
+            # Check for merge conflicts
+            if preserve_user_work:
+                conflict_result = subprocess.run(
+                    ['git', 'diff', '--name-only', '--diff-filter=U'],
+                    capture_output=True,
+                    text=True,
+                    check=False
+                )
+                
+                if conflict_result.stdout.strip():
+                    telemetry.warning("Git merge conflicts detected after restore:")
+                    for conflicted_file in conflict_result.stdout.strip().splitlines():
+                        telemetry.warning(f"  - {conflicted_file}")
+                    
+                    telemetry.warning("Please resolve conflicts manually or use git merge --abort to cancel")
+            
+            telemetry.info(f"Successfully restored git state to {target_branch}@{target_commit}")
+            
+        except subprocess.CalledProcessError as e:
+            telemetry.error(f"Failed to restore git state: {str(e)}")
+            if e.stderr:
+                telemetry.error(f"Git error: {e.stderr}")
+            raise
+            
+    def _restore_cache_state(self, snapshot_id: str, dry_run: bool = False):
         """
         Restore cache state from snapshot.
         
         Note: Full cache restore will be implemented in Task 3.5.
         This is a placeholder that validates state exists.
+        
+        Args:
+            snapshot_id: Checkpoint ID to restore from
+            dry_run: Preview changes without actually restoring
         """
         telemetry.info(f"Cache state restore requested for {snapshot_id} (to be fully implemented in Task 3.5)")
+        
+        # Task 3.5 will implement full cache restore
+        # For now, just log that we're restoring cache
+        if not dry_run:
+            telemetry.info("Cache restore will be implemented in Task 3.5")
+            
+    def _warn_about_user_work_loss(self, checkpoint: Dict[str, Any]):
+        """
+        Warn user about work that would be lost on restore.
+        
+        Args:
+            checkpoint: Checkpoint dictionary
+        """
+        warnings = []
+        
+        # Check for uncommitted changes
+        git_state_list = checkpoint.get('git_state', [])
+        if git_state_list:
+            git_status = git_state_list[0].get('git_status', '')
+            if git_status.strip():
+                warnings.append(f"Git has uncommitted changes ({len(git_status.splitlines())} files)")
+        
+        # Check for modified files
+        file_state_list = checkpoint.get('file_state', [])
+        if file_state_list:
+            modified_count = sum(1 for f in file_state_list if 'M' in f['file_status'])
+            added_count = sum(1 for f in file_state_list if 'A' in f['file_status'] or '??' in f['file_status'])
+            
+            if modified_count > 0:
+                warnings.append(f"Modified files will be restored ({modified_count} files)")
+            if added_count > 0:
+                warnings.append(f"Added/untracked files may be affected ({added_count} files)")
+        
+        if warnings:
+            telemetry.warning("⚠️  WARNING: The following user work may be lost:")
+            for warning in warnings:
+                telemetry.warning(f"  - {warning}")
+            telemetry.warning("Consider creating a backup before proceeding")
+            
+    def _check_file_conflict(self, file_state: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """
+        Check if restoring a file would conflict with user work.
+        
+        Args:
+            file_state: File state dictionary from checkpoint
+            
+        Returns:
+            Conflict info dictionary or None if no conflict
+        """
+        file_path = file_state['file_path']
+        file_status = file_state['file_status']
+        checkpoint_hash = file_state.get('file_hash')
+        
+        # If file doesn't exist currently and was deleted in checkpoint, no conflict
+        if not os.path.exists(file_path) and 'D' in file_status:
+            return None
+        
+        # If file exists but was deleted in checkpoint, that's a conflict
+        if 'D' in file_status and os.path.exists(file_path):
+            return {
+                'file': file_path,
+                'reason': 'File exists but was deleted in checkpoint',
+                'action': 'will be deleted'
+            }
+        
+        # Check if file has been modified since checkpoint
+        if os.path.exists(file_path) and checkpoint_hash and checkpoint_hash != 'DELETED':
+            current_hash = self._calculate_file_hash(file_path)
+            if current_hash != checkpoint_hash:
+                # Check if the change is just whitespace or minor
+                return {
+                    'file': file_path,
+                    'reason': 'File has been modified since checkpoint',
+                    'action': 'will be overwritten',
+                    'current_hash': current_hash,
+                    'checkpoint_hash': checkpoint_hash
+                }
+        
+        return None
         
     def _validate_system_state(self) -> bool:
         """
