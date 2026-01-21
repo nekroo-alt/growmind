@@ -281,6 +281,27 @@ def cmd_logs_timeline(args):
         print()
 
 
+def cmd_health(args):
+    """Run health checks on system components."""
+    from v2.core.health_check import run_health_check
+    
+    report = run_health_check(verbose=args.verbose, auto_fix=args.fix)
+    
+    # Export to JSON if requested
+    if args.export:
+        import json
+        with open(args.export, 'w') as f:
+            json.dump(report.to_dict(), f, indent=2)
+        print(f"\nHealth report exported to {args.export}")
+    
+    # Exit with appropriate code
+    import sys
+    if report.overall_status.value == "critical":
+        sys.exit(2)
+    elif report.overall_status.value == "error":
+        sys.exit(1)
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="L4 Self-Evolving Development Platform CLI"
@@ -356,6 +377,12 @@ def main():
     logs_timeline_p.add_argument("--operation-id", required=True, help="Operation ID to generate timeline for")
     logs_timeline_p.add_argument("--log-dir", default="v2/logs", help="Log directory")
 
+    # Health command
+    health_p = subparsers.add_parser("health", help="Run health checks on system components")
+    health_p.add_argument("-v", "--verbose", action="store_true", help="Show detailed output")
+    health_p.add_argument("--fix", action="store_true", help="Auto-fix fixable issues")
+    health_p.add_argument("--export", help="Export health report to JSON file")
+
     args = parser.parse_args()
 
     # Change CWD to project root
@@ -386,6 +413,8 @@ def main():
         cmd_logs_errors(args)
     elif args.command == "logs-timeline":
         cmd_logs_timeline(args)
+    elif args.command == "health":
+        cmd_health(args)
     else:
         parser.print_help()
 
