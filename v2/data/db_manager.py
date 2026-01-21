@@ -148,10 +148,17 @@ def init_db():
             file_size INTEGER,
             file_status TEXT NOT NULL,
             git_diff TEXT,
+            backup_path TEXT,
             FOREIGN KEY (snapshot_id) REFERENCES snapshots (snapshot_id) ON DELETE CASCADE
         )
         """
         )
+        
+        # Add backup_path column if table already exists (migration)
+        try:
+            cursor.execute("ALTER TABLE snapshot_file_state ADD COLUMN backup_path TEXT")
+        except sqlite3.OperationalError:
+            pass  # Already exists
         
         # Git state snapshots
         cursor.execute(
@@ -177,10 +184,17 @@ def init_db():
             cache_value BLOB,
             cache_hash TEXT,
             cache_size INTEGER,
+            cache_data TEXT,
             FOREIGN KEY (snapshot_id) REFERENCES snapshots (snapshot_id) ON DELETE CASCADE
         )
         """
         )
+        
+        # Add cache_data column if table already exists (migration)
+        try:
+            cursor.execute("ALTER TABLE snapshot_cache_state ADD COLUMN cache_data TEXT")
+        except sqlite3.OperationalError:
+            pass  # Already exists
         
         # Create indexes for efficient queries
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_snapshots_timestamp ON snapshots(timestamp)")
