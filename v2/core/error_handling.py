@@ -997,3 +997,773 @@ def is_critical(error: L4DError) -> bool:
         True if error is critical, False otherwise
     """
     return error.severity == ErrorSeverity.CRITICAL
+
+
+# ============================================================================
+# Error Recovery Strategies
+# ============================================================================
+
+class RecoveryAction:
+    """Represents a recovery action that can be taken."""
+    
+    def __init__(
+        self,
+        action_type: str,
+        description: str,
+        automatic: bool = False,
+        command: Optional[str] = None,
+        requires_user_input: bool = False
+    ):
+        """
+        Initialize a recovery action.
+        
+        Args:
+            action_type: Type of action (retry, rollback, manual, etc.)
+            description: Human-readable description of the action
+            automatic: Whether this action can be performed automatically
+            command: Optional command to execute for manual recovery
+            requires_user_input: Whether this action requires user confirmation
+        """
+        self.action_type = action_type
+        self.description = description
+        self.automatic = automatic
+        self.command = command
+        self.requires_user_input = requires_user_input
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert recovery action to dictionary."""
+        return {
+            "action_type": self.action_type,
+            "description": self.description,
+            "automatic": self.automatic,
+            "command": self.command,
+            "requires_user_input": self.requires_user_input
+        }
+
+
+class RecoveryResult:
+    """Represents the result of a recovery attempt."""
+    
+    def __init__(
+        self,
+        success: bool,
+        action_taken: Optional[RecoveryAction] = None,
+        error: Optional[Exception] = None,
+        message: str = ""
+    ):
+        """
+        Initialize a recovery result.
+        
+        Args:
+            success: Whether recovery was successful
+            action_taken: The recovery action that was taken
+            error: Error that occurred during recovery (if any)
+            message: Additional message about the recovery
+        """
+        self.success = success
+        self.action_taken = action_taken
+        self.error = error
+        self.message = message
+        self.timestamp = datetime.now()
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert recovery result to dictionary."""
+        return {
+            "success": self.success,
+            "action_taken": self.action_taken.to_dict() if self.action_taken else None,
+            "error": str(self.error) if self.error else None,
+            "message": self.message,
+            "timestamp": self.timestamp.isoformat()
+        }
+
+
+class RecoveryManager:
+    """
+    Manages error recovery strategies and automatic recovery.
+    
+    This class provides automatic recovery for transient errors and
+    suggests recovery steps for user-action errors. It integrates
+    with CheckpointManager for rollback on unrecoverable errors.
+    """
+    
+    def __init__(self, checkpoint_manager=None):
+        """
+        Initialize recovery manager.
+        
+        Args:
+            checkpoint_manager: Optional CheckpointManager instance for rollback
+        """
+        self.checkpoint_manager = checkpoint_manager
+        self._lock = RLock()
+        self._recovery_history: List[Dict[str, Any]] = []
+    
+    def recover(
+        self,
+        error: L4DError,
+        context: Optional[Dict[str, Any]] = None,
+        allow_rollback: bool = True
+    ) -> RecoveryResult:
+        """
+        Attempt to recover from an error.
+        
+        Args:
+            error: The error to recover from
+            context: Additional context for recovery
+            allow_rollback: Whether to allow rollback to checkpoint
+            
+        Returns:
+            RecoveryResult with outcome and action taken
+        """
+        context = context or {}
+        
+        # Log recovery attempt
+        logger.info(f"Attempting recovery for error: {error.code.value}")
+        
+        # Determine recovery strategy based on error code
+        if error.code == ErrorCode.DB_LOCKED:
+            return self._recover_database_lock(error, context)
+        elif error.code == ErrorCode.LLM_RATE_LIMIT:
+            return self._recover_llm_rate_limit(error, context)
+        elif error.code == ErrorCode.LLM_TIMEOUT:
+            return self._recover_llm_timeout(error, context)
+        elif error.code == ErrorCode.NETWORK_CONNECTION_FAILED:
+            return self._recover_network_error(error, context)
+        elif error.code == ErrorCode.NETWORK_TIMEOUT:
+            return self._recover_network_error(error, context)
+        elif error.code in [
+            ErrorCode.FILE_NOT_FOUND,
+            ErrorCode.FILE_PERMISSION_DENIED,
+            ErrorCode.GIT_CONFLICT,
+            ErrorCode.GIT_MERGE_FAILED
+        ]:
+            return self._suggest_user_action(error, context)
+        elif is_critical(error) and allow_rollback and self.checkpoint_manager:
+            return self._recover_with_rollback(error, context)
+        else:
+            return self._suggest_manual_recovery(error, context)
+    
+    def _recover_database_lock(
+        self,
+        error: L4DError,
+        context: Dict[str, Any]
+    ) -> RecoveryResult:
+        """
+        Recover from database lock by retrying with backoff.
+        
+        Args:
+            error: The database lock error
+            context: Additional context
+            
+        Returns:
+            RecoveryResult
+        """
+        action = RecoveryAction(
+            action_type="retry_with_backoff",
+            description="Retry database operation with exponential backoff",
+            automatic=True
+        )
+        
+        try:
+            # Suggest retry with backoff
+            logger.info("Database locked, suggest retry with backoff")
+            message = (
+                f"Database is locked. This is usually temporary. "
+                f"Suggested action: Retry the operation. "
+                f"Use retry decorator with RETRY_POLICY_DATABASE for automatic retry."
+            )
+            
+            result = RecoveryResult(
+                success=True,
+                action_taken=action,
+                message=message
+            )
+            
+            self._record_recovery(error, result)
+            return result
+            
+        except Exception as e:
+            result = RecoveryResult(
+                success=False,
+                action_taken=action,
+                error=e,
+                message=f"Failed to recover from database lock: {e}"
+            )
+            self._record_recovery(error, result)
+            return result
+    
+    def _recover_llm_rate_limit(
+        self,
+        error: L4DError,
+        context: Dict[str, Any]
+    ) -> RecoveryResult:
+        """
+        Recover from LLM rate limit by waiting and retrying.
+        
+        Args:
+            error: The LLM rate limit error
+            context: Additional context
+            
+        Returns:
+            RecoveryResult
+        """
+        action = RecoveryAction(
+            action_type="wait_and_retry",
+            description="Wait for rate limit to reset and retry",
+            automatic=False,
+            requires_user_input=True
+        )
+        
+        try:
+            # Calculate suggested wait time
+            wait_time = self._calculate_rate_limit_wait(error)
+            
+            message = (
+                f"LLM API rate limit exceeded. "
+                f"Suggested wait time: {wait_time:.0f} seconds ({wait_time/60:.1f} minutes). "
+                f"Retry after waiting, or upgrade your API plan for higher limits. "
+                f"Command: sleep {wait_time:.0f} && <retry your command>"
+            )
+            
+            result = RecoveryResult(
+                success=False,  # Requires user to wait and retry
+                action_taken=action,
+                message=message
+            )
+            
+            self._record_recovery(error, result)
+            return result
+            
+        except Exception as e:
+            result = RecoveryResult(
+                success=False,
+                action_taken=action,
+                error=e,
+                message=f"Failed to recover from rate limit: {e}"
+            )
+            self._record_recovery(error, result)
+            return result
+    
+    def _recover_llm_timeout(
+        self,
+        error: L4DError,
+        context: Dict[str, Any]
+    ) -> RecoveryResult:
+        """
+        Recover from LLM timeout by retrying with backoff.
+        
+        Args:
+            error: The LLM timeout error
+            context: Additional context
+            
+        Returns:
+            RecoveryResult
+        """
+        action = RecoveryAction(
+            action_type="retry_with_backoff",
+            description="Retry LLM call with exponential backoff",
+            automatic=True
+        )
+        
+        try:
+            message = (
+                f"LLM API request timed out. "
+                f"Suggested action: Retry with exponential backoff. "
+                f"Check your network connection. "
+                f"Use retry decorator with RETRY_POLICY_LLAPI for automatic retry."
+            )
+            
+            result = RecoveryResult(
+                success=True,
+                action_taken=action,
+                message=message
+            )
+            
+            self._record_recovery(error, result)
+            return result
+            
+        except Exception as e:
+            result = RecoveryResult(
+                success=False,
+                action_taken=action,
+                error=e,
+                message=f"Failed to recover from LLM timeout: {e}"
+            )
+            self._record_recovery(error, result)
+            return result
+    
+    def _recover_network_error(
+        self,
+        error: L4DError,
+        context: Dict[str, Any]
+    ) -> RecoveryResult:
+        """
+        Recover from network error by retrying with backoff.
+        
+        Args:
+            error: The network error
+            context: Additional context
+            
+        Returns:
+            RecoveryResult
+        """
+        action = RecoveryAction(
+            action_type="retry_with_backoff",
+            description="Retry network operation with exponential backoff",
+            automatic=True
+        )
+        
+        try:
+            message = (
+                f"Network error: {error.message}. "
+                f"Suggested action: Retry with exponential backoff. "
+                f"Check your network connection. "
+                f"Use retry decorator with RETRY_POLICY_NETWORK for automatic retry."
+            )
+            
+            result = RecoveryResult(
+                success=True,
+                action_taken=action,
+                message=message
+            )
+            
+            self._record_recovery(error, result)
+            return result
+            
+        except Exception as e:
+            result = RecoveryResult(
+                success=False,
+                action_taken=action,
+                error=e,
+                message=f"Failed to recover from network error: {e}"
+            )
+            self._record_recovery(error, result)
+            return result
+    
+    def _suggest_user_action(
+        self,
+        error: L4DError,
+        context: Dict[str, Any]
+    ) -> RecoveryResult:
+        """
+        Suggest user action for errors requiring manual intervention.
+        
+        Args:
+            error: The error requiring user action
+            context: Additional context
+            
+        Returns:
+            RecoveryResult
+        """
+        action = RecoveryAction(
+            action_type="user_action_required",
+            description=error.recovery_strategy or "User action required",
+            automatic=False,
+            requires_user_input=True
+        )
+        
+        # Generate specific suggestions based on error code
+        suggestions = self._get_user_action_suggestions(error, context)
+        
+        message = (
+            f"{error.message}\n\n"
+            f"Recovery actions required:\n"
+        )
+        
+        for i, suggestion in enumerate(suggestions, 1):
+            message += f"{i}. {suggestion}\n"
+        
+        result = RecoveryResult(
+            success=False,  # Requires user action
+            action_taken=action,
+            message=message
+        )
+        
+        self._record_recovery(error, result)
+        return result
+    
+    def _get_user_action_suggestions(
+        self,
+        error: L4DError,
+        context: Dict[str, Any]
+    ) -> List[str]:
+        """
+        Get user action suggestions for a specific error.
+        
+        Args:
+            error: The error
+            context: Additional context
+            
+        Returns:
+            List of suggestion strings
+        """
+        if error.code == ErrorCode.FILE_NOT_FOUND:
+            suggestions = [
+                "Check the file path in the error message",
+                "Create the missing file if it's required",
+                "Run: l4-dev doctor to check project integrity"
+            ]
+            if context and context.get("file_path"):
+                suggestions.append(f"Verify file exists: ls -la {context['file_path']}")
+            return suggestions
+        
+        elif error.code == ErrorCode.FILE_PERMISSION_DENIED:
+            suggestions = [
+                "Check file permissions and ownership",
+                "Run: ls -la <file_path> to see permissions",
+                "Try: chmod +r <file_path> to add read permission",
+                "Check you have necessary permissions for the directory"
+            ]
+            return suggestions
+        
+        elif error.code == ErrorCode.GIT_CONFLICT:
+            suggestions = [
+                "Review and resolve merge conflicts in affected files",
+                "After resolving conflicts: git add <resolved_files>",
+                "Continue with: git commit",
+                "Or abort merge: git merge --abort"
+            ]
+            return suggestions
+        
+        elif error.code == ErrorCode.GIT_MERGE_FAILED:
+            suggestions = [
+                "Check git status to see merge state",
+                "Review merge conflicts if any",
+                "Try: git status",
+                "Try: git merge --abort to cancel the merge",
+                "Resolve issues manually and retry"
+            ]
+            return suggestions
+        
+        else:
+            return [
+                "Review the error message and context",
+                "Check system logs for more details",
+                "Run: l4-dev doctor to diagnose issues",
+                "Contact support if issue persists"
+            ]
+    
+    def _recover_with_rollback(
+        self,
+        error: L4DError,
+        context: Dict[str, Any]
+    ) -> RecoveryResult:
+        """
+        Recover from critical error by rolling back to checkpoint.
+        
+        Args:
+            error: The critical error
+            context: Additional context
+            
+        Returns:
+            RecoveryResult
+        """
+        if not self.checkpoint_manager:
+            return RecoveryResult(
+                success=False,
+                message="Checkpoint manager not available for rollback"
+            )
+        
+        action = RecoveryAction(
+            action_type="rollback_to_checkpoint",
+            description="Rollback to last known good checkpoint",
+            automatic=True
+        )
+        
+        try:
+            # Get latest checkpoint
+            checkpoints = self.checkpoint_manager.list_checkpoints(limit=1)
+            
+            if not checkpoints:
+                result = RecoveryResult(
+                    success=False,
+                    action_taken=action,
+                    message="No checkpoints available for rollback"
+                )
+                self._record_recovery(error, result)
+                return result
+            
+            latest_checkpoint = checkpoints[0]
+            
+            logger.warning(
+                f"Critical error encountered: {error.code.value}. "
+                f"Rolling back to checkpoint: {latest_checkpoint['id']}"
+            )
+            
+            # Perform rollback
+            self.checkpoint_manager.restore(latest_checkpoint['id'])
+            
+            message = (
+                f"Rolled back to checkpoint {latest_checkpoint['id']} "
+                f"(created at {latest_checkpoint['timestamp']}). "
+                f"Error: {error.message}"
+            )
+            
+            result = RecoveryResult(
+                success=True,
+                action_taken=action,
+                message=message
+            )
+            
+            self._record_recovery(error, result)
+            return result
+            
+        except Exception as e:
+            logger.error(f"Rollback failed: {e}")
+            result = RecoveryResult(
+                success=False,
+                action_taken=action,
+                error=e,
+                message=f"Rollback to checkpoint failed: {e}"
+            )
+            self._record_recovery(error, result)
+            return result
+    
+    def _suggest_manual_recovery(
+        self,
+        error: L4DError,
+        context: Dict[str, Any]
+    ) -> RecoveryResult:
+        """
+        Suggest manual recovery for unrecoverable errors.
+        
+        Args:
+            error: The error
+            context: Additional context
+            
+        Returns:
+            RecoveryResult
+        """
+        action = RecoveryAction(
+            action_type="manual_recovery",
+            description="Manual recovery required",
+            automatic=False,
+            requires_user_input=True
+        )
+        
+        message = (
+            f"Error: {error.message}\n\n"
+            f"Suggested recovery steps:\n"
+            f"1. Check logs for more details: l4-dev logs --last 1h\n"
+            f"2. Run diagnostics: l4-dev doctor\n"
+            f"3. Review error context: {error.context}\n"
+        )
+        
+        if error.recovery_strategy:
+            message += f"4. {error.recovery_strategy}\n"
+        
+        if self.checkpoint_manager:
+            message += f"5. Consider rolling back to checkpoint: l4-dev resume --last-checkpoint\n"
+        
+        result = RecoveryResult(
+            success=False,
+            action_taken=action,
+            message=message
+        )
+        
+        self._record_recovery(error, result)
+        return result
+    
+    def _calculate_rate_limit_wait(self, error: L4DError) -> float:
+        """
+        Calculate suggested wait time for rate limit recovery.
+        
+        Args:
+            error: The rate limit error
+            
+        Returns:
+            Suggested wait time in seconds
+        """
+        # Check if error context contains retry-after
+        retry_after = error.context.get("retry_after")
+        if retry_after:
+            try:
+                return float(retry_after)
+            except (ValueError, TypeError):
+                pass
+        
+        # Default wait times based on error severity
+        if "per minute" in str(error).lower():
+            return 60.0
+        elif "per hour" in str(error).lower():
+            return 3600.0
+        elif "per day" in str(error).lower():
+            return 86400.0
+        else:
+            # Default to 2 minutes
+            return 120.0
+    
+    def _record_recovery(self, error: L4DError, result: RecoveryResult):
+        """
+        Record recovery attempt for analytics.
+        
+        Args:
+            error: The error that was recovered
+            result: The recovery result
+        """
+        with self._lock:
+            record = {
+                "timestamp": datetime.now().isoformat(),
+                "error_code": error.code.value,
+                "error_category": error.category.value,
+                "error_source": error.source.value,
+                "action_taken": result.action_taken.action_type if result.action_taken else None,
+                "success": result.success,
+                "automatic": result.action_taken.automatic if result.action_taken else False
+            }
+            self._recovery_history.append(record)
+            
+            # Keep only last 1000 records
+            if len(self._recovery_history) > 1000:
+                self._recovery_history = self._recovery_history[-1000:]
+    
+    def get_recovery_stats(self) -> Dict[str, Any]:
+        """
+        Get recovery statistics.
+        
+        Returns:
+            Dictionary containing recovery statistics
+        """
+        with self._lock:
+            if not self._recovery_history:
+                return {
+                    "total_recoveries": 0,
+                    "automatic_recoveries": 0,
+                    "manual_recoveries": 0,
+                    "success_rate": 0.0,
+                    "recoveries_by_error": {}
+                }
+            
+            total = len(self._recovery_history)
+            automatic = sum(1 for r in self._recovery_history if r["automatic"])
+            successful = sum(1 for r in self._recovery_history if r["success"])
+            
+            # Group by error code
+            by_error: Dict[str, Dict[str, int]] = {}
+            for record in self._recovery_history:
+                error_code = record["error_code"]
+                if error_code not in by_error:
+                    by_error[error_code] = {"count": 0, "success": 0}
+                by_error[error_code]["count"] += 1
+                if record["success"]:
+                    by_error[error_code]["success"] += 1
+            
+            # Calculate success rates by error
+            for error_code in by_error:
+                count = by_error[error_code]["count"]
+                success = by_error[error_code]["success"]
+                by_error[error_code]["success_rate"] = round(success / count * 100, 2) if count > 0 else 0.0
+            
+            return {
+                "total_recoveries": total,
+                "automatic_recoveries": automatic,
+                "manual_recoveries": total - automatic,
+                "successful_recoveries": successful,
+                "success_rate": round(successful / total * 100, 2) if total > 0 else 0.0,
+                "recoveries_by_error": by_error,
+                "history": self._recovery_history[-100:]  # Last 100 records
+            }
+    
+    def generate_recovery_report(self) -> str:
+        """
+        Generate a human-readable recovery report.
+        
+        Returns:
+            Formatted recovery report string
+        """
+        stats = self.get_recovery_stats()
+        
+        report = [
+            "=" * 60,
+            "Error Recovery Report",
+            "=" * 60,
+            f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+            "",
+            "Summary:",
+            f"  Total Recovery Attempts: {stats['total_recoveries']}",
+            f"  Automatic Recoveries: {stats['automatic_recoveries']}",
+            f"  Manual Recoveries: {stats['manual_recoveries']}",
+            f"  Successful Recoveries: {stats['successful_recoveries']}",
+            f"  Success Rate: {stats['success_rate']}%",
+            "",
+            "Recoveries by Error Type:",
+        ]
+        
+        for error_code, error_stats in stats["recoveries_by_error"].items():
+            report.append(
+                f"  {error_code}: {error_stats['count']} attempts "
+                f"({error_stats['success_rate']}% success)"
+            )
+        
+        if stats["history"]:
+            report.append("")
+            report.append("Recent Recovery Attempts (last 10):")
+            for record in stats["history"][-10:]:
+                report.append(
+                    f"  [{record['timestamp']}] {record['error_code']}: "
+                    f"{record['action_taken']} - "
+                    f"{'SUCCESS' if record['success'] else 'FAILED'}"
+                )
+        
+        report.append("=" * 60)
+        
+        return "\n".join(report)
+    
+    def clear_history(self):
+        """Clear recovery history."""
+        with self._lock:
+            self._recovery_history.clear()
+            logger.info("Recovery history cleared")
+
+
+# Global recovery manager instance
+_global_recovery_manager = RecoveryManager()
+
+
+def set_recovery_manager(recovery_manager: RecoveryManager):
+    """
+    Set the global recovery manager.
+    
+    Args:
+        recovery_manager: RecoveryManager instance to use globally
+    """
+    global _global_recovery_manager
+    _global_recovery_manager = recovery_manager
+
+
+def get_recovery_manager() -> RecoveryManager:
+    """
+    Get the global recovery manager.
+    
+    Returns:
+        Global RecoveryManager instance
+    """
+    return _global_recovery_manager
+
+
+def recover_from_error(
+    error: L4DError,
+    context: Optional[Dict[str, Any]] = None,
+    allow_rollback: bool = True
+) -> RecoveryResult:
+    """
+    Recover from an error using the global recovery manager.
+    
+    Args:
+        error: The error to recover from
+        context: Additional context for recovery
+        allow_rollback: Whether to allow rollback to checkpoint
+        
+    Returns:
+        RecoveryResult with outcome and action taken
+    """
+    return _global_recovery_manager.recover(error, context, allow_rollback)
+
+
+def get_recovery_statistics() -> Dict[str, Any]:
+    """
+    Get recovery statistics from the global recovery manager.
+    
+    Returns:
+        Dictionary containing recovery statistics
+    """
+    return _global_recovery_manager.get_recovery_stats()
