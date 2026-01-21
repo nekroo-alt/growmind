@@ -2,16 +2,17 @@ import sqlite3
 import os
 import json
 from typing import List, Set, Dict
-from v1.core.telemetry import telemetry
+from v2.core.telemetry import telemetry
 
 # Database paths
 TASK_DB_PATH = "task.db"
 ACTIVITY_DB_PATH = "activity.db"
+SNAPSHOTS_DB_PATH = "snapshots.db"
 
 
 def init_db():
     """
-    Initializes the task and activity databases if they don't exist.
+    Initializes the task, activity, and snapshots databases if they don't exist.
     """
     # Initialize activity database
     with sqlite3.connect(ACTIVITY_DB_PATH) as conn:
@@ -83,6 +84,102 @@ def init_db():
         )
         """
         )
+        conn.commit()
+
+    # Initialize snapshots database
+    with sqlite3.connect(SNAPSHOTS_DB_PATH) as conn:
+        cursor = conn.cursor()
+        
+        # Main snapshots table
+        cursor.execute(
+            """
+        CREATE TABLE IF NOT EXISTS snapshots (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            snapshot_id TEXT UNIQUE NOT NULL,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+            snapshot_type TEXT NOT NULL,
+            operation_id TEXT,
+            task_id INTEGER,
+            reason TEXT,
+            is_incremental BOOLEAN DEFAULT 0,
+            parent_snapshot_id TEXT,
+            metadata TEXT,
+            FOREIGN KEY (parent_snapshot_id) REFERENCES snapshots (snapshot_id)
+        )
+        """
+        )
+        
+        # Database state snapshots
+        cursor.execute(
+            """
+        CREATE TABLE IF NOT EXISTS snapshot_db_state (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            snapshot_id TEXT NOT NULL,
+            db_name TEXT NOT NULL,
+            db_hash TEXT NOT NULL,
+            db_size INTEGER,
+            is_incremental BOOLEAN DEFAULT 0,
+            data BLOB,
+            FOREIGN KEY (snapshot_id) REFERENCES snapshots (snapshot_id) ON DELETE CASCADE
+        )
+        """
+        )
+        
+        # File system state snapshots
+        cursor.execute(
+            """
+        CREATE TABLE IF NOT EXISTS snapshot_file_state (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            snapshot_id TEXT NOT NULL,
+            file_path TEXT NOT NULL,
+            file_hash TEXT NOT NULL,
+            file_size INTEGER,
+            file_status TEXT NOT NULL,
+            git_diff TEXT,
+            FOREIGN KEY (snapshot_id) REFERENCES snapshots (snapshot_id) ON DELETE CASCADE
+        )
+        """
+        )
+        
+        # Git state snapshots
+        cursor.execute(
+            """
+        CREATE TABLE IF NOT EXISTS snapshot_git_state (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            snapshot_id TEXT NOT NULL,
+            branch TEXT NOT NULL,
+            commit_hash TEXT NOT NULL,
+            git_status TEXT,
+            FOREIGN KEY (snapshot_id) REFERENCES snapshots (snapshot_id) ON DELETE CASCADE
+        )
+        """
+        )
+        
+        # Cache state snapshots
+        cursor.execute(
+            """
+        CREATE TABLE IF NOT EXISTS snapshot_cache_state (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            snapshot_id TEXT NOT NULL,
+            cache_key TEXT NOT NULL,
+            cache_value BLOB,
+            cache_hash TEXT,
+            cache_size INTEGER,
+            FOREIGN KEY (snapshot_id) REFERENCES snapshots (snapshot_id) ON DELETE CASCADE
+        )
+        """
+        )
+        
+        # Create indexes for efficient queries
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_snapshots_timestamp ON snapshots(timestamp)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_snapshots_type ON snapshots(snapshot_type)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_snapshots_operation ON snapshots(operation_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_snapshots_task ON snapshots(task_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_snapshot_db ON snapshot_db_state(snapshot_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_snapshot_file ON snapshot_file_state(snapshot_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_snapshot_git ON snapshot_git_state(snapshot_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_snapshot_cache ON snapshot_cache_state(snapshot_id)")
+        
         conn.commit()
 
 
