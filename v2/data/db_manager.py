@@ -120,10 +120,22 @@ def init_db():
             db_size INTEGER,
             is_incremental BOOLEAN DEFAULT 0,
             data BLOB,
+            backup_path TEXT,
+            backup_status TEXT,
             FOREIGN KEY (snapshot_id) REFERENCES snapshots (snapshot_id) ON DELETE CASCADE
         )
         """
         )
+        
+        # Add new columns if table already exists (migration)
+        try:
+            cursor.execute("ALTER TABLE snapshot_db_state ADD COLUMN backup_path TEXT")
+        except sqlite3.OperationalError:
+            pass  # Already exists
+        try:
+            cursor.execute("ALTER TABLE snapshot_db_state ADD COLUMN backup_status TEXT")
+        except sqlite3.OperationalError:
+            pass  # Already exists
         
         # File system state snapshots
         cursor.execute(

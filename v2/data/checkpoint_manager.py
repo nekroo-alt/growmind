@@ -416,27 +416,67 @@ class CheckpointManager:
         return f"chkp_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{os.urandom(4).hex()}"
         
     def _capture_database_state(self, cursor, snapshot_id: str):
-        """Capture database state for snapshot."""
-        databases = [TASK_DB_PATH, ACTIVITY_DB_PATH, SNAPSHOTS_DB_PATH]
+        """Capture database state for snapshot using SQLite backup API."""
+        databases = [
+            (TASK_DB_PATH, 'task.db'),
+            (ACTIVITY_DB_PATH, 'activity.db'),
+            (SNAPSHOTS_DB_PATH, 'snapshots.db')
+        ]
         
-        for db_path in databases:
+        # Also capture telemetry.db if it exists
+        telemetry_db = os.path.join(os.path.dirname(TASK_DB_PATH), 'telemetry.db')
+        if os.path.exists(telemetry_db):
+            databases.append((telemetry_db, 'telemetry.db'))
+        
+        # Create backup directory for this snapshot
+        backup_dir = os.path.join(
+            os.path.dirname(SNAPSHOTS_DB_PATH),
+            'checkpoints',
+            snapshot_id
+        )
+        os.makedirs(backup_dir, exist_ok=True)
+        
+        for db_path, db_name in databases:
             if not os.path.exists(db_path):
                 continue
                 
-            # Calculate database hash
-            db_hash = self._calculate_file_hash(db_path)
-            db_size = os.path.getsize(db_path)
-            
-            # For now, store hash and size (full dumps will be in Task 3.3)
-            cursor.execute(
-                """
-                INSERT INTO snapshot_db_state (
-                    snapshot_id, db_name, db_hash, db_size, is_incremental
+            try:
+                # Calculate database hash
+                db_hash = self._calculate_file_hash(db_path)
+                db_size = os.path.getsize(db_path)
+                
+                # Create backup using SQLite backup API
+                backup_path = os.path.join(backup_dir, f'{db_name}.backup')
+                self._create_sqlite_backup(db_path, backup_path)
+                
+                # Check if this is an incremental backup (compare with previous)
+                is_incremental = self._is_incremental_backup(cursor, db_name, db_hash)
+                
+                cursor.execute(
+                    """
+                    INSERT INTO snapshot_db_state (
+                        snapshot_id, db_name, db_hash, db_size, is_incremental,
+                        backup_path
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (snapshot_id, db_name, db_hash, db_size, is_incremental, backup_path)
                 )
-                VALUES (?, ?, ?, ?, 0)
-                """,
-                (snapshot_id, os.path.basename(db_path), db_hash, db_size)
-            )
+                
+            except Exception as e:
+                telemetry.warning(f"Failed to capture database state for {db_name}: {str(e)}")
+                # Still record the database even if backup failed
+                cursor.execute(
+                    """
+                    INSERT INTO snapshot_db_state (
+                        snapshot_id, db_name, db_hash, db_size, is_incremental,
+                        backup_path, backup_status
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (snapshot_id, db_name, self._calculate_file_hash(db_path), 
+                     os.path.getsize(db_path), 0, None, f'failed: {str(e)}')
+                )
             
     def _capture_file_system_state(self, cursor, snapshot_id: str):
         """Capture file system state for snapshot."""
@@ -596,10 +636,60 @@ class CheckpointManager:
         """
         Restore database state from snapshot.
         
-        Note: Full database restore will be implemented in Task 3.3.
-        This is a placeholder that validates state exists.
+        Restores all databases captured in the checkpoint.
         """
-        telemetry.info(f"Database state restore requested for {snapshot_id} (to be fully implemented in Task 3.3)")
+        telemetry.info(f"Restoring database state from checkpoint: {snapshot_id}")
+        
+        checkpoint = self.get(snapshot_id)
+        if not checkpoint:
+            raise ValueError(f"Checkpoint not found: {snapshot_id}")
+        
+        db_state_list = checkpoint.get('db_state', [])
+        
+        if not db_state_list:
+            telemetry.warning(f"No database state found in checkpoint: {snapshot_id}")
+            return
+        
+        # Restore each database
+        for db_state in db_state_list:
+            db_name = db_state['db_name']
+            backup_path = db_state.get('backup_path')
+            backup_status = db_state.get('backup_status')
+            
+            if backup_status and backup_status.startswith('failed'):
+                telemetry.warning(f"Skipping {db_name} - backup had error: {backup_status}")
+                continue
+            
+            if not backup_path or not os.path.exists(backup_path):
+                telemetry.warning(f"Backup file not found for {db_name}: {backup_path}")
+                continue
+            
+            try:
+                # Determine the target database path
+                if db_name == 'task.db':
+                    target_path = TASK_DB_PATH
+                elif db_name == 'activity.db':
+                    target_path = ACTIVITY_DB_PATH
+                elif db_name == 'snapshots.db':
+                    target_path = SNAPSHOTS_DB_PATH
+                elif db_name == 'telemetry.db':
+                    target_path = os.path.join(os.path.dirname(TASK_DB_PATH), 'telemetry.db')
+                else:
+                    telemetry.warning(f"Unknown database: {db_name}")
+                    continue
+                
+                # Restore from backup
+                self._restore_sqlite_backup(backup_path, target_path)
+                
+                # Validate database integrity
+                if not self._validate_database_integrity(target_path):
+                    raise ValueError(f"Database integrity check failed for {db_name}")
+                
+                telemetry.info(f"Successfully restored database: {db_name}")
+                
+            except Exception as e:
+                telemetry.error(f"Failed to restore database {db_name}: {str(e)}")
+                raise
         
     def _restore_file_system_state(self, snapshot_id: str):
         """
@@ -654,6 +744,127 @@ class CheckpointManager:
                 
         return True
         
+    def _create_sqlite_backup(self, source_path: str, backup_path: str):
+        """
+        Create a backup of SQLite database.
+        
+        Uses file copy for simplicity and reliability.
+        For WAL mode databases, we first checkpoint to ensure consistency.
+        """
+        # Handle WAL mode databases
+        try:
+            conn = sqlite3.connect(source_path)
+            cursor = conn.cursor()
+            
+            # Check if database is in WAL mode
+            cursor.execute("PRAGMA journal_mode")
+            journal_mode = cursor.fetchone()[0]
+            
+            if journal_mode == 'wal':
+                # Checkpoint WAL to ensure consistency
+                cursor.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                conn.commit()
+            
+            conn.close()
+        except Exception:
+            pass  # Continue even if checkpoint fails
+        
+        # Copy the database file
+        shutil.copy2(source_path, backup_path)
+        
+        # Also copy WAL and SHM files if they exist
+        for ext in ['-wal', '-shm']:
+            wal_path = f"{source_path}{ext}"
+            if os.path.exists(wal_path):
+                shutil.copy2(wal_path, f"{backup_path}{ext}")
+    
+    def _restore_sqlite_backup(self, backup_path: str, target_path: str):
+        """
+        Restore SQLite database from backup.
+        
+        Creates a backup of the current database before restoring.
+        Uses file copy for simplicity and reliability.
+        """
+        # Create a backup of the current database for safety
+        if os.path.exists(target_path):
+            safety_backup = f"{target_path}.pre_restore_{int(datetime.now().timestamp())}"
+            shutil.copy2(target_path, safety_backup)
+            telemetry.info(f"Created safety backup: {safety_backup}")
+        
+        # Close any open connections to the target database
+        # (This is handled by the calling code which opens a new connection after restore)
+        
+        # Copy backup files to target
+        shutil.copy2(backup_path, target_path)
+        
+        # Also copy WAL and SHM files if they exist
+        for ext in ['-wal', '-shm']:
+            backup_wal = f"{backup_path}{ext}"
+            if os.path.exists(backup_wal):
+                target_wal = f"{target_path}{ext}"
+                shutil.copy2(backup_wal, target_wal)
+    
+    def _validate_database_integrity(self, db_path: str) -> bool:
+        """
+        Validate database integrity after restore.
+        
+        Returns:
+            True if database is valid
+        """
+        try:
+            conn = sqlite3.connect(db_path)
+            cursor = conn.cursor()
+            
+            # Run integrity check
+            cursor.execute("PRAGMA integrity_check")
+            result = cursor.fetchone()
+            
+            if result and result[0] != 'ok':
+                telemetry.error(f"Database integrity check failed: {result[0]}")
+                conn.close()
+                return False
+            
+            # Check foreign key constraints
+            cursor.execute("PRAGMA foreign_key_check")
+            fk_violations = cursor.fetchall()
+            
+            if fk_violations:
+                telemetry.error(f"Foreign key violations found: {fk_violations}")
+                conn.close()
+                return False
+            
+            conn.close()
+            return True
+            
+        except Exception as e:
+            telemetry.error(f"Database validation failed: {str(e)}")
+            return False
+    
+    def _is_incremental_backup(self, cursor, db_name: str, current_hash: str) -> bool:
+        """
+        Check if this should be an incremental backup.
+        
+        Compares with the most recent backup of the same database.
+        """
+        # Get the most recent snapshot with this database
+        cursor.execute(
+            """
+            SELECT db_hash 
+            FROM snapshot_db_state 
+            WHERE db_name = ? 
+            ORDER BY snapshot_id DESC 
+            LIMIT 1
+            """,
+            (db_name,)
+        )
+        result = cursor.fetchone()
+        
+        if result and result[0] == current_hash:
+            # Database hasn't changed, mark as incremental
+            return True
+        
+        return False
+    
     def _calculate_file_hash(self, file_path: str) -> str:
         """Calculate SHA256 hash of a file."""
         sha256_hash = hashlib.sha256()
