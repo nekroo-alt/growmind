@@ -18,6 +18,12 @@ Task 1.5 Features:
 - Network usage tracking
 - Alerting for resource exhaustion
 - Resource usage reports
+
+Task 2.3 Features:
+- Log-telemetry correlation
+- Log reference tracking
+- Operation timeline generation
+- Log query by operation and task
 """
 
 import sqlite3
@@ -55,6 +61,7 @@ class TelemetryManager:
     - Decorator support for function tracking
     - Auto-capture timing and metrics
     - Query interface for analytics
+    - Log-telemetry correlation (Task 2.3)
     """
 
     def __init__(self, db_path: str = TELEMETRY_DB_PATH):
@@ -161,6 +168,22 @@ class TelemetryManager:
                 """
             )
 
+            # Log references table (Task 2.3) - Correlates logs with telemetry
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS log_references (
+                    id TEXT PRIMARY KEY,
+                    operation_id TEXT NOT NULL,
+                    log_level TEXT NOT NULL,
+                    logger_name TEXT,
+                    message TEXT,
+                    timestamp DATETIME NOT NULL,
+                    log_data TEXT,
+                    FOREIGN KEY (operation_id) REFERENCES operations (id) ON DELETE CASCADE
+                )
+                """
+            )
+
             # Create indexes for fast queries
             cursor.execute(
                 """
@@ -214,6 +237,26 @@ class TelemetryManager:
                 """
                 CREATE INDEX IF NOT EXISTS idx_file_operations_timestamp 
                 ON file_operations(timestamp)
+                """
+            )
+            
+            # Create indexes for log references (Task 2.3)
+            cursor.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_log_references_operation 
+                ON log_references(operation_id)
+                """
+            )
+            cursor.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_log_references_timestamp 
+                ON log_references(timestamp)
+                """
+            )
+            cursor.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_log_references_level 
+                ON log_references(log_level)
                 """
             )
 
@@ -701,935 +744,187 @@ class TelemetryManager:
                 
                 return [dict(row) for row in rows]
 
-    # Resource Usage Monitoring (Task 1.5)
+    # Log-Telemetry Integration (Task 2.3)
 
-    @dataclass
-    class ResourceThresholds:
-        """Thresholds for resource alerts"""
-        cpu_warning: float = 80.0  # CPU usage percentage
-        cpu_critical: float = 95.0
-        memory_warning: float = 80.0  # Memory usage percentage
-        memory_critical: float = 95.0
-        disk_warning: float = 90.0  # Disk usage percentage
-        disk_critical: float = 98.0
-
-    def _check_psutil_available(self) -> bool:
-        """Check if psutil is available for resource monitoring"""
-        return PSUTIL_AVAILABLE
-
-    def _get_cpu_usage(self) -> Dict[str, Any]:
-        """
-        Get current CPU usage information.
-        
-        Returns:
-            Dictionary with CPU metrics
-        """
-        if not self._check_psutil_available():
-            return {"error": "psutil not available"}
-        
-        try:
-            cpu_percent = psutil.cpu_percent(interval=0.1)
-            cpu_count = psutil.cpu_count()
-            cpu_freq = psutil.cpu_freq()
-            
-            metrics = {
-                "cpu_percent": cpu_percent,
-                "cpu_count": cpu_count,
-                "cpu_freq_mhz": cpu_freq.current if cpu_freq else None
-            }
-            
-            # Per-CPU usage
-            cpu_percents = psutil.cpu_percent(interval=0.1, percpu=True)
-            metrics["cpu_percents_per_core"] = cpu_percents
-            
-            return metrics
-        except Exception as e:
-            return {"error": str(e)}
-
-    def _get_memory_usage(self) -> Dict[str, Any]:
-        """
-        Get current memory usage information.
-        
-        Returns:
-            Dictionary with memory metrics
-        """
-        if not self._check_psutil_available():
-            return {"error": "psutil not available"}
-        
-        try:
-            mem = psutil.virtual_memory()
-            swap = psutil.swap_memory()
-            
-            return {
-                "total_mb": mem.total / (1024 * 1024),
-                "available_mb": mem.available / (1024 * 1024),
-                "used_mb": mem.used / (1024 * 1024),
-                "free_mb": mem.free / (1024 * 1024),
-                "percent": mem.percent,
-                "swap_total_mb": swap.total / (1024 * 1024),
-                "swap_used_mb": swap.used / (1024 * 1024),
-                "swap_percent": swap.percent
-            }
-        except Exception as e:
-            return {"error": str(e)}
-
-    def _get_disk_usage(self, path: str = ".") -> Dict[str, Any]:
-        """
-        Get disk usage information for a path.
-        
-        Args:
-            path: Path to check disk usage for
-            
-        Returns:
-            Dictionary with disk metrics
-        """
-        if not self._check_psutil_available():
-            return {"error": "psutil not available"}
-        
-        try:
-            disk = psutil.disk_usage(path)
-            
-            return {
-                "total_gb": disk.total / (1024 ** 3),
-                "used_gb": disk.used / (1024 ** 3),
-                "free_gb": disk.free / (1024 ** 3),
-                "percent": disk.percent,
-                "path": path
-            }
-        except Exception as e:
-            return {"error": str(e)}
-
-    def _get_disk_io(self) -> Dict[str, Any]:
-        """
-        Get disk I/O statistics.
-        
-        Returns:
-            Dictionary with I/O metrics
-        """
-        if not self._check_psutil_available():
-            return {"error": "psutil not available"}
-        
-        try:
-            io = psutil.disk_io_counters()
-            if io is None:
-                return {"error": "disk I/O not available"}
-            
-            return {
-                "read_count": io.read_count,
-                "write_count": io.write_count,
-                "read_bytes_mb": io.read_bytes / (1024 * 1024),
-                "write_bytes_mb": io.write_bytes / (1024 * 1024),
-                "read_time_ms": io.read_time,
-                "write_time_ms": io.write_time
-            }
-        except Exception as e:
-            return {"error": str(e)}
-
-    def _get_network_io(self) -> Dict[str, Any]:
-        """
-        Get network I/O statistics.
-        
-        Returns:
-            Dictionary with network metrics
-        """
-        if not self._check_psutil_available():
-            return {"error": "psutil not available"}
-        
-        try:
-            net = psutil.net_io_counters()
-            if net is None:
-                return {"error": "network I/O not available"}
-            
-            return {
-                "bytes_sent_mb": net.bytes_sent / (1024 * 1024),
-                "bytes_recv_mb": net.bytes_recv / (1024 * 1024),
-                "packets_sent": net.packets_sent,
-                "packets_recv": net.packets_recv,
-                "errin": net.errin,
-                "errout": net.errout,
-                "dropin": net.dropin,
-                "dropout": net.dropout
-            }
-        except Exception as e:
-            return {"error": str(e)}
-
-    def _check_resource_thresholds(
-        self,
-        metrics: Dict[str, Any],
-        thresholds: ResourceThresholds,
-        operation_id: str
-    ) -> List[Dict[str, Any]]:
-        """
-        Check if resource metrics exceed thresholds and generate alerts.
-        
-        Args:
-            metrics: Resource metrics dictionary
-            thresholds: Threshold configuration
-            operation_id: ID of the operation for context
-            
-        Returns:
-            List of alert dictionaries
-        """
-        alerts = []
-        
-        if "cpu_percent" in metrics:
-            cpu = metrics["cpu_percent"]
-            if cpu >= thresholds.cpu_critical:
-                alerts.append({
-                    "resource_type": "cpu",
-                    "severity": "critical",
-                    "value": cpu,
-                    "threshold": thresholds.cpu_critical,
-                    "message": f"CPU usage critically high: {cpu:.1f}%"
-                })
-                self.record_event(
-                    operation_id,
-                    "resource_alert",
-                    "critical",
-                    f"CPU usage critically high: {cpu:.1f}%",
-                    {"cpu_percent": cpu, "threshold": thresholds.cpu_critical}
-                )
-            elif cpu >= thresholds.cpu_warning:
-                alerts.append({
-                    "resource_type": "cpu",
-                    "severity": "warning",
-                    "value": cpu,
-                    "threshold": thresholds.cpu_warning,
-                    "message": f"CPU usage high: {cpu:.1f}%"
-                })
-                self.record_event(
-                    operation_id,
-                    "resource_alert",
-                    "warning",
-                    f"CPU usage high: {cpu:.1f}%",
-                    {"cpu_percent": cpu, "threshold": thresholds.cpu_warning}
-                )
-        
-        if "percent" in metrics:  # Memory usage
-            mem = metrics["percent"]
-            if mem >= thresholds.memory_critical:
-                alerts.append({
-                    "resource_type": "memory",
-                    "severity": "critical",
-                    "value": mem,
-                    "threshold": thresholds.memory_critical,
-                    "message": f"Memory usage critically high: {mem:.1f}%"
-                })
-                self.record_event(
-                    operation_id,
-                    "resource_alert",
-                    "critical",
-                    f"Memory usage critically high: {mem:.1f}%",
-                    {"memory_percent": mem, "threshold": thresholds.memory_critical}
-                )
-            elif mem >= thresholds.memory_warning:
-                alerts.append({
-                    "resource_type": "memory",
-                    "severity": "warning",
-                    "value": mem,
-                    "threshold": thresholds.memory_warning,
-                    "message": f"Memory usage high: {mem:.1f}%"
-                })
-                self.record_event(
-                    operation_id,
-                    "resource_alert",
-                    "warning",
-                    f"Memory usage high: {mem:.1f}%",
-                    {"memory_percent": mem, "threshold": thresholds.memory_warning}
-                )
-        
-        if "percent" in metrics and "path" in metrics:  # Disk usage
-            disk = metrics["percent"]
-            if disk >= thresholds.disk_critical:
-                alerts.append({
-                    "resource_type": "disk",
-                    "severity": "critical",
-                    "value": disk,
-                    "threshold": thresholds.disk_critical,
-                    "message": f"Disk usage critically high: {disk:.1f}%",
-                    "path": metrics["path"]
-                })
-                self.record_event(
-                    operation_id,
-                    "resource_alert",
-                    "critical",
-                    f"Disk usage critically high: {disk:.1f}%",
-                    {"disk_percent": disk, "threshold": thresholds.disk_critical, "path": metrics["path"]}
-                )
-            elif disk >= thresholds.disk_warning:
-                alerts.append({
-                    "resource_type": "disk",
-                    "severity": "warning",
-                    "value": disk,
-                    "threshold": thresholds.disk_warning,
-                    "message": f"Disk usage high: {disk:.1f}%",
-                    "path": metrics["path"]
-                })
-                self.record_event(
-                    operation_id,
-                    "resource_alert",
-                    "warning",
-                    f"Disk usage high: {disk:.1f}%",
-                    {"disk_percent": disk, "threshold": thresholds.disk_warning, "path": metrics["path"]}
-                )
-        
-        return alerts
-
-    @contextmanager
-    def monitor_resources(
+    def record_log_reference(
         self,
         operation_id: str,
-        sample_interval: float = 1.0,
-        thresholds: Optional[ResourceThresholds] = None,
-        disk_path: str = "."
-    ):
+        log_level: str,
+        logger_name: str,
+        message: str,
+        log_data: Optional[Dict[str, Any]] = None
+    ) -> str:
         """
-        Context manager to monitor resources during an operation.
+        Record a log reference for an operation.
         
-        Usage:
-            with telemetry.monitor_resources(op_id, sample_interval=1.0) as monitor:
-                # ... perform operation ...
-                pass
-            
-            # After context exits, get resource summary
-            summary = monitor.get_summary()
-        
-        Args:
-            operation_id: ID of the operation to monitor
-            sample_interval: Sampling interval in seconds
-            thresholds: Optional thresholds for alerts
-            disk_path: Path to monitor disk usage for
-            
-        Yields:
-            ResourceMonitor context
-        """
-        if not self._check_psutil_available():
-            # Return a dummy monitor if psutil not available
-            class DummyMonitor:
-                def get_summary(self):
-                    return {"error": "psutil not available, monitoring disabled"}
-            yield DummyMonitor()
-            return
-        
-        if thresholds is None:
-            thresholds = self.ResourceThresholds()
-        
-        class ResourceMonitor:
-            def __init__(self, telemetry_manager, operation_id, sample_interval, thresholds, disk_path):
-                self.telemetry = telemetry_manager
-                self.operation_id = operation_id
-                self.sample_interval = sample_interval
-                self.thresholds = thresholds
-                self.disk_path = disk_path
-                self._monitoring = False
-                self._monitor_thread = None
-                self._samples = {
-                    "cpu": [],
-                    "memory": [],
-                    "disk": [],
-                    "disk_io": [],
-                    "network": []
-                }
-                self._baseline = None
-                self._start_time = None
-                self._end_time = None
-                self._alerts = []
-            
-            def _monitor_loop(self):
-                """Monitor loop that runs in background thread"""
-                import threading as th
-                while self._monitoring:
-                    try:
-                        # Collect all metrics
-                        cpu_metrics = self.telemetry._get_cpu_usage()
-                        mem_metrics = self.telemetry._get_memory_usage()
-                        disk_metrics = self.telemetry._get_disk_usage(self.disk_path)
-                        disk_io_metrics = self.telemetry._get_disk_io()
-                        net_metrics = self.telemetry._get_network_io()
-                        
-                        # Store samples
-                        timestamp = time.time()
-                        self._samples["cpu"].append((timestamp, cpu_metrics))
-                        self._samples["memory"].append((timestamp, mem_metrics))
-                        self._samples["disk"].append((timestamp, disk_metrics))
-                        self._samples["disk_io"].append((timestamp, disk_io_metrics))
-                        self._samples["network"].append((timestamp, net_metrics))
-                        
-                        # Record to telemetry
-                        if "cpu_percent" in cpu_metrics:
-                            self.telemetry.record_resource_usage(
-                                self.operation_id,
-                                "cpu",
-                                cpu_metrics["cpu_percent"],
-                                "%",
-                                "cpu_usage"
-                            )
-                        
-                        if "percent" in mem_metrics:
-                            self.telemetry.record_resource_usage(
-                                self.operation_id,
-                                "memory",
-                                mem_metrics["percent"],
-                                "%",
-                                "memory_usage"
-                            )
-                        
-                        if "percent" in disk_metrics:
-                            self.telemetry.record_resource_usage(
-                                self.operation_id,
-                                "disk",
-                                disk_metrics["percent"],
-                                "%",
-                                f"disk_usage_{self.disk_path}"
-                            )
-                        
-                        # Check thresholds and generate alerts
-                        alerts = self.telemetry._check_resource_thresholds(
-                            {**cpu_metrics, **mem_metrics, **disk_metrics},
-                            self.thresholds,
-                            self.operation_id
-                        )
-                        self._alerts.extend(alerts)
-                        
-                    except Exception as e:
-                        # Log error but continue monitoring
-                        self.telemetry.record_event(
-                            self.operation_id,
-                            "monitoring_error",
-                            "warning",
-                            f"Resource monitoring error: {str(e)}"
-                        )
-                    
-                    time.sleep(self.sample_interval)
-            
-            def start(self):
-                """Start monitoring"""
-                self._monitoring = True
-                self._start_time = time.time()
-                
-                # Capture baseline
-                self._baseline = {
-                    "cpu": self.telemetry._get_cpu_usage(),
-                    "memory": self.telemetry._get_memory_usage(),
-                    "disk": self.telemetry._get_disk_usage(self.disk_path),
-                    "disk_io": self.telemetry._get_disk_io(),
-                    "network": self.telemetry._get_network_io()
-                }
-                
-                # Start monitoring thread
-                self._monitor_thread = threading.Thread(target=self._monitor_loop, daemon=True)
-                self._monitor_thread.start()
-            
-            def stop(self):
-                """Stop monitoring"""
-                self._monitoring = False
-                self._end_time = time.time()
-                if self._monitor_thread:
-                    self._monitor_thread.join(timeout=2.0)
-            
-            def get_summary(self) -> Dict[str, Any]:
-                """Get resource usage summary"""
-                if not self._samples or not any(self._samples.values()):
-                    return {"error": "No samples collected"}
-                
-                duration = (self._end_time - self._start_time) if self._end_time else 0
-                
-                def calculate_stats(samples):
-                    """Calculate statistics from samples list"""
-                    values = []
-                    for timestamp, metrics in samples:
-                        if "cpu_percent" in metrics:
-                            values.append(metrics["cpu_percent"])
-                        elif "percent" in metrics and "path" not in metrics:
-                            values.append(metrics["percent"])
-                        elif "percent" in metrics and "path" in metrics:
-                            values.append(metrics["percent"])
-                        elif "read_bytes_mb" in metrics:
-                            values.append(metrics["read_bytes_mb"] + metrics["write_bytes_mb"])
-                        elif "bytes_sent_mb" in metrics:
-                            values.append(metrics["bytes_sent_mb"] + metrics["bytes_recv_mb"])
-                    
-                    if not values:
-                        return None
-                    
-                    return {
-                        "min": min(values),
-                        "max": max(values),
-                        "avg": sum(values) / len(values),
-                        "count": len(values)
-                    }
-                
-                cpu_stats = calculate_stats(self._samples["cpu"])
-                mem_stats = calculate_stats(self._samples["memory"])
-                disk_stats = calculate_stats(self._samples["disk"])
-                disk_io_stats = calculate_stats(self._samples["disk_io"])
-                net_stats = calculate_stats(self._samples["network"])
-                
-                # Calculate disk I/O throughput
-                io_throughput = None
-                if disk_io_stats and disk_io_stats["count"] > 1:
-                    first_io = self._samples["disk_io"][0][1]
-                    last_io = self._samples["disk_io"][-1][1]
-                    time_diff = self._samples["disk_io"][-1][0] - self._samples["disk_io"][0][0]
-                    if time_diff > 0 and "read_bytes_mb" in first_io and "read_bytes_mb" in last_io:
-                        read_delta = last_io["read_bytes_mb"] - first_io["read_bytes_mb"]
-                        write_delta = last_io["write_bytes_mb"] - first_io["write_bytes_mb"]
-                        io_throughput = {
-                            "read_mb_per_sec": read_delta / time_diff if time_diff > 0 else 0,
-                            "write_mb_per_sec": write_delta / time_diff if time_diff > 0 else 0
-                        }
-                
-                # Calculate network throughput
-                net_throughput = None
-                if net_stats and net_stats["count"] > 1:
-                    first_net = self._samples["network"][0][1]
-                    last_net = self._samples["network"][-1][1]
-                    time_diff = self._samples["network"][-1][0] - self._samples["network"][0][0]
-                    if time_diff > 0 and "bytes_sent_mb" in first_net and "bytes_sent_mb" in last_net:
-                        sent_delta = last_net["bytes_sent_mb"] - first_net["bytes_sent_mb"]
-                        recv_delta = last_net["bytes_recv_mb"] - first_net["bytes_recv_mb"]
-                        net_throughput = {
-                            "sent_mb_per_sec": sent_delta / time_diff if time_diff > 0 else 0,
-                            "recv_mb_per_sec": recv_delta / time_diff if time_diff > 0 else 0
-                        }
-                
-                return {
-                    "duration_seconds": round(duration, 2),
-                    "cpu": cpu_stats,
-                    "memory": mem_stats,
-                    "disk": disk_stats,
-                    "disk_io_throughput": io_throughput,
-                    "network_throughput": net_throughput,
-                    "baseline": self._baseline,
-                    "sample_count": sum(len(samples) for samples in self._samples.values()),
-                    "alerts": self._alerts
-                }
-        
-        monitor = ResourceMonitor(self, operation_id, sample_interval, thresholds, disk_path)
-        monitor.start()
-        
-        try:
-            yield monitor
-        finally:
-            monitor.stop()
-            
-            # Store summary as metadata
-            summary = monitor.get_summary()
-            if "error" not in summary:
-                self.record_metric(
-                    operation_id,
-                    "resource_monitoring_samples",
-                    summary["sample_count"],
-                    "samples"
-                )
-
-    def generate_resource_report(
-        self,
-        operation_id: str,
-        include_details: bool = True
-    ) -> Dict[str, Any]:
-        """
-        Generate a comprehensive resource usage report for an operation.
+        This enables querying logs by operation and generating operation timelines.
         
         Args:
             operation_id: ID of the operation
-            include_details: Include detailed samples
+            log_level: Log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+            logger_name: Name of the logger
+            message: Log message
+            log_data: Additional log data (context, exception info, etc.)
             
         Returns:
-            Resource usage report dictionary
+            Log reference ID (UUID string)
         """
         with self._lock:
-            # Get operation details
-            operation = self.get_operation(operation_id)
-            if not operation:
-                return {"error": "Operation not found"}
-            
-            # Get resource records
-            resources = self.get_operation_resources(operation_id)
-            
-            if not resources:
-                return {
-                    "operation_id": operation_id,
-                    "operation_type": operation.get("operation_type"),
-                    "status": "No resource data available"
-                }
-            
-            # Group by resource type
-            by_type = defaultdict(list)
-            for resource in resources:
-                by_type[resource["resource_type"]].append(resource)
-            
-            # Calculate statistics for each type
-            report = {
-                "operation_id": operation_id,
-                "operation_type": operation.get("operation_type"),
-                "operation_title": operation.get("title"),
-                "operation_start": operation.get("start_time"),
-                "operation_end": operation.get("end_time"),
-                "resources": {}
-            }
-            
-            for resource_type, records in by_type.items():
-                values = [r["value"] for r in records]
-                timestamps = [r["timestamp"] for r in records]
-                
-                stats = {
-                    "unit": records[0]["unit"] if records else "unknown",
-                    "count": len(values),
-                    "min": min(values),
-                    "max": max(values),
-                    "avg": sum(values) / len(values),
-                    "first_sample": timestamps[0],
-                    "last_sample": timestamps[-1]
-                }
-                
-                # Include unit-specific labels
-                if resource_type == "cpu":
-                    stats["label"] = f"CPU Usage ({stats['unit']})"
-                elif resource_type == "memory":
-                    stats["label"] = f"Memory Usage ({stats['unit']})"
-                elif resource_type == "disk":
-                    stats["label"] = f"Disk Usage ({stats['unit']})"
-                
-                if include_details:
-                    stats["samples"] = records
-                
-                report["resources"][resource_type] = stats
-            
-            return report
+            log_ref_id = str(uuid.uuid4())
+            timestamp = datetime.utcnow().isoformat()
+            log_data_json = json.dumps(log_data) if log_data else None
 
-    def get_resource_trends(
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    INSERT INTO log_references 
+                    (id, operation_id, log_level, logger_name, message, timestamp, log_data)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (log_ref_id, operation_id, log_level, logger_name, message, timestamp, log_data_json)
+                )
+                conn.commit()
+
+            return log_ref_id
+
+    def get_operation_logs(
         self,
-        operation_type: Optional[str] = None,
-        limit: int = 50
-    ) -> Dict[str, Any]:
+        operation_id: str,
+        log_level: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
         """
-        Analyze resource usage trends across operations.
+        Get all log references for an operation.
         
         Args:
-            operation_type: Filter by operation type
-            limit: Maximum operations to analyze
+            operation_id: ID of the operation
+            log_level: Optional filter by log level
             
         Returns:
-            Resource trends analysis
+            List of log reference dictionaries ordered by timestamp
         """
         with self._lock:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
                 
-                # Get operations
-                query = "SELECT id, operation_type, start_time FROM operations WHERE 1=1"
-                params = []
+                query = "SELECT * FROM log_references WHERE operation_id = ?"
+                params = [operation_id]
                 
-                if operation_type:
-                    query += " AND operation_type = ?"
-                    params.append(operation_type)
+                if log_level:
+                    query += " AND log_level = ?"
+                    params.append(log_level)
                 
-                query += " ORDER BY start_time DESC LIMIT ?"
-                params.append(limit)
+                query += " ORDER BY timestamp ASC"
                 
                 cursor.execute(query, params)
-                operations = cursor.fetchall()
-                
-                if not operations:
-                    return {"message": "No operations found"}
-                
-                # Collect resource data
-                trends = {
-                    "cpu": [],
-                    "memory": [],
-                    "disk": []
-                }
-                
-                for op in operations:
-                    op_id = op["id"]
-                    
-                    # Get resource records
-                    cursor.execute(
-                        """
-                        SELECT resource_type, AVG(value) as avg_value
-                        FROM resources
-                        WHERE operation_id = ?
-                        GROUP BY resource_type
-                        """,
-                        (op_id,)
-                    )
-                    resource_avgs = cursor.fetchall()
-                    
-                    for res in resource_avgs:
-                        resource_type = res["resource_type"]
-                        avg_value = res["avg_value"]
-                        
-                        if resource_type in trends:
-                            trends[resource_type].append({
-                                "operation_id": op_id,
-                                "operation_type": op["operation_type"],
-                                "timestamp": op["start_time"],
-                                "avg_value": avg_value
-                            })
-                
-                # Calculate trend statistics
-                for resource_type, values in trends.items():
-                    if values:
-                        numeric_values = [v["avg_value"] for v in values]
-                        trends[resource_type] = {
-                            "samples": values,
-                            "count": len(values),
-                            "min": min(numeric_values),
-                            "max": max(numeric_values),
-                            "avg": sum(numeric_values) / len(numeric_values)
-                        }
-                
-                return {
-                    "operation_type": operation_type,
-                    "operations_analyzed": len(operations),
-                    "trends": trends
-                }
-
-    # File Operation Tracking (Task 1.4)
-
-    def record_file_read(
-        self,
-        operation_id: str,
-        file_path: str,
-        file_size: int = None,
-        metadata: Optional[Dict[str, Any]] = None
-    ) -> str:
-        """
-        Record a file read operation.
-        
-        Args:
-            operation_id: ID of the operation
-            file_path: Path to the file that was read
-            file_size: Size of the file in bytes
-            metadata: Additional metadata
-            
-        Returns:
-            File operation ID (UUID string)
-        """
-        with self._lock:
-            import hashlib
-            file_op_id = str(uuid.uuid4())
-            timestamp = datetime.utcnow().isoformat()
-            
-            # Get file size if not provided
-            if file_size is None and os.path.exists(file_path):
-                try:
-                    file_size = os.path.getsize(file_path)
-                except (OSError, IOError):
-                    file_size = 0
-            
-            # Calculate content hash for verification
-            content_hash = None
-            if os.path.exists(file_path):
-                try:
-                    with open(file_path, 'rb') as f:
-                        content_hash = hashlib.sha256(f.read()).hexdigest()[:16]
-                except (OSError, IOError):
-                    pass
-            
-            metadata_json = json.dumps(metadata) if metadata else None
-
-            with self._get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute(
-                    """
-                    INSERT INTO file_operations 
-                    (id, operation_id, operation_type, file_path, file_size, content_hash, timestamp, metadata)
-                    VALUES (?, ?, 'read', ?, ?, ?, ?, ?)
-                    """,
-                    (file_op_id, operation_id, file_path, file_size, content_hash, timestamp, metadata_json)
-                )
-                conn.commit()
-
-            return file_op_id
-
-    def record_file_write(
-        self,
-        operation_id: str,
-        file_path: str,
-        file_size: int = None,
-        content_hash: str = None,
-        diff_summary: str = None,
-        metadata: Optional[Dict[str, Any]] = None
-    ) -> str:
-        """
-        Record a file write operation.
-        
-        Args:
-            operation_id: ID of the operation
-            file_path: Path to the file that was written
-            file_size: Size of the file in bytes
-            content_hash: Hash of the file content for verification
-            diff_summary: Summary of changes made to the file
-            metadata: Additional metadata
-            
-        Returns:
-            File operation ID (UUID string)
-        """
-        with self._lock:
-            file_op_id = str(uuid.uuid4())
-            timestamp = datetime.utcnow().isoformat()
-            metadata_json = json.dumps(metadata) if metadata else None
-
-            with self._get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute(
-                    """
-                    INSERT INTO file_operations 
-                    (id, operation_id, operation_type, file_path, file_size, content_hash, diff_summary, timestamp, metadata)
-                    VALUES (?, ?, 'write', ?, ?, ?, ?, ?, ?)
-                    """,
-                    (file_op_id, operation_id, file_path, file_size, content_hash, diff_summary, timestamp, metadata_json)
-                )
-                conn.commit()
-
-            return file_op_id
-
-    def record_file_delete(
-        self,
-        operation_id: str,
-        file_path: str,
-        metadata: Optional[Dict[str, Any]] = None
-    ) -> str:
-        """
-        Record a file delete operation.
-        
-        Args:
-            operation_id: ID of the operation
-            file_path: Path to the file that was deleted
-            metadata: Additional metadata
-            
-        Returns:
-            File operation ID (UUID string)
-        """
-        with self._lock:
-            file_op_id = str(uuid.uuid4())
-            timestamp = datetime.utcnow().isoformat()
-            metadata_json = json.dumps(metadata) if metadata else None
-
-            with self._get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute(
-                    """
-                    INSERT INTO file_operations 
-                    (id, operation_id, operation_type, file_path, timestamp, metadata)
-                    VALUES (?, ?, 'delete', ?, ?, ?)
-                    """,
-                    (file_op_id, operation_id, file_path, timestamp, metadata_json)
-                )
-                conn.commit()
-
-            return file_op_id
-
-    def record_git_operation(
-        self,
-        operation_id: str,
-        git_op_type: str,
-        details: Optional[Dict[str, Any]] = None,
-        metadata: Optional[Dict[str, Any]] = None
-    ) -> str:
-        """
-        Record a git operation (add, commit, checkout, etc.).
-        
-        Args:
-            operation_id: ID of the operation
-            git_op_type: Type of git operation ('add', 'commit', 'checkout', 'branch', 'merge')
-            details: Operation details (files added, commit hash, etc.)
-            metadata: Additional metadata
-            
-        Returns:
-            File operation ID (UUID string)
-        """
-        with self._lock:
-            file_op_id = str(uuid.uuid4())
-            timestamp = datetime.utcnow().isoformat()
-            
-            # Combine details and metadata
-            combined_metadata = {}
-            if details:
-                combined_metadata.update(details)
-            if metadata:
-                combined_metadata.update(metadata)
-            metadata_json = json.dumps(combined_metadata) if combined_metadata else None
-
-            with self._get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute(
-                    """
-                    INSERT INTO file_operations 
-                    (id, operation_id, operation_type, file_path, timestamp, metadata)
-                    VALUES (?, ?, 'git_' || ?, NULL, ?, ?)
-                    """,
-                    (file_op_id, operation_id, git_op_type, timestamp, metadata_json)
-                )
-                conn.commit()
-
-            return file_op_id
-
-    def get_file_operations(
-        self,
-        operation_id: str
-    ) -> List[Dict[str, Any]]:
-        """
-        Get all file operations for an operation.
-        
-        Args:
-            operation_id: ID of the operation
-            
-        Returns:
-            List of file operation dictionaries ordered by timestamp
-        """
-        with self._lock:
-            with self._get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute(
-                    """
-                    SELECT * FROM file_operations WHERE operation_id = ? ORDER BY timestamp ASC
-                    """,
-                    (operation_id,)
-                )
                 rows = cursor.fetchall()
                 
-                file_ops = []
+                logs = []
                 for row in rows:
-                    op = dict(row)
-                    if op["metadata"]:
-                        op["metadata"] = json.loads(op["metadata"])
-                    file_ops.append(op)
+                    log_ref = dict(row)
+                    if log_ref["log_data"]:
+                        log_ref["log_data"] = json.loads(log_ref["log_data"])
+                    logs.append(log_ref)
                 
-                return file_ops
+                return logs
 
-    def get_file_operations_by_path(
+    def get_logs_by_task(
         self,
-        file_path: str,
-        operation_type: Optional[str] = None,
+        task_id: int,
+        log_level: Optional[str] = None,
         limit: int = 100
     ) -> List[Dict[str, Any]]:
         """
-        Get file operations for a specific file path.
+        Get all log references for operations associated with a task.
         
         Args:
-            file_path: Path to the file
-            operation_type: Filter by operation type (read, write, delete, git_*)
-            limit: Maximum results
+            task_id: Task ID to query logs for
+            log_level: Optional filter by log level
+            limit: Maximum number of logs to return
             
         Returns:
-            List of file operation dictionaries ordered by timestamp
+            List of log reference dictionaries ordered by timestamp
         """
         with self._lock:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
                 
-                query = "SELECT * FROM file_operations WHERE file_path = ?"
-                params = [file_path]
+                query = """
+                    SELECT lr.* 
+                    FROM log_references lr
+                    INNER JOIN operations op ON lr.operation_id = op.id
+                    WHERE op.metadata LIKE ?
+                """
+                params = [f'%"{task_id}"%']
                 
-                if operation_type:
-                    if operation_type.startswith('git_'):
-                        query += " AND operation_type = ?"
-                    else:
-                        query += " AND operation_type = ?"
-                    params.append(operation_type)
+                if log_level:
+                    query += " AND lr.log_level = ?"
+                    params.append(log_level)
+                
+                query += " ORDER BY lr.timestamp DESC LIMIT ?"
+                params.append(limit)
+                
+                cursor.execute(query, params)
+                rows = cursor.fetchall()
+                
+                logs = []
+                for row in rows:
+                    log_ref = dict(row)
+                    if log_ref["log_data"]:
+                        log_ref["log_data"] = json.loads(log_ref["log_data"])
+                    logs.append(log_ref)
+                
+                return logs
+
+    def search_logs(
+        self,
+        message_contains: Optional[str] = None,
+        log_level: Optional[str] = None,
+        logger_name: Optional[str] = None,
+        start_time: Optional[str] = None,
+        end_time: Optional[str] = None,
+        limit: int = 100
+    ) -> List[Dict[str, Any]]:
+        """
+        Search log references by various criteria.
+        
+        Args:
+            message_contains: Filter by message content
+            log_level: Filter by log level
+            logger_name: Filter by logger name
+            start_time: Start time filter (ISO format)
+            end_time: End time filter (ISO format)
+            limit: Maximum results
+            
+        Returns:
+            List of log reference dictionaries ordered by timestamp
+        """
+        with self._lock:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                
+                query = "SELECT * FROM log_references WHERE 1=1"
+                params = []
+                
+                if message_contains:
+                    query += " AND message LIKE ?"
+                    params.append(f"%{message_contains}%")
+                
+                if log_level:
+                    query += " AND log_level = ?"
+                    params.append(log_level)
+                
+                if logger_name:
+                    query += " AND logger_name = ?"
+                    params.append(logger_name)
+                
+                if start_time:
+                    query += " AND timestamp >= ?"
+                    params.append(start_time)
+                
+                if end_time:
+                    query += " AND timestamp <= ?"
+                    params.append(end_time)
                 
                 query += " ORDER BY timestamp DESC LIMIT ?"
                 params.append(limit)
@@ -1637,171 +932,237 @@ class TelemetryManager:
                 cursor.execute(query, params)
                 rows = cursor.fetchall()
                 
-                file_ops = []
+                logs = []
                 for row in rows:
-                    op = dict(row)
-                    if op["metadata"]:
-                        op["metadata"] = json.loads(op["metadata"])
-                    file_ops.append(op)
+                    log_ref = dict(row)
+                    if log_ref["log_data"]:
+                        log_ref["log_data"] = json.loads(log_ref["log_data"])
+                    logs.append(log_ref)
                 
-                return file_ops
+                return logs
 
-    def get_modified_files(
-        self,
-        operation_id: str
-    ) -> List[str]:
-        """
-        Get list of files modified during an operation.
-        
-        Args:
-            operation_id: ID of the operation
-            
-        Returns:
-            List of unique file paths
-        """
-        with self._lock:
-            with self._get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute(
-                    """
-                    SELECT DISTINCT file_path 
-                    FROM file_operations 
-                    WHERE operation_id = ? 
-                    AND file_path IS NOT NULL 
-                    AND operation_type IN ('read', 'write', 'delete')
-                    """,
-                    (operation_id,)
-                )
-                rows = cursor.fetchall()
-                
-                return [row["file_path"] for row in rows if row["file_path"]]
-
-    # File I/O Wrappers for Automatic Telemetry
-
-    @contextmanager
-    def track_file_read(self, operation_id: str, file_path: str, metadata: Optional[Dict[str, Any]] = None):
-        """
-        Context manager to automatically track file reads.
-        
-        Usage:
-            with telemetry.track_file_read(op_id, "file.txt") as f:
-                content = f.read()
-        
-        Args:
-            operation_id: ID of the operation
-            file_path: Path to the file
-            metadata: Additional metadata
-            
-        Yields:
-            File handle
-        """
-        file_size = 0
-        try:
-            if os.path.exists(file_path):
-                file_size = os.path.getsize(file_path)
-            
-            with open(file_path, 'r') as f:
-                yield f
-                self.record_file_read(
-                    operation_id=operation_id,
-                    file_path=file_path,
-                    file_size=file_size,
-                    metadata=metadata
-                )
-        except Exception as e:
-            # Record failed read attempt
-            self.record_file_read(
-                operation_id=operation_id,
-                file_path=file_path,
-                file_size=file_size,
-                metadata={**(metadata or {}), "error": str(e)}
-            )
-            raise
-
-    def tracked_write_file(
+    def generate_operation_timeline(
         self,
         operation_id: str,
-        file_path: str,
-        content: str,
-        metadata: Optional[Dict[str, Any]] = None
-    ):
+        include_telemetry: bool = True,
+        include_logs: bool = True
+    ) -> Dict[str, Any]:
         """
-        Write to a file and automatically track the operation.
+        Generate a timeline of events for an operation.
+        
+        Combines telemetry events, metrics, and log references into a unified timeline.
         
         Args:
             operation_id: ID of the operation
-            file_path: Path to the file
-            content: Content to write
-            metadata: Additional metadata
+            include_telemetry: Include telemetry events and metrics
+            include_logs: Include log references
+            
+        Returns:
+            Dictionary with operation details and timeline of events
         """
-        import hashlib
-        
-        # Calculate content hash
-        content_hash = hashlib.sha256(content.encode()).hexdigest()[:16]
-        
-        # Write file
-        with open(file_path, 'w') as f:
-            f.write(content)
-        
-        # Record operation
-        self.record_file_write(
-            operation_id=operation_id,
-            file_path=file_path,
-            file_size=len(content.encode()),
-            content_hash=content_hash,
-            metadata=metadata
-        )
+        with self._lock:
+            # Get operation details
+            operation = self.get_operation(operation_id)
+            if not operation:
+                return {"error": "Operation not found"}
+            
+            timeline_events = []
+            
+            # Add telemetry events
+            if include_telemetry:
+                events = self.get_operation_events(operation_id)
+                for event in events:
+                    timeline_events.append({
+                        "type": "telemetry_event",
+                        "timestamp": event["timestamp"],
+                        "event_type": event["event_type"],
+                        "severity": event["severity"],
+                        "message": event["message"],
+                        "context": event.get("context")
+                    })
+                
+                metrics = self.get_operation_metrics(operation_id)
+                for metric in metrics:
+                    timeline_events.append({
+                        "type": "telemetry_metric",
+                        "timestamp": metric["timestamp"],
+                        "metric_name": metric["metric_name"],
+                        "metric_value": metric["metric_value"],
+                        "unit": metric.get("unit")
+                    })
+            
+            # Add log references
+            if include_logs:
+                logs = self.get_operation_logs(operation_id)
+                for log in logs:
+                    timeline_events.append({
+                        "type": "log",
+                        "timestamp": log["timestamp"],
+                        "log_level": log["log_level"],
+                        "logger_name": log["logger_name"],
+                        "message": log["message"],
+                        "data": log.get("log_data")
+                    })
+            
+            # Sort timeline by timestamp
+            timeline_events.sort(key=lambda x: x["timestamp"])
+            
+            return {
+                "operation_id": operation_id,
+                "operation_type": operation.get("operation_type"),
+                "operation_title": operation.get("title"),
+                "operation_status": operation.get("status"),
+                "operation_start": operation.get("start_time"),
+                "operation_end": operation.get("end_time"),
+                "timeline": timeline_events,
+                "event_count": len(timeline_events)
+            }
 
-    # Migration Management
-
-    def apply_migration(self, version: int, description: str, migration_sql: str):
+    def export_operation_with_logs(
+        self,
+        operation_id: str,
+        format: str = "json"
+    ) -> Dict[str, Any]:
         """
-        Apply a database migration.
+        Export operation data with associated logs for analysis.
         
         Args:
-            version: Migration version number
-            description: Human-readable description of migration
-            migration_sql: SQL to execute for the migration
-        """
-        with self._lock:
-            with self._get_connection() as conn:
-                cursor = conn.cursor()
-                
-                # Check if migration already applied
-                cursor.execute(
-                    "SELECT 1 FROM migrations WHERE version = ?",
-                    (version,)
-                )
-                if cursor.fetchone():
-                    return  # Already applied
-                
-                # Execute migration
-                cursor.executescript(migration_sql)
-                
-                # Record migration
-                cursor.execute(
-                    """
-                    INSERT INTO migrations (version, description)
-                    VALUES (?, ?)
-                    """,
-                    (version, description)
-                )
-                
-                conn.commit()
-
-    def get_migration_version(self) -> int:
-        """
-        Get the current migration version.
-        
+            operation_id: ID of the operation
+            format: Export format ('json' or 'dict')
+            
         Returns:
-            Highest migration version applied
+            Dictionary with complete operation data including logs
+        """
+        with self._lock:
+            # Get operation details
+            operation = self.get_operation(operation_id)
+            if not operation:
+                return {"error": "Operation not found"}
+            
+            # Get all related data
+            events = self.get_operation_events(operation_id)
+            metrics = self.get_operation_metrics(operation_id)
+            resources = self.get_operation_resources(operation_id)
+            logs = self.get_operation_logs(operation_id)
+            child_ops = self.get_child_operations(operation_id)
+            
+            export_data = {
+                "operation": operation,
+                "events": events,
+                "metrics": metrics,
+                "resources": resources,
+                "logs": logs,
+                "child_operations": child_ops,
+                "exported_at": datetime.utcnow().isoformat()
+            }
+            
+            if format == "json":
+                return json.dumps(export_data, indent=2, default=str)
+            else:
+                return export_data
+
+    def get_log_statistics(
+        self,
+        operation_id: Optional[str] = None,
+        start_time: Optional[str] = None,
+        end_time: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Get statistics about logs for an operation or time range.
+        
+        Args:
+            operation_id: Optional operation ID to filter by
+            start_time: Optional start time filter
+            end_time: Optional end time filter
+            
+        Returns:
+            Dictionary with log statistics
         """
         with self._lock:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute("SELECT MAX(version) FROM migrations")
-                row = cursor.fetchone()
-                return row[0] if row[0] else 0
+                
+                query = "SELECT log_level, COUNT(*) as count FROM log_references WHERE 1=1"
+                params = []
+                
+                if operation_id:
+                    query += " AND operation_id = ?"
+                    params.append(operation_id)
+                
+                if start_time:
+                    query += " AND timestamp >= ?"
+                    params.append(start_time)
+                
+                if end_time:
+                    query += " AND timestamp <= ?"
+                    params.append(end_time)
+                
+                query += " GROUP BY log_level"
+                
+                cursor.execute(query, params)
+                rows = cursor.fetchall()
+                
+                level_counts = {row["log_level"]: row["count"] for row in rows}
+                total_logs = sum(level_counts.values())
+                
+                return {
+                    "total_logs": total_logs,
+                    "by_level": level_counts,
+                    "error_count": level_counts.get("ERROR", 0),
+                    "warning_count": level_counts.get("WARNING", 0),
+                    "critical_count": level_counts.get("CRITICAL", 0)
+                }
+
+    def get_operation_with_telemetry_metrics(
+        self,
+        operation_id: str
+    ) -> Dict[str, Any]:
+        """
+        Get operation details with aggregated telemetry metrics in log context.
+        
+        This is useful for including telemetry metrics in log messages.
+        
+        Args:
+            operation_id: ID of the operation
+            
+        Returns:
+            Dictionary with operation details and key metrics
+        """
+        with self._lock:
+            operation = self.get_operation(operation_id)
+            if not operation:
+                return {"error": "Operation not found"}
+            
+            # Get key metrics
+            metrics = self.get_operation_metrics(operation_id)
+            metric_summary = {}
+            
+            for metric in metrics:
+                metric_name = metric["metric_name"]
+                if metric_name not in metric_summary:
+                    metric_summary[metric_name] = {
+                        "value": metric["metric_value"],
+                        "unit": metric.get("unit"),
+                        "timestamp": metric["timestamp"]
+                    }
+                else:
+                    # Keep the latest value
+                    if metric["timestamp"] > metric_summary[metric_name]["timestamp"]:
+                        metric_summary[metric_name] = {
+                            "value": metric["metric_value"],
+                            "unit": metric.get("unit"),
+                            "timestamp": metric["timestamp"]
+                        }
+            
+            return {
+                "operation_id": operation_id,
+                "operation_type": operation.get("operation_type"),
+                "operation_title": operation.get("title"),
+                "operation_status": operation.get("status"),
+                "start_time": operation.get("start_time"),
+                "end_time": operation.get("end_time"),
+                "telemetry_metrics": metric_summary
+            }
 
     # Context Manager API
 
@@ -1863,6 +1224,21 @@ class TelemetryManager:
                 self.telemetry.record_resource_usage(
                     self.operation_id, resource_type, value, unit, name
                 )
+            
+            def get_telemetry_context(self) -> Dict[str, Any]:
+                """
+                Get telemetry context for logging.
+                
+                Returns a dictionary with operation details that can be
+                passed to log messages as context.
+                
+                Returns:
+                    Dictionary with operation context
+                """
+                return {
+                    "operation_id": self.operation_id,
+                    "operation_type": self.telemetry.get_operation(self.operation_id).get("operation_type") if self.telemetry.get_operation(self.operation_id) else None
+                }
         
         op_context = OperationContext(self, operation_id)
         
