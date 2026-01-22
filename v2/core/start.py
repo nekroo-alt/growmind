@@ -25,7 +25,7 @@ from v2.data.checkpoint_manager import CheckpointManager
 class Orchestrator:
     def __init__(self):
         self.git_guard = GitGuard()
-        self.dispatcher = Dispatcher()
+        self.dispatcher = Dispatcher()  # Now has __init__ with telemetry_manager
         self.planner = Planner()
         self.implementor = Implementor()
         self.verifier = Verifier()

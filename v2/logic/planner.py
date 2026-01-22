@@ -8,6 +8,8 @@ from v1.logic.task_impact_analyzer import TaskImpactAnalyzer
 from v1.logic.complexity_estimator import ComplexityEstimator
 from v1.data.semantic_mapper import SemanticMapper
 from v1.llm_base.provider import LLMProvider
+from v2.data.telemetry_manager import get_telemetry_manager
+from v2.core.telemetry import telemetry
 
 
 class Planner:
@@ -17,6 +19,7 @@ class Planner:
         self.task_impact_analyzer = TaskImpactAnalyzer(workspace_root)
         self.llm = LLMProvider()
         self.semantic_mappers = {}  # Cache of semantic mappers
+        self.telemetry_manager = get_telemetry_manager()  # V3 telemetry
 
     @fcid_mapping("PLAN-0100")
     def breakdown_requirements(
@@ -32,119 +35,159 @@ class Planner:
         - Estimate token impact of proposed tasks
         - Validate that subtasks don't overlap in code modifications
         - Generate context-aware acceptance criteria
+        
+        V3 Enhancement: Integrated telemetry tracking for planning operations.
         """
-        # Step 1: Analyze task impact using AST analysis
+        # V3: Track planning operation
         task_title = task_to_break["title"] if task_to_break else "Initial requirement analysis and task breakdown"
-        acceptance_criteria = task_to_break["acceptance_criteria"] if task_to_break else ""
         
-        impact_analysis = self.task_impact_analyzer.analyze_task_impact(
-            task_title, acceptance_criteria
-        )
-        
-        # Step 2: Build semantic mappers for affected files
-        self._build_semantic_mappers(impact_analysis["affected_files"])
-        
-        # Step 3: Get relevant project files using impact-based selection
-        relevant_files = self._get_relevant_files(impact_analysis)
-        
-        query = task_title
-        pruned_context = self.context_engine.get_pruned_context(query, relevant_files)
-        
-        # Step 4: Prepare code structure information for LLM
-        code_structure_info = self._prepare_code_structure_info(impact_analysis)
-        
-        # Step 5: Build enhanced prompt with AST insights
-        system_prompt = self._build_enhanced_system_prompt(code_structure_info)
-        user_prompt = self._build_enhanced_user_prompt(
-            product_content, technical_content, task_to_break, 
-            pruned_context, code_structure_info, impact_analysis
-        )
-
-        # Step 6: Call LLM with enhanced context
-        result = self.llm.call(
-            system_prompt, user_prompt, temperature=0.2, max_tokens=4096
-        )
-        response = result["content"]
-
-        try:
-            if "Error: All LLM providers failed" in response:
-                raise ValueError(response)
-
-            # Parse JSON response
-            if "```json" in response:
-                response = response.split("```json")[1].split("```")[0].strip()
-            elif "```" in response:
-                response = response.split("```")[1].split("```")[0].strip()
-            subtasks_data = json.loads(response)
+        with self.telemetry_manager.track_operation(
+            operation_type="planning",
+            title=f"Task breakdown: {task_title}"
+        ) as op:
+            # Step 1: Analyze task impact using AST analysis
+            acceptance_criteria = task_to_break["acceptance_criteria"] if task_to_break else ""
             
-            # Step 7: Validate subtasks for overlap and estimate impact
-            validated_subtasks = self._validate_and_estimate_subtasks(
-                subtasks_data, impact_analysis
+            impact_analysis = self.task_impact_analyzer.analyze_task_impact(
+                task_title, acceptance_criteria
             )
             
-            # Step 8: Enhance acceptance criteria with context-aware checks
-            context_aware_subtasks = self._enhance_acceptance_criteria(
-                validated_subtasks, impact_analysis, code_structure_info
-            )
+            # Step 2: Build semantic mappers for affected files
+            self._build_semantic_mappers(impact_analysis["affected_files"])
             
-            subtasks = [
-                (t["title"], t["acceptance_criteria"], t.get("module"))
-                for t in context_aware_subtasks
-            ]
-        except Exception as e:
-            # Improved error handling: No more hardcoded platform tasks
-            log_activity(
-                summary="Task Breakdown Failed",
-                action="PLANNING",
-                status="Failed",
-                cot_blob=f"Error parsing LLM response or LLM failed: {str(e)}",
+            # Step 3: Get relevant project files using impact-based selection
+            relevant_files = self._get_relevant_files(impact_analysis)
+            
+            query = task_title
+            pruned_context = self.context_engine.get_pruned_context(query, relevant_files)
+            
+            # Step 4: Prepare code structure information for LLM
+            code_structure_info = self._prepare_code_structure_info(impact_analysis)
+            
+            # Step 5: Build enhanced prompt with AST insights
+            system_prompt = self._build_enhanced_system_prompt(code_structure_info)
+            user_prompt = self._build_enhanced_user_prompt(
+                product_content, technical_content, task_to_break, 
+                pruned_context, code_structure_info, impact_analysis
             )
-            # Return 0 to signify planning failed
-            return 0
 
-        parent_id = task_to_break["id"] if task_to_break else None
-        module = task_to_break["module"] if task_to_break else None
+            # Step 6: Call LLM with enhanced context
+            result = self.llm.call(
+                system_prompt, user_prompt, temperature=0.2, max_tokens=4096
+            )
+            response = result["content"]
 
-        new_tasks_added = 0
-        for title, ac, mod in subtasks:
-            if not task_exists(title):
-                log_task(
-                    title=title,
-                    status="pending",
-                    acceptance_criteria=ac,
-                    parent_id=parent_id,
-                    module=mod or module,
+            try:
+                if "Error: All LLM providers failed" in response:
+                    raise ValueError(response)
+
+                # Parse JSON response
+                if "```json" in response:
+                    response = response.split("```json")[1].split("```")[0].strip()
+                elif "```" in response:
+                    response = response.split("```")[1].split("```")[0].strip()
+                subtasks_data = json.loads(response)
+                
+                # Step 7: Validate subtasks for overlap and estimate impact
+                validated_subtasks = self._validate_and_estimate_subtasks(
+                    subtasks_data, impact_analysis
                 )
-                new_tasks_added += 1
+                
+                # Step 8: Enhance acceptance criteria with context-aware checks
+                context_aware_subtasks = self._enhance_acceptance_criteria(
+                    validated_subtasks, impact_analysis, code_structure_info
+                )
+                
+                subtasks = [
+                    (t["title"], t["acceptance_criteria"], t.get("module"))
+                    for t in context_aware_subtasks
+                ]
+            except Exception as e:
+                # Improved error handling: No more hardcoded platform tasks
+                log_activity(
+                    summary="Task Breakdown Failed",
+                    action="PLANNING",
+                    status="Failed",
+                    cot_blob=f"Error parsing LLM response or LLM failed: {str(e)}",
+                )
+                # V3: Record failure event
+                op.record_event(
+                    event_type="breakdown_failed",
+                    severity="error",
+                    message=f"Task breakdown failed: {str(e)}",
+                    context={"target": task_title, "error": str(e)}
+                )
+                # Return 0 to signify planning failed
+                return 0
 
-        # Calculate context size metrics
-        context_size_chars = len(pruned_context)
-        context_size_lines = pruned_context.count('\n')
-        
-        # Calculate average complexity score
-        avg_complexity = sum(
-            t.get("complexity_score", 0) for t in context_aware_subtasks
-        ) / len(context_aware_subtasks) if context_aware_subtasks else 0
-        
-        log_activity(
-            summary="Task Breakdown",
-            action="PLANNING",
-            status="Success",
-            cot_blob=(
-                f"Broke down {'project' if not task_to_break else task_to_break['title']} into {len(subtasks)} tasks. "
-                f"Added {new_tasks_added} new tasks. "
-                f"AST analysis identified {len(impact_analysis['affected_files'])} relevant files with "
-                f"{len(impact_analysis['target_classes'])} classes and {len(impact_analysis['target_functions'])} functions. "
-                f"Context size: {context_size_chars} chars ({context_size_lines} lines). "
-                f"Average task complexity: {avg_complexity:.1f}. "
-                f"Token usage: {result['usage']['total_tokens']} (prompt: {result['usage']['prompt_tokens']}, completion: {result['usage']['completion_tokens']})."
-            ),
-            tokens_used=result["usage"]["total_tokens"],
-            prompt_tokens=result["usage"]["prompt_tokens"],
-            completion_tokens=result["usage"]["completion_tokens"],
-            estimated_cost=result["cost"],
-        )
-        return new_tasks_added
+            parent_id = task_to_break["id"] if task_to_break else None
+            module = task_to_break["module"] if task_to_break else None
+
+            new_tasks_added = 0
+            for title, ac, mod in subtasks:
+                if not task_exists(title):
+                    log_task(
+                        title=title,
+                        status="pending",
+                        acceptance_criteria=ac,
+                        parent_id=parent_id,
+                        module=mod or module,
+                    )
+                    new_tasks_added += 1
+
+            # Calculate context size metrics
+            context_size_chars = len(pruned_context)
+            context_size_lines = pruned_context.count('\n')
+            
+            # Calculate average complexity score
+            avg_complexity = sum(
+                t.get("complexity_score", 0) for t in context_aware_subtasks
+            ) / len(context_aware_subtasks) if context_aware_subtasks else 0
+            
+            # V3: Record planning metrics and events
+            op.record_event(
+                event_type="breakdown_completed",
+                severity="info",
+                message=f"Successfully broke down into {len(subtasks)} tasks, added {new_tasks_added} new tasks",
+                context={
+                    "target": task_title,
+                    "total_subtasks": len(subtasks),
+                    "new_tasks": new_tasks_added,
+                    "affected_files": len(impact_analysis['affected_files']),
+                    "target_classes": len(impact_analysis['target_classes']),
+                    "target_functions": len(impact_analysis['target_functions']),
+                    "context_size_chars": context_size_chars,
+                    "context_size_lines": context_size_lines,
+                    "avg_complexity": avg_complexity
+                }
+            )
+            
+            op.record_metric("subtasks_generated", len(subtasks))
+            op.record_metric("new_tasks_added", new_tasks_added)
+            op.record_metric("affected_files_count", len(impact_analysis['affected_files']))
+            op.record_metric("context_size_chars", context_size_chars)
+            
+            log_activity(
+                summary="Task Breakdown",
+                action="PLANNING",
+                status="Success",
+                cot_blob=(
+                    f"Broke down {'project' if not task_to_break else task_to_break['title']} into {len(subtasks)} tasks. "
+                    f"Added {new_tasks_added} new tasks. "
+                    f"AST analysis identified {len(impact_analysis['affected_files'])} relevant files with "
+                    f"{len(impact_analysis['target_classes'])} classes and {len(impact_analysis['target_functions'])} functions. "
+                    f"Context size: {context_size_chars} chars ({context_size_lines} lines). "
+                    f"Average task complexity: {avg_complexity:.1f}. "
+                    f"Token usage: {result['usage']['total_tokens']} (prompt: {result['usage']['prompt_tokens']}, completion: {result['usage']['completion_tokens']})."
+                ),
+                tokens_used=result["usage"]["total_tokens"],
+                prompt_tokens=result["usage"]["prompt_tokens"],
+                completion_tokens=result["usage"]["completion_tokens"],
+                estimated_cost=result["cost"],
+            )
+            
+            telemetry.info(f"Task breakdown completed: {len(subtasks)} tasks, {new_tasks_added} new tasks added")
+            return new_tasks_added
     
     def _build_semantic_mappers(self, affected_files: List[Dict]):
         """

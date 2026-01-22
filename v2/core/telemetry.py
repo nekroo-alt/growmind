@@ -11,6 +11,10 @@ from rich.table import Table
 from rich.text import Text
 from collections import deque
 from contextlib import contextmanager
+from typing import Optional, Dict, Any
+
+# Import V3 TelemetryManager
+from v2.data.telemetry_manager import get_telemetry_manager
 
 
 class Telemetry:
@@ -43,6 +47,10 @@ class Telemetry:
             "tasks_completed": 0,
         }
         self.log_history = deque(maxlen=10)
+        
+        # V3 Telemetry Manager Integration
+        self.telemetry_manager = get_telemetry_manager()
+        self.current_operation_id: Optional[str] = None
 
         self.log_dir = "logs"
         if not os.path.exists(self.log_dir):
@@ -93,26 +101,80 @@ class Telemetry:
         # Strip rich tags for history if needed, or keep them for display
         self.log_history.append(f"[{color}]{timestamp} | {level} | {message}[/{color}]")
 
-    def info(self, message: str):
+    def info(self, message: str, context: Optional[Dict[str, Any]] = None):
         self.logger.info(message)
         self._add_to_history("INFO", message)
+        
+        # V3 Integration: Record log reference if we have an active operation
+        if self.current_operation_id:
+            self.telemetry_manager.record_log_reference(
+                operation_id=self.current_operation_id,
+                log_level="INFO",
+                logger_name="L4",
+                message=message,
+                log_data=context
+            )
 
-    def error(self, message: str, exc_info=False):
+    def error(self, message: str, exc_info=False, context: Optional[Dict[str, Any]] = None):
         self.logger.error(message, exc_info=exc_info)
         self._add_to_history("ERROR", message)
+        
+        # V3 Integration: Record log reference if we have an active operation
+        if self.current_operation_id:
+            self.telemetry_manager.record_log_reference(
+                operation_id=self.current_operation_id,
+                log_level="ERROR",
+                logger_name="L4",
+                message=message,
+                log_data=context
+            )
 
-    def debug(self, message: str):
+    def debug(self, message: str, context: Optional[Dict[str, Any]] = None):
         self.logger.debug(message)
         self._add_to_history("DEBUG", message)
+        
+        # V3 Integration: Record log reference if we have an active operation
+        if self.current_operation_id:
+            self.telemetry_manager.record_log_reference(
+                operation_id=self.current_operation_id,
+                log_level="DEBUG",
+                logger_name="L4",
+                message=message,
+                log_data=context
+            )
 
-    def warning(self, message: str):
+    def warning(self, message: str, context: Optional[Dict[str, Any]] = None):
         self.logger.warning(message)
         self._add_to_history("WARNING", message)
+        
+        # V3 Integration: Record log reference if we have an active operation
+        if self.current_operation_id:
+            self.telemetry_manager.record_log_reference(
+                operation_id=self.current_operation_id,
+                log_level="WARNING",
+                logger_name="L4",
+                message=message,
+                log_data=context
+            )
 
-    def log_task_start(self, task_title: str):
+    def log_task_start(self, task_title: str, task_id: Optional[int] = None):
         self.current_task = task_title
         self.current_step = ""
         self.info(f"🚀 Starting Task: [bold cyan]{task_title}[/bold cyan]")
+        
+        # V3 Integration: Start telemetry operation
+        self.current_operation_id = self.telemetry_manager.start_operation(
+            operation_type="task_execution",
+            title=task_title,
+            metadata={"task_id": task_id} if task_id else None
+        )
+        self.telemetry_manager.record_event(
+            self.current_operation_id,
+            "started",
+            "info",
+            f"Task started: {task_title}",
+            {"task_id": task_id} if task_id else None
+        )
 
     def log_task_success(self, task_title: str):
         self.info(
@@ -120,6 +182,17 @@ class Telemetry:
         )
         self.current_task = "Waiting..."
         self.current_step = ""
+        
+        # V3 Integration: End telemetry operation
+        if self.current_operation_id:
+            self.telemetry_manager.record_event(
+                self.current_operation_id,
+                "completed",
+                "info",
+                f"Task completed successfully: {task_title}"
+            )
+            self.telemetry_manager.end_operation(self.current_operation_id, "completed")
+            self.current_operation_id = None
 
     def log_task_failure(self, task_title: str, reason: str):
         self.error(
@@ -127,11 +200,33 @@ class Telemetry:
         )
         self.current_task = "Waiting..."
         self.current_step = ""
+        
+        # V3 Integration: End telemetry operation with failure
+        if self.current_operation_id:
+            self.telemetry_manager.record_event(
+                self.current_operation_id,
+                "failed",
+                "error",
+                f"Task failed: {task_title}",
+                {"reason": reason}
+            )
+            self.telemetry_manager.end_operation(self.current_operation_id, "failed", {"failure_reason": reason})
+            self.current_operation_id = None
 
-    def track_step(self, step_name: str):
+    def track_step(self, step_name: str, context: Optional[Dict[str, Any]] = None):
         """Sets the current active step within a task."""
         self.current_step = step_name
-        self.info(f"  ↳ [bold blue]Step:[/bold blue] {step_name}")
+        self.info(f"  ↳ [bold blue]Step:[/bold blue] {step_name}", context=context)
+        
+        # V3 Integration: Record step event
+        if self.current_operation_id:
+            self.telemetry_manager.record_event(
+                self.current_operation_id,
+                "step",
+                "info",
+                f"Step: {step_name}",
+                context
+            )
 
     def log_llm_usage(
         self, tokens: int, cost: float, p_tokens: int = 0, c_tokens: int = 0
@@ -142,6 +237,13 @@ class Telemetry:
         self.stats["completion_tokens"] += c_tokens
         self.stats["cost"] += cost
         self.update_dashboard()
+        
+        # V3 Integration: Record metrics
+        if self.current_operation_id:
+            self.telemetry_manager.record_metric(self.current_operation_id, "tokens_used", tokens, "tokens")
+            self.telemetry_manager.record_metric(self.current_operation_id, "prompt_tokens", p_tokens, "tokens")
+            self.telemetry_manager.record_metric(self.current_operation_id, "completion_tokens", c_tokens, "tokens")
+            self.telemetry_manager.record_metric(self.current_operation_id, "cost", cost, "USD")
 
     def log_llm_interaction(
         self, provider, model, system_prompt, user_prompt, response
@@ -161,18 +263,34 @@ class Telemetry:
         self.debug(f"LLM interaction logged to {self.llm_log_file}")
 
     @contextmanager
-    def task_context(self, task_title: str):
-        """Context manager for task execution."""
-        self.log_task_start(task_title)
-        outcome = {"success": True}
-        try:
-            yield outcome
-            if outcome["success"]:
-                self.log_task_success(task_title)
-        except Exception as e:
-            self.log_task_failure(task_title, str(e))
-            self.error(f"Error in task '{task_title}'", exc_info=True)
-            raise
+    def task_context(self, task_title: str, task_id: Optional[int] = None, operation_type: str = "task_execution"):
+        """
+        Context manager for task execution with V3 telemetry integration.
+        
+        Args:
+            task_title: Title of the task
+            task_id: Optional task ID for tracking
+            operation_type: Type of operation for telemetry
+        """
+        # V3 Integration: Use TelemetryManager context manager
+        with self.telemetry_manager.track_operation(
+            operation_type=operation_type,
+            title=task_title,
+            metadata={"task_id": task_id} if task_id else None
+        ) as op:
+            self.current_operation_id = op.operation_id
+            self.log_task_start(task_title, task_id)
+            outcome = {"success": True}
+            try:
+                yield outcome
+                if outcome["success"]:
+                    self.log_task_success(task_title)
+            except Exception as e:
+                self.log_task_failure(task_title, str(e))
+                self.error(f"Error in task '{task_title}'", exc_info=True)
+                raise
+            finally:
+                self.current_operation_id = None
 
     def start_dashboard(self):
         """

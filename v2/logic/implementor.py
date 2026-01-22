@@ -1,17 +1,18 @@
 import os
 import subprocess
 import glob
-from v1.data.db_manager import (
+from v2.data.db_manager import (
     log_activity,
     update_task_status,
     fcid_mapping,
     get_commit_count,
 )
-from v1.logic.git_guard import GitGuard
-from v1.logic.context_engine import ContextEngine
-from v1.llm_base.provider import LLMProvider
-from v1.logic.verifier import Verifier
-from v1.core.telemetry import telemetry
+from v2.logic.git_guard import GitGuard
+from v2.logic.context_engine import ContextEngine
+from v2.llm_base.provider import LLMProvider
+from v2.logic.verifier import Verifier
+from v2.core.telemetry import telemetry
+from v2.data.telemetry_manager import get_telemetry_manager
 
 
 class Implementor:
@@ -21,6 +22,7 @@ class Implementor:
         self.context_engine = ContextEngine(workspace_root)
         self.llm = LLMProvider()
         self.verifier = Verifier()
+        self.telemetry_manager = get_telemetry_manager()  # V3 telemetry
 
     def _get_error_reason(self, result):
         raw_content = result.get("raw_content", "").strip()
@@ -110,87 +112,103 @@ class Implementor:
     @fcid_mapping("ACT-100")
     def execute_tdd_cycle(self, task):
         """
-        Executes a Red-Green-Refactor cycle for the given task.
+        Executes a Red-Green-Refactor cycle for given task.
         Returns (success, error_message).
+        
+        V3 Enhancement: Integrated telemetry tracking for TDD cycle operations.
         """
         task_id = task["id"]
         task_title = task["title"]
         acceptance_criteria = task.get("acceptance_criteria", "")
-
-        # Context Injection with AST-based analysis
-        # Use enhanced ContextEngine with task title and acceptance criteria
-        # for intelligent file scoping and dependency-aware context selection
-        v1_files = glob.glob(
-            os.path.join(self.workspace_root, "v1/**/*.py"), recursive=True
-        )
-        v1_files = [os.path.relpath(f, self.workspace_root) for f in v1_files]
         
-        # Get pruned context with smart scoping enabled (V2 enhancement)
-        context = self.context_engine.get_pruned_context(
-            task_query=task_title,
-            files=v1_files,
-            use_smart_scoping=True,
-            task_title=task_title,
-            acceptance_criteria=acceptance_criteria,
-            force_refresh=False
-        )
-        
-        # Analyze context quality metrics
-        quality_metrics = self._analyze_context_quality(context)
-        
-        # Log detailed context information including quality metrics
-        log_activity(
-            summary=f"Starting TDD Cycle: {task_title}",
-            action="TDD Start",
-            status="Success",
-            cot_blob=(
-                f"Beginning implementation for task ID {task_id}. "
-                f"Context gathered: {len(context)} chars, "
-                f"{quality_metrics['file_count']} files, "
-                f"avg relevance: {quality_metrics['avg_relevance']:.2f}, "
-                f"quality score: {quality_metrics['quality_score']:.2f}, "
-                f"dependency coverage: {quality_metrics['dependency_coverage']}"
-            ),
-            notify_telemetry=False,  # We use log_task_start via orchestrator/task_context
-        )
-        
-        # Log telemetry for context quality monitoring
-        telemetry.track_step(
-            f"Context collected: {quality_metrics['file_count']} files, "
-            f"quality score: {quality_metrics['quality_score']:.2f}"
-        )
-        
-        # Warn if context quality is low
-        if quality_metrics['quality_score'] < 0.3:
-            telemetry.warning(
-                f"Low context quality detected (score: {quality_metrics['quality_score']:.2f}). "
-                f"This may affect implementation accuracy. "
-                f"Avg relevance: {quality_metrics['avg_relevance']:.2f}, "
-                f"Dependency coverage: {quality_metrics['dependency_coverage']}"
+        # V3: Track TDD cycle operation
+        with self.telemetry_manager.track_operation(
+            operation_type="tdd_cycle",
+            title=f"TDD Cycle: {task_title}",
+            metadata={"task_id": task_id}
+        ) as op:
+            # Context Injection with AST-based analysis
+            # Use enhanced ContextEngine with task title and acceptance criteria
+            # for intelligent file scoping and dependency-aware context selection
+            v1_files = glob.glob(
+                os.path.join(self.workspace_root, "v1/**/*.py"), recursive=True
             )
+            v1_files = [os.path.relpath(f, self.workspace_root) for f in v1_files]
+            
+            # Get pruned context with smart scoping enabled (V2 enhancement)
+            context = self.context_engine.get_pruned_context(
+                task_query=task_title,
+                files=v1_files,
+                use_smart_scoping=True,
+                task_title=task_title,
+                acceptance_criteria=acceptance_criteria,
+                force_refresh=False
+            )
+            
+            # Analyze context quality metrics
+            quality_metrics = self._analyze_context_quality(context)
+            
+            # Log detailed context information including quality metrics
+            log_activity(
+                summary=f"Starting TDD Cycle: {task_title}",
+                action="TDD Start",
+                status="Success",
+                cot_blob=(
+                    f"Beginning implementation for task ID {task_id}. "
+                    f"Context gathered: {len(context)} chars, "
+                    f"{quality_metrics['file_count']} files, "
+                    f"avg relevance: {quality_metrics['avg_relevance']:.2f}, "
+                    f"quality score: {quality_metrics['quality_score']:.2f}, "
+                    f"dependency coverage: {quality_metrics['dependency_coverage']}"
+                ),
+                notify_telemetry=False,  # We use log_task_start via orchestrator/task_context
+            )
+            
+            # Log telemetry for context quality monitoring
+            telemetry.track_step(
+                f"Context collected: {quality_metrics['file_count']} files, "
+                f"quality score: {quality_metrics['quality_score']:.2f}"
+            )
+            
+            # Warn if context quality is low
+            if quality_metrics['quality_score'] < 0.3:
+                telemetry.warning(
+                    f"Low context quality detected (score: {quality_metrics['quality_score']:.2f}). "
+                    f"This may affect implementation accuracy. "
+                    f"Avg relevance: {quality_metrics['avg_relevance']:.2f}, "
+                    f"Dependency coverage: {quality_metrics['dependency_coverage']}"
+                )
 
-        # Red Phase: Write a failing test
-        telemetry.track_step("Red Phase: Writing failing test")
-        success, error = self._run_red_phase(task, context)
-        if not success:
-            return False, error
+            # Red Phase: Write a failing test
+            telemetry.track_step("Red Phase: Writing failing test")
+            success, error = self._run_red_phase(task, context)
+            if not success:
+                return False, error
 
-        # Green Phase: Write minimal code to pass
-        telemetry.track_step("Green Phase: Implementing code")
-        success, error = self._run_green_phase(task, context)
-        if not success:
-            return False, error
+            # Green Phase: Write minimal code to pass
+            telemetry.track_step("Green Phase: Implementing code")
+            success, error = self._run_green_phase(task, context)
+            if not success:
+                return False, error
 
-        # Refactor Phase: Cleanup
-        telemetry.track_step("Refactor Phase: Cleaning up")
-        self._run_refactor_phase(task_title)
+            # Refactor Phase: Cleanup
+            telemetry.track_step("Refactor Phase: Cleaning up")
+            self._run_refactor_phase(task_title)
 
-        # Check for Refactor Sprint (every 10 commits)
-        if get_commit_count() % 10 == 0 and get_commit_count() > 0:
-            self.run_refactor_sprint()
+            # Check for Refactor Sprint (every 10 commits)
+            if get_commit_count() % 10 == 0 and get_commit_count() > 0:
+                self.run_refactor_sprint()
 
-        update_task_status(task_id, "completed")
-        return True, None
+            # V3: Record TDD cycle completion
+            op.record_event(
+                event_type="tdd_cycle_completed",
+                severity="info",
+                message=f"TDD cycle completed successfully for task: {task_title}",
+                context={"task_id": task_id}
+            )
+            
+            update_task_status(task_id, "completed")
+            return True, None
 
     def _run_red_phase(self, task, context):
         task_title = task["title"]
