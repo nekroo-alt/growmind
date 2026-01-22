@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Optional, Dict, List, Any, Tuple
 import threading
 import logging
+from collections import defaultdict, Counter
 
 logger = logging.getLogger(__name__)
 
@@ -861,6 +862,717 @@ class SessionManager:
             
             logger.info(f"Archived {count} stale sessions")
             return count
+    
+    # ==================== Task 5.4: Session Analytics and Reporting ====================
+    
+    def get_session_metrics(self, session_id: str, telemetry_manager=None) -> Dict[str, Any]:
+        """
+        Calculate comprehensive metrics for a session.
+        
+        Args:
+            session_id: ID of the session
+            telemetry_manager: Optional TelemetryManager for enhanced metrics
+            
+        Returns:
+            Dictionary with session metrics
+            
+        Example:
+            >>> metrics = manager.get_session_metrics("abc-123", telemetry_manager)
+            >>> print(f"Duration: {metrics['duration_minutes']} minutes")
+            >>> print(f"Tasks completed: {metrics['tasks_completed']}")
+        """
+        session = self._load_session(session_id)
+        if not session:
+            return {"error": "Session not found"}
+        
+        # Calculate duration
+        end_time = session.end_time or datetime.now()
+        duration_seconds = (end_time - session.start_time).total_seconds()
+        duration_minutes = duration_seconds / 60
+        
+        metrics = {
+            "session_id": session_id,
+            "start_time": session.start_time.isoformat(),
+            "end_time": session.end_time.isoformat() if session.end_time else None,
+            "duration_seconds": round(duration_seconds, 2),
+            "duration_minutes": round(duration_minutes, 2),
+            "status": session.status.value,
+            "tasks_completed": len(session.active_tasks),
+            "operations_count": len(session.active_operations),
+            "checkpoint_count": self._get_session_checkpoint_count(session_id)
+        }
+        
+        # Enhanced metrics from telemetry if available
+        if telemetry_manager:
+            # Get operations for this session
+            session_ops = telemetry_manager.query_operations(
+                start_time=session.start_time.isoformat(),
+                end_time=(session.end_time or datetime.now()).isoformat()
+            )
+            
+            # Calculate success rate
+            completed_ops = [op for op in session_ops if op["status"] == "completed"]
+            failed_ops = [op for op in session_ops if op["status"] == "failed"]
+            metrics["operations_completed"] = len(completed_ops)
+            metrics["operations_failed"] = len(failed_ops)
+            metrics["operations_success_rate"] = (
+                len(completed_ops) / len(session_ops) * 100 if session_ops else 0
+            )
+            
+            # Calculate average operation duration
+            completed_with_duration = [
+                op for op in completed_ops
+                if op["end_time"] and op["start_time"]
+            ]
+            if completed_with_duration:
+                durations = [
+                    (datetime.fromisoformat(op["end_time"]) - 
+                     datetime.fromisoformat(op["start_time"])).total_seconds()
+                    for op in completed_with_duration
+                ]
+                metrics["avg_operation_duration_seconds"] = round(sum(durations) / len(durations), 2)
+            
+            # Count errors from telemetry events
+            error_events = telemetry_manager.search_events(
+                severity="error",
+                start_time=session.start_time.isoformat(),
+                end_time=(session.end_time or datetime.now()).isoformat(),
+                limit=1000
+            )
+            metrics["error_count"] = len(error_events)
+            
+            # Count critical errors
+            critical_events = telemetry_manager.search_events(
+                severity="critical",
+                start_time=session.start_time.isoformat(),
+                end_time=(session.end_time or datetime.now()).isoformat(),
+                limit=1000
+            )
+            metrics["critical_error_count"] = len(critical_events)
+        
+        return metrics
+    
+    def get_session_productivity(self, session_id: str, telemetry_manager=None) -> Dict[str, Any]:
+        """
+        Calculate productivity metrics for a session.
+        
+        Args:
+            session_id: ID of the session
+            telemetry_manager: Optional TelemetryManager for enhanced metrics
+            
+        Returns:
+            Dictionary with productivity metrics
+            
+        Example:
+            >>> productivity = manager.get_session_productivity("abc-123")
+            >>> print(f"Tasks per hour: {productivity['tasks_per_hour']}")
+        """
+        metrics = self.get_session_metrics(session_id, telemetry_manager)
+        
+        if "error" in metrics:
+            return metrics
+        
+        # Calculate tasks per hour
+        duration_hours = metrics["duration_minutes"] / 60
+        if duration_hours > 0:
+            tasks_per_hour = metrics["tasks_completed"] / duration_hours
+        else:
+            tasks_per_hour = 0
+        
+        # Calculate operations per hour
+        if duration_hours > 0:
+            ops_per_hour = metrics.get("operations_completed", 0) / duration_hours
+        else:
+            ops_per_hour = 0
+        
+        # Calculate productivity score (0-100)
+        # Factors: task completion rate, error rate, operations success rate
+        base_score = 50  # Start at 50
+        
+        # Bonus for task completion
+        if metrics["tasks_completed"] > 0:
+            base_score += min(metrics["tasks_completed"] * 2, 30)  # Max +30
+        
+        # Penalty for errors
+        error_penalty = min(metrics.get("error_count", 0) * 5, 20)  # Max -20
+        base_score -= error_penalty
+        
+        # Bonus for high success rate
+        success_rate = metrics.get("operations_success_rate", 0)
+        if success_rate > 90:
+            base_score += 10
+        elif success_rate > 80:
+            base_score += 5
+        
+        # Clamp to 0-100
+        productivity_score = max(0, min(100, base_score))
+        
+        return {
+            "session_id": session_id,
+            "tasks_per_hour": round(tasks_per_hour, 2),
+            "operations_per_hour": round(ops_per_hour, 2),
+            "productivity_score": round(productivity_score, 1),
+            "tasks_completed": metrics["tasks_completed"],
+            "operations_completed": metrics.get("operations_completed", 0),
+            "error_count": metrics.get("error_count", 0),
+            "duration_hours": round(duration_hours, 2)
+        }
+    
+    def generate_session_timeline(
+        self,
+        session_id: str,
+        telemetry_manager=None
+    ) -> Dict[str, Any]:
+        """
+        Generate a timeline of key events for a session.
+        
+        Args:
+            session_id: ID of the session
+            telemetry_manager: Optional TelemetryManager for enhanced timeline
+            
+        Returns:
+            Dictionary with session timeline
+            
+        Example:
+            >>> timeline = manager.generate_session_timeline("abc-123", telemetry_manager)
+            >>> for event in timeline["events"]:
+            ...     print(f"{event['timestamp']}: {event['description']}")
+        """
+        session = self._load_session(session_id)
+        if not session:
+            return {"error": "Session not found"}
+        
+        timeline_events = []
+        
+        # Add session start
+        timeline_events.append({
+            "timestamp": session.start_time.isoformat(),
+            "event_type": "session_start",
+            "description": f"Session started",
+            "severity": "info"
+        })
+        
+        # Add checkpoints if available
+        checkpoint_ids = self._get_session_checkpoints(session_id)
+        for i, checkpoint_id in enumerate(checkpoint_ids, 1):
+            timeline_events.append({
+                "timestamp": session.start_time.isoformat(),  # Approximate, would need actual checkpoint time
+                "event_type": "checkpoint_created",
+                "description": f"Checkpoint created ({i}/{len(checkpoint_ids)})",
+                "severity": "info",
+                "checkpoint_id": checkpoint_id
+            })
+        
+        # Add telemetry events if available
+        if telemetry_manager:
+            session_ops = telemetry_manager.query_operations(
+                start_time=session.start_time.isoformat(),
+                end_time=(session.end_time or datetime.now()).isoformat(),
+                limit=1000
+            )
+            
+            for op in session_ops:
+                timeline_events.append({
+                    "timestamp": op["start_time"],
+                    "event_type": "operation_start",
+                    "description": f"Operation started: {op['title']}",
+                    "severity": "info",
+                    "operation_id": op["id"],
+                    "operation_type": op["operation_type"]
+                })
+                
+                if op["end_time"]:
+                    status_icon = "✓" if op["status"] == "completed" else "✗"
+                    timeline_events.append({
+                        "timestamp": op["end_time"],
+                        "event_type": "operation_end",
+                        "description": f"Operation {status_icon}: {op['title']} ({op['status']})",
+                        "severity": "info" if op["status"] == "completed" else "error",
+                        "operation_id": op["id"],
+                        "operation_status": op["status"]
+                    })
+            
+            # Add error events
+            error_events = telemetry_manager.search_events(
+                severity="error",
+                start_time=session.start_time.isoformat(),
+                end_time=(session.end_time or datetime.now()).isoformat(),
+                limit=1000
+            )
+            
+            for error in error_events:
+                timeline_events.append({
+                    "timestamp": error["timestamp"],
+                    "event_type": "error",
+                    "description": f"Error: {error['message']}",
+                    "severity": "error",
+                    "operation_id": error["operation_id"]
+                })
+        
+        # Add session end if completed
+        if session.end_time:
+            timeline_events.append({
+                "timestamp": session.end_time.isoformat(),
+                "event_type": "session_end",
+                "description": f"Session ended ({session.status.value})",
+                "severity": "info"
+            })
+        
+        # Sort by timestamp
+        timeline_events.sort(key=lambda x: x["timestamp"])
+        
+        # Calculate event statistics
+        error_count = sum(1 for e in timeline_events if e["severity"] == "error")
+        info_count = sum(1 for e in timeline_events if e["severity"] == "info")
+        
+        return {
+            "session_id": session_id,
+            "session_start": session.start_time.isoformat(),
+            "session_end": session.end_time.isoformat() if session.end_time else None,
+            "events": timeline_events,
+            "event_count": len(timeline_events),
+            "error_count": error_count,
+            "info_count": info_count
+        }
+    
+    def identify_bottlenecks(
+        self,
+        session_id: str,
+        telemetry_manager=None
+    ) -> List[Dict[str, Any]]:
+        """
+        Identify bottlenecks and slow operations in a session.
+        
+        Args:
+            session_id: ID of the session
+            telemetry_manager: TelemetryManager instance (required)
+            
+        Returns:
+            List of bottlenecks identified
+            
+        Example:
+            >>> bottlenecks = manager.identify_bottlenecks("abc-123", telemetry_manager)
+            >>> for bottleneck in bottlenecks:
+            ...     print(f"{bottleneck['operation']}: {bottleneck['duration_seconds']}s")
+        """
+        if not telemetry_manager:
+            return [{"error": "TelemetryManager required for bottleneck analysis"}]
+        
+        session = self._load_session(session_id)
+        if not session:
+            return [{"error": "Session not found"}]
+        
+        # Get all operations for this session
+        session_ops = telemetry_manager.query_operations(
+            start_time=session.start_time.isoformat(),
+            end_time=(session.end_time or datetime.now()).isoformat(),
+            limit=1000
+        )
+        
+        # Calculate durations for completed operations
+        bottlenecks = []
+        for op in session_ops:
+            if op["end_time"] and op["start_time"] and op["status"] == "completed":
+                start = datetime.fromisoformat(op["start_time"])
+                end = datetime.fromisoformat(op["end_time"])
+                duration_seconds = (end - start).total_seconds()
+                
+                # Flag operations taking > 30 seconds as potential bottlenecks
+                if duration_seconds > 30:
+                    bottlenecks.append({
+                        "operation_id": op["id"],
+                        "operation_type": op["operation_type"],
+                        "operation_title": op["title"],
+                        "duration_seconds": round(duration_seconds, 2),
+                        "severity": "high" if duration_seconds > 60 else "medium"
+                    })
+        
+        # Sort by duration (slowest first)
+        bottlenecks.sort(key=lambda x: x["duration_seconds"], reverse=True)
+        
+        # Add failed operations as bottlenecks
+        failed_ops = [op for op in session_ops if op["status"] == "failed"]
+        for op in failed_ops:
+            bottlenecks.append({
+                "operation_id": op["id"],
+                "operation_type": op["operation_type"],
+                "operation_title": op["title"],
+                "duration_seconds": 0,
+                "severity": "critical",
+                "issue": "operation_failed"
+            })
+        
+        return bottlenecks
+    
+    def identify_error_patterns(
+        self,
+        session_id: str,
+        telemetry_manager=None
+    ) -> Dict[str, Any]:
+        """
+        Identify common error patterns in a session.
+        
+        Args:
+            session_id: ID of the session
+            telemetry_manager: TelemetryManager instance (required)
+            
+        Returns:
+            Dictionary with error pattern analysis
+            
+        Example:
+            >>> patterns = manager.identify_error_patterns("abc-123", telemetry_manager)
+            >>> print(f"Most common error: {patterns['most_common_error']}")
+        """
+        if not telemetry_manager:
+            return {"error": "TelemetryManager required for error pattern analysis"}
+        
+        session = self._load_session(session_id)
+        if not session:
+            return {"error": "Session not found"}
+        
+        # Get all error events
+        error_events = telemetry_manager.search_events(
+            severity="error",
+            start_time=session.start_time.isoformat(),
+            end_time=(session.end_time or datetime.now()).isoformat(),
+            limit=1000
+        )
+        
+        # Get all critical events
+        critical_events = telemetry_manager.search_events(
+            severity="critical",
+            start_time=session.start_time.isoformat(),
+            end_time=(session.end_time or datetime.now()).isoformat(),
+            limit=1000
+        )
+        
+        # Count error types by operation type
+        error_by_operation = defaultdict(int)
+        error_messages = []
+        
+        for error in error_events + critical_events:
+            error_by_operation[error["event_type"]] += 1
+            error_messages.append(error["message"])
+        
+        # Find most common error
+        most_common_error = None
+        most_common_count = 0
+        for error_type, count in error_by_operation.items():
+            if count > most_common_count:
+                most_common_count = count
+                most_common_error = error_type
+        
+        # Identify recurring error messages
+        from collections import Counter
+        message_counter = Counter(error_messages)
+        recurring_errors = [
+            {"message": msg, "count": count}
+            for msg, count in message_counter.most_common(10)
+            if count > 1
+        ]
+        
+        return {
+            "session_id": session_id,
+            "total_errors": len(error_events),
+            "total_critical": len(critical_events),
+            "error_by_operation": dict(error_by_operation),
+            "most_common_error": most_common_error,
+            "most_common_error_count": most_common_count,
+            "recurring_error_messages": recurring_errors
+        }
+    
+    def compare_sessions(
+        self,
+        session_ids: List[str],
+        telemetry_manager=None
+    ) -> Dict[str, Any]:
+        """
+        Compare multiple sessions to identify trends.
+        
+        Args:
+            session_ids: List of session IDs to compare
+            telemetry_manager: Optional TelemetryManager for enhanced comparison
+            
+        Returns:
+            Dictionary with session comparison
+            
+        Example:
+            >>> comparison = manager.compare_sessions(["abc-123", "def-456"], telemetry_manager)
+            >>> print(f"Average duration: {comparison['avg_duration_minutes']} minutes")
+        """
+        if not session_ids:
+            return {"error": "No sessions provided for comparison"}
+        
+        session_data = []
+        for session_id in session_ids:
+            metrics = self.get_session_metrics(session_id, telemetry_manager)
+            if "error" not in metrics:
+                session_data.append(metrics)
+        
+        if not session_data:
+            return {"error": "No valid sessions found"}
+        
+        # Calculate averages
+        avg_duration = sum(s["duration_seconds"] for s in session_data) / len(session_data)
+        avg_tasks = sum(s["tasks_completed"] for s in session_data) / len(session_data)
+        avg_ops = sum(s.get("operations_completed", 0) for s in session_data) / len(session_data)
+        avg_errors = sum(s.get("error_count", 0) for s in session_data) / len(session_data)
+        
+        # Find best and worst sessions
+        best_session = max(session_data, key=lambda s: s["tasks_completed"])
+        worst_session = min(session_data, key=lambda s: s["tasks_completed"])
+        
+        # Calculate success rate
+        completed_ops = sum(s.get("operations_completed", 0) for s in session_data)
+        total_ops = sum(s.get("operations_completed", 0) + s.get("operations_failed", 0) for s in session_data)
+        success_rate = (completed_ops / total_ops * 100) if total_ops > 0 else 0
+        
+        return {
+            "session_count": len(session_data),
+            "avg_duration_seconds": round(avg_duration, 2),
+            "avg_duration_minutes": round(avg_duration / 60, 2),
+            "avg_tasks_completed": round(avg_tasks, 2),
+            "avg_operations_completed": round(avg_ops, 2),
+            "avg_errors": round(avg_errors, 2),
+            "overall_success_rate": round(success_rate, 2),
+            "best_session": {
+                "session_id": best_session["session_id"],
+                "tasks_completed": best_session["tasks_completed"]
+            },
+            "worst_session": {
+                "session_id": worst_session["session_id"],
+                "tasks_completed": worst_session["tasks_completed"]
+            },
+            "session_details": session_data
+        }
+    
+    def generate_report(
+        self,
+        session_id: str,
+        telemetry_manager=None,
+        include_timeline: bool = True,
+        include_bottlenecks: bool = True,
+        include_errors: bool = True
+    ) -> Dict[str, Any]:
+        """
+        Generate a comprehensive report for a session.
+        
+        Args:
+            session_id: ID of the session
+            telemetry_manager: Optional TelemetryManager for enhanced report
+            include_timeline: Include timeline of events
+            include_bottlenecks: Include bottleneck analysis
+            include_errors: Include error pattern analysis
+            
+        Returns:
+            Dictionary with complete session report
+            
+        Example:
+            >>> report = manager.generate_report("abc-123", telemetry_manager)
+            >>> print(json.dumps(report, indent=2))
+        """
+        # Get basic session info
+        session = self._load_session(session_id)
+        if not session:
+            return {"error": "Session not found"}
+        
+        # Build report
+        report = {
+            "session_id": session_id,
+            "start_time": session.start_time.isoformat(),
+            "end_time": session.end_time.isoformat() if session.end_time else None,
+            "status": session.status.value,
+            "generated_at": datetime.now().isoformat()
+        }
+        
+        # Add metrics
+        report["metrics"] = self.get_session_metrics(session_id, telemetry_manager)
+        
+        # Add productivity
+        report["productivity"] = self.get_session_productivity(session_id, telemetry_manager)
+        
+        # Add timeline
+        if include_timeline:
+            report["timeline"] = self.generate_session_timeline(session_id, telemetry_manager)
+        
+        # Add bottlenecks
+        if include_bottlenecks and telemetry_manager:
+            report["bottlenecks"] = self.identify_bottlenecks(session_id, telemetry_manager)
+        
+        # Add error patterns
+        if include_errors and telemetry_manager:
+            report["error_patterns"] = self.identify_error_patterns(session_id, telemetry_manager)
+        
+        return report
+    
+    def generate_period_report(
+        self,
+        days: int = 7,
+        telemetry_manager=None
+    ) -> Dict[str, Any]:
+        """
+        Generate a report for sessions within a time period.
+        
+        Args:
+            days: Number of days to look back
+            telemetry_manager: Optional TelemetryManager for enhanced report
+            
+        Returns:
+            Dictionary with period report
+            
+        Example:
+            >>> report = manager.generate_period_report(days=7, telemetry_manager=tm)
+            >>> print(f"Total sessions: {report['session_count']}")
+        """
+        # Get sessions from the last N days
+        cutoff_date = datetime.now() - timedelta(days=days)
+        
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                SELECT * FROM sessions 
+                WHERE start_time >= ?
+                ORDER BY start_time DESC
+            """, (cutoff_date.isoformat(),))
+            
+            rows = cursor.fetchall()
+            sessions = [self._row_to_session(row) for row in rows]
+        
+        if not sessions:
+            return {
+                "period_days": days,
+                "session_count": 0,
+                "message": f"No sessions found in the last {days} days"
+            }
+        
+        # Generate metrics for all sessions
+        session_ids = [s.session_id for s in sessions]
+        comparison = self.compare_sessions(session_ids, telemetry_manager)
+        
+        # Calculate daily statistics
+        daily_sessions = defaultdict(int)
+        for session in sessions:
+            date_key = session.start_time.date().isoformat()
+            daily_sessions[date_key] += 1
+        
+        # Calculate task completion trend
+        total_tasks = sum(len(s.active_tasks) for s in sessions)
+        avg_tasks_per_session = total_tasks / len(sessions)
+        
+        return {
+            "period_days": days,
+            "period_start": cutoff_date.isoformat(),
+            "period_end": datetime.now().isoformat(),
+            "session_count": len(sessions),
+            "daily_sessions": dict(daily_sessions),
+            "comparison": comparison,
+            "total_tasks_completed": total_tasks,
+            "avg_tasks_per_session": round(avg_tasks_per_session, 2)
+        }
+    
+    def export_report(
+        self,
+        session_id: str,
+        export_path: str,
+        telemetry_manager=None,
+        format: str = "json"
+    ) -> bool:
+        """
+        Export session report to a file.
+        
+        Args:
+            session_id: ID of the session
+            export_path: Path to export file
+            telemetry_manager: Optional TelemetryManager for enhanced report
+            format: Export format ('json' or 'markdown')
+            
+        Returns:
+            True if exported successfully, False otherwise
+            
+        Example:
+            >>> success = manager.export_report(
+            ...     "abc-123",
+            ...     "session_report.json",
+            ...     telemetry_manager=tm,
+            ...     format="json"
+            ... )
+        """
+        report = self.generate_report(session_id, telemetry_manager)
+        
+        if "error" in report:
+            logger.error(f"Failed to generate report: {report['error']}")
+            return False
+        
+        try:
+            Path(export_path).parent.mkdir(parents=True, exist_ok=True)
+            
+            if format == "json":
+                with open(export_path, 'w') as f:
+                    json.dump(report, f, indent=2, default=str)
+            elif format == "markdown":
+                with open(export_path, 'w') as f:
+                    f.write("# Session Report\n\n")
+                    f.write(f"**Session ID:** {report['session_id']}\n\n")
+                    f.write(f"**Start Time:** {report['start_time']}\n\n")
+                    f.write(f"**End Time:** {report['end_time'] or 'In Progress'}\n\n")
+                    f.write(f"**Status:** {report['status']}\n\n")
+                    
+                    f.write("## Metrics\n\n")
+                    metrics = report['metrics']
+                    f.write(f"- Duration: {metrics.get('duration_minutes', 0):.2f} minutes\n")
+                    f.write(f"- Tasks Completed: {metrics.get('tasks_completed', 0)}\n")
+                    f.write(f"- Operations: {metrics.get('operations_count', 0)}\n")
+                    f.write(f"- Errors: {metrics.get('error_count', 0)}\n\n")
+                    
+                    f.write("## Productivity\n\n")
+                    prod = report['productivity']
+                    f.write(f"- Tasks per Hour: {prod.get('tasks_per_hour', 0):.2f}\n")
+                    f.write(f"- Productivity Score: {prod.get('productivity_score', 0)}/100\n\n")
+                    
+                    if 'bottlenecks' in report:
+                        f.write("## Bottlenecks\n\n")
+                        for b in report['bottlenecks'][:5]:
+                            f.write(f"- {b['operation_title']}: {b['duration_seconds']}s\n")
+                        f.write("\n")
+                    
+                    if 'error_patterns' in report:
+                        f.write("## Error Patterns\n\n")
+                        f.write(f"- Total Errors: {report['error_patterns']['total_errors']}\n")
+                        f.write(f"- Most Common: {report['error_patterns']['most_common_error']}\n")
+            else:
+                logger.error(f"Unsupported export format: {format}")
+                return False
+            
+            logger.info(f"Report exported to {export_path}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to export report: {e}")
+            return False
+    
+    def _get_session_checkpoint_count(self, session_id: str) -> int:
+        """Get the number of checkpoints for a session."""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT COUNT(*) as count 
+                FROM session_checkpoints 
+                WHERE session_id = ?
+            """, (session_id,))
+            return cursor.fetchone()["count"]
+    
+    def _get_session_checkpoints(self, session_id: str) -> List[str]:
+        """Get all checkpoint IDs for a session."""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT checkpoint_id 
+                FROM session_checkpoints 
+                WHERE session_id = ?
+                ORDER BY created_at ASC
+            """, (session_id,))
+            return [row["checkpoint_id"] for row in cursor.fetchall()]
 
 
 # Singleton instance for easy access
