@@ -7,16 +7,22 @@ This module provides session management capabilities for L4D, including:
 - Listing and managing sessions
 - Archiving and exporting session state
 - Session validation and integrity checks
+- Detecting and recovering from interrupted sessions
+- Persisting session state across runs
 """
 
 import json
 import sqlite3
 import uuid
-from datetime import datetime
+import subprocess
+from datetime import datetime, timedelta
 from enum import Enum
 from pathlib import Path
-from typing import Optional, Dict, List, Any
+from typing import Optional, Dict, List, Any, Tuple
 import threading
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class SessionStatus(Enum):
@@ -566,6 +572,294 @@ class SessionManager:
             count = cursor.rowcount
             conn.commit()
             
+            return count
+    
+    def detect_interrupted_sessions(self) -> List[Session]:
+        """
+        Detect sessions that were interrupted (active or recently paused).
+        
+        Returns:
+            List of interrupted sessions
+            
+        Example:
+            >>> interrupted = manager.detect_interrupted_sessions()
+            >>> if interrupted:
+            ...     print(f"Found {len(interrupted)} interrupted sessions")
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            
+            # Find sessions that were active or paused in the last hour
+            # These are likely interrupted sessions
+            cursor.execute("""
+                SELECT * FROM sessions 
+                WHERE status IN (?, ?)
+                AND (end_time IS NULL OR end_time > datetime('now', '-1 hour'))
+                ORDER BY start_time DESC
+            """, (SessionStatus.ACTIVE.value, SessionStatus.PAUSED.value))
+            
+            rows = cursor.fetchall()
+            return [self._row_to_session(row) for row in rows]
+    
+    def save_session_on_shutdown(self, session_id: str, checkpoint_id: Optional[str] = None) -> bool:
+        """
+        Save session state before shutdown (graceful or interrupt).
+        
+        Args:
+            session_id: ID of the session to save
+            checkpoint_id: Optional checkpoint ID to associate with session
+            
+        Returns:
+            True if saved successfully, False otherwise
+            
+        Example:
+            >>> manager.save_session_on_shutdown("abc-123", checkpoint_id="chk-456")
+        """
+        with self.lock:
+            session = self._load_session(session_id)
+            
+            if not session:
+                logger.warning(f"Session {session_id} not found for shutdown save")
+                return False
+            
+            # Update session status to paused (not completed, since we're shutting down)
+            if session.status == SessionStatus.ACTIVE:
+                session.status = SessionStatus.PAUSED
+            
+            # Associate checkpoint if provided
+            if checkpoint_id:
+                session.checkpoint_id = checkpoint_id
+                self._save_checkpoint_mapping(session_id, checkpoint_id)
+            
+            # Record shutdown timestamp in metadata
+            session.metadata["last_shutdown"] = datetime.now().isoformat()
+            
+            self._save_session(session)
+            logger.info(f"Session {session_id} saved successfully on shutdown")
+            return True
+    
+    def _save_checkpoint_mapping(self, session_id: str, checkpoint_id: str) -> None:
+        """Save checkpoint to session mapping."""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                INSERT INTO session_checkpoints (session_id, checkpoint_id)
+                VALUES (?, ?)
+            """, (session_id, checkpoint_id))
+            
+            conn.commit()
+    
+    def restore_session_on_startup(self, session_id: str, checkpoint_manager=None) -> Tuple[Optional[Session], bool]:
+        """
+        Restore session on startup, checking for external changes.
+        
+        Args:
+            session_id: ID of the session to restore
+            checkpoint_manager: Optional CheckpointManager instance for state restoration
+            
+        Returns:
+            Tuple of (restored Session, has_external_changes)
+            
+        Example:
+            >>> session, has_changes = manager.restore_session_on_startup("abc-123")
+            >>> if session:
+            ...     if has_changes:
+            ...         print("External changes detected - merge needed")
+            ...     else:
+            ...         print("Session restored cleanly")
+        """
+        with self.lock:
+            session = self._load_session(session_id)
+            
+            if not session:
+                logger.warning(f"Session {session_id} not found for restoration")
+                return None, False
+            
+            # Check for external changes
+            has_external_changes = self._check_external_changes()
+            
+            if has_external_changes:
+                logger.warning(f"External changes detected for session {session_id}")
+                # Don't automatically restore - let user decide
+                return session, True
+            
+            # Restore from checkpoint if available
+            if session.checkpoint_id and checkpoint_manager:
+                try:
+                    logger.info(f"Restoring session {session_id} from checkpoint {session.checkpoint_id}")
+                    success = checkpoint_manager.restore(session.checkpoint_id)
+                    if not success:
+                        logger.error(f"Failed to restore checkpoint {session.checkpoint_id}")
+                        return None, False
+                except Exception as e:
+                    logger.error(f"Error restoring checkpoint: {e}")
+                    return None, False
+            
+            # Set session to active
+            session.status = SessionStatus.ACTIVE
+            self._save_session(session)
+            
+            logger.info(f"Session {session_id} restored successfully")
+            return session, False
+    
+    def _check_external_changes(self) -> bool:
+        """
+        Check if there are external changes to the git repository.
+        
+        Returns:
+            True if external changes detected, False otherwise
+        """
+        try:
+            # Check if git repository exists
+            result = subprocess.run(
+                ["git", "rev-parse", "--git-dir"],
+                capture_output=True,
+                text=True
+            )
+            
+            if result.returncode != 0:
+                # Not a git repository, assume no changes
+                return False
+            
+            # Check for uncommitted changes
+            result = subprocess.run(
+                ["git", "status", "--porcelain"],
+                capture_output=True,
+                text=True
+            )
+            
+            # If there are any changes, return True
+            if result.stdout.strip():
+                logger.info("External changes detected in git repository")
+                return True
+            
+            # Check if HEAD has moved (different commits)
+            result = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                capture_output=True,
+                text=True
+            )
+            
+            if result.returncode == 0:
+                current_head = result.stdout.strip()
+                
+                # Store last known head in session metadata
+                # For now, just assume changes if HEAD is different
+                # In production, store last HEAD in session metadata
+                
+            return False
+            
+        except Exception as e:
+            logger.warning(f"Error checking external changes: {e}")
+            return False
+    
+    def handle_merge_conflicts(self, session_id: str, external_session_id: str) -> bool:
+        """
+        Handle merge conflicts when external work conflicts with session.
+        
+        Args:
+            session_id: ID of the current session
+            external_session_id: ID of the session with external changes
+            
+        Returns:
+            True if merge was successful, False otherwise
+            
+        Example:
+            >>> success = manager.handle_merge_conflicts("abc-123", "def-456")
+            >>> if success:
+            ...     print("Merge completed successfully")
+            ... else:
+            ...     print("Merge failed - manual resolution needed")
+        """
+        with self.lock:
+            current = self._load_session(session_id)
+            external = self._load_session(external_session_id)
+            
+            if not current or not external:
+                logger.error("One or both sessions not found for merge")
+                return False
+            
+            # Basic merge strategy:
+            # 1. Preserve user's work if safe
+            # 2. Merge tasks and operations
+            # 3. Update checkpoint to latest state
+            
+            try:
+                # Check git status for conflicts
+                result = subprocess.run(
+                    ["git", "status", "--porcelain"],
+                    capture_output=True,
+                    text=True
+                )
+                
+                # If there are conflicts, warn user
+                if "U " in result.stdout:
+                    logger.warning("Git merge conflicts detected - manual resolution required")
+                    # In production, provide merge tools or interactive resolution
+                    return False
+                
+                # Merge tasks (avoid duplicates)
+                for task in external.active_tasks:
+                    if task not in current.active_tasks:
+                        current.active_tasks.append(task)
+                
+                # Merge operations (avoid duplicates)
+                for op in external.active_operations:
+                    if op not in current.active_operations:
+                        current.active_operations.append(op)
+                
+                # Merge metadata
+                for key, value in external.metadata.items():
+                    if key not in current.metadata:
+                        current.metadata[key] = value
+                
+                # Archive the external session
+                self.archive_session(external_session_id)
+                
+                # Save merged session
+                self._save_session(current)
+                
+                logger.info(f"Successfully merged external session {external_session_id} into {session_id}")
+                return True
+                
+            except Exception as e:
+                logger.error(f"Error during merge: {e}")
+                return False
+    
+    def cleanup_stale_sessions(self, hours: int = 24) -> int:
+        """
+        Clean up stale/interrupted sessions that are too old.
+        
+        Args:
+            hours: Number of hours after which sessions are considered stale
+            
+        Returns:
+            Number of sessions archived
+            
+        Example:
+            >>> count = manager.cleanup_stale_sessions(hours=24)
+            >>> print(f"Cleaned up {count} stale sessions")
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                UPDATE sessions 
+                SET status = ?, end_time = datetime('now'), updated_at = datetime('now')
+                WHERE status IN (?, ?)
+                AND (end_time IS NULL OR updated_at < datetime('now', '-' || ? || ' hours'))
+            """, (
+                SessionStatus.ARCHIVED.value,
+                SessionStatus.ACTIVE.value,
+                SessionStatus.PAUSED.value,
+                hours
+            ))
+            
+            count = cursor.rowcount
+            conn.commit()
+            
+            logger.info(f"Archived {count} stale sessions")
             return count
 
 

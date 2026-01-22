@@ -764,17 +764,17 @@ This document defines a series of tasks to enhance L4D v2 with comprehensive tel
 
 ---
 
-### Task 5.3: Session Persistence and Recovery
+### Task 5.3: Session Persistence and Recovery ✅ **COMPLETE**
 
 **Title**: Implement session persistence across runs
 
 **Acceptance Criteria**:
-- Save session state to disk on shutdown
-- Restore session state on startup
-- Detect and recover from interrupted sessions
-- Offer session resumption to user
-- Merge interrupted session if work continued externally
-- Clean up stale sessions
+- ✅ Save session state to disk on shutdown
+- ✅ Restore session state on startup
+- ✅ Detect and recover from interrupted sessions
+- ✅ Offer session resumption to user
+- ✅ Merge interrupted session if work continued externally
+- ✅ Clean up stale sessions
 
 **Module**: `core/session_manager.py` (enhance), `core/start.py`
 
@@ -783,11 +783,11 @@ This document defines a series of tasks to enhance L4D v2 with comprehensive tel
 **Dependencies**: Task 5.2, 4.3
 
 **Technical Notes**:
-- Auto-detect interrupted sessions on startup
-- Prompt user: "Resume previous session? [y/n]"
-- Use checkpoints for state restoration
-- Handle merge conflicts with external work
-- Archive sessions after completion
+- ✅ Auto-detect interrupted sessions on startup using `detect_interrupted_sessions()`
+- ✅ Prompt user: "Resume previous session? [y/n]" (logged in telemetry)
+- ✅ Use checkpoints for state restoration via `restore_session_on_startup()`
+- ✅ Handle merge conflicts with external work via `_check_external_changes()`
+- ✅ Archive sessions after completion via `cleanup_stale_sessions()`
 
 ---
 

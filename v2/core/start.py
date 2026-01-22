@@ -1,6 +1,6 @@
 import os
 import sys
-from v1.data.db_manager import (
+from v2.data.db_manager import (
     log_activity,
     fcid_mapping,
     init_db,
@@ -10,14 +10,16 @@ from v1.data.db_manager import (
     load_state,
     update_task_status,
 )
-from v1.llm_base.provider import LLMProvider
-from v1.logic.git_guard import GitGuard
-from v1.logic.dispatcher import Dispatcher
-from v1.logic.planner import Planner
-from v1.logic.implementor import Implementor
-from v1.logic.verifier import Verifier
-from v1.core.telemetry import telemetry
-from v1.retro.retro_agent import RetroAgent
+from v2.llm_base.provider import LLMProvider
+from v2.logic.git_guard import GitGuard
+from v2.logic.dispatcher import Dispatcher
+from v2.logic.planner import Planner
+from v2.logic.implementor import Implementor
+from v2.logic.verifier import Verifier
+from v2.core.telemetry import telemetry
+from v2.retro.retro_agent import RetroAgent
+from v2.core.session_manager import get_session_manager, SessionStatus
+from v2.data.checkpoint_manager import CheckpointManager
 
 
 class Orchestrator:
@@ -29,6 +31,11 @@ class Orchestrator:
         self.verifier = Verifier()
         self.telemetry = telemetry
         self.retro_agent = RetroAgent()
+        
+        # Session management
+        self.session_manager = get_session_manager()
+        self.checkpoint_manager = CheckpointManager()
+        self.current_session = None
 
     @fcid_mapping("CORE-100")
     def cold_start_check(self):
@@ -75,6 +82,70 @@ class Orchestrator:
             completion_tokens=c_tokens,
         )
 
+    def _handle_interrupted_sessions(self):
+        """
+        Detect and handle interrupted sessions on startup.
+        
+        Returns:
+            True if resuming a session, False otherwise
+        """
+        # Detect interrupted sessions
+        interrupted = self.session_manager.detect_interrupted_sessions()
+        
+        if not interrupted:
+            return False
+        
+        self.telemetry.info(f"Found {len(interrupted)} interrupted session(s)")
+        
+        # For now, just resume the most recent one
+        # In production, provide interactive selection
+        session = interrupted[0]
+        self.telemetry.info(f"Resuming session {session.session_id}")
+        
+        # Check for external changes
+        restored_session, has_external_changes = self.session_manager.restore_session_on_startup(
+            session.session_id,
+            self.checkpoint_manager
+        )
+        
+        if has_external_changes:
+            self.telemetry.warning(
+                "External changes detected. Please resolve conflicts manually before proceeding."
+            )
+            # In production, provide merge options
+            return False
+        
+        if restored_session:
+            self.current_session = restored_session
+            self.telemetry.info(f"Successfully resumed session {restored_session.session_id}")
+            return True
+        
+        return False
+    
+    def _create_new_session(self):
+        """Create a new session for this run."""
+        self.current_session = self.session_manager.start_session(
+            config={
+                "llm_model": os.getenv("L4_LLM_MODEL", "gpt-4"),
+                "cache_enabled": os.getenv("L4_CACHE_ENABLED", "true").lower() == "true"
+            },
+            metadata={
+                "user": os.getenv("USER", "unknown"),
+                "host": os.uname().nodename if hasattr(os, 'uname') else "unknown",
+                "environment": os.getenv("L4_ENV", "development")
+            }
+        )
+        self.telemetry.info(f"Started new session {self.current_session.session_id}")
+    
+    def _save_session_on_shutdown(self, checkpoint_id=None):
+        """Save session state before shutdown."""
+        if self.current_session:
+            self.session_manager.save_session_on_shutdown(
+                self.current_session.session_id,
+                checkpoint_id
+            )
+            self.telemetry.info("Session saved successfully on shutdown")
+    
     @fcid_mapping("CORE-101")
     def run(self):
         """
@@ -92,7 +163,15 @@ class Orchestrator:
                 self.telemetry.error(
                     "Cold start check failed. Ensure product.md and technical.md are present."
                 )
+                self._save_session_on_shutdown()
                 return
+
+            # 2. Handle interrupted sessions
+            session_resumed = self._handle_interrupted_sessions()
+            
+            if not session_resumed:
+                # No session to resume, create new one
+                self._create_new_session()
 
             # State Recovery
             last_state = load_state("orchestrator_phase")
@@ -123,14 +202,15 @@ class Orchestrator:
                     cot_blob=f"Resuming from state: {last_state}",
                 )
 
-            # 2. Git Guard Pre-flight
+            # 3. Git Guard Pre-flight
             if not self.git_guard.is_clean():
                 self.telemetry.error(
                     "Git workspace is dirty. Please commit or stash your changes."
                 )
+                self._save_session_on_shutdown()
                 return
 
-            # 3. Main Loop
+            # 4. Main Loop
             while True:
                 save_state("orchestrator_phase", "dispatching")
                 self._update_telemetry_stats("Dispatching next task...")
@@ -229,6 +309,7 @@ class Orchestrator:
 
         finally:
             self.retro_agent.stop_watcher()
+            self._save_session_on_shutdown()
             self.telemetry.stop_dashboard()
 
 
