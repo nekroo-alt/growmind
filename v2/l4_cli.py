@@ -437,6 +437,500 @@ def cmd_health(args):
         sys.exit(1)
 
 
+def cmd_resume(args):
+    """Resume a previous session."""
+    from v2.core.session_manager import SessionManager
+    from v2.data.checkpoint_manager import CheckpointManager
+    
+    session_mgr = SessionManager()
+    checkpoint_mgr = CheckpointManager()
+    
+    session_id = args.session_id
+    checkpoint_id = args.checkpoint_id
+    
+    # If no session ID provided, try to detect interrupted sessions
+    if not session_id:
+        interrupted = session_mgr.detect_interrupted_sessions()
+        if not interrupted:
+            print("No interrupted sessions found. Starting a new session...")
+            cmd_start(args)
+            return
+        
+        print("\nDetected interrupted sessions:")
+        for i, session in enumerate(interrupted, 1):
+            print(f"{i}. {session.session_id[:8]}... - {session.status.value} - "
+                  f"{session.start_time.strftime('%Y-%m-%d %H:%M:%S')}")
+        
+        if args.auto:
+            # Auto-resume the most recent interrupted session
+            session = interrupted[0]
+            session_id = session.session_id
+            print(f"\nAuto-resuming most recent session: {session_id[:8]}...")
+        else:
+            # Ask user which session to resume
+            choice = input("\nSelect session to resume (number, or 'q' to quit): ").strip()
+            if choice.lower() == 'q':
+                print("Resume cancelled.")
+                return
+            
+            try:
+                index = int(choice) - 1
+                if 0 <= index < len(interrupted):
+                    session_id = interrupted[index].session_id
+                else:
+                    print("Invalid selection.")
+                    return
+            except ValueError:
+                print("Invalid input.")
+                return
+    
+    # Resume the session
+    print(f"\nResuming session: {session_id[:8]}...")
+    
+    # Check for external changes
+    session, has_external_changes = session_mgr.restore_session_on_startup(
+        session_id,
+        checkpoint_manager=checkpoint_mgr
+    )
+    
+    if not session:
+        print(f"Failed to resume session: {session_id}")
+        print("Session may be corrupted or not found.")
+        return
+    
+    if has_external_changes:
+        print("\n⚠️  WARNING: External changes detected in the repository.")
+        print("Your manual changes may conflict with the session state.")
+        
+        if not args.force:
+            choice = input("\nProceed anyway? [y/N]: ").strip().lower()
+            if choice != 'y':
+                print("Resume cancelled.")
+                return
+    
+    print(f"\n✓ Session resumed successfully!")
+    print(f"  Session ID: {session.session_id}")
+    print(f"  Status: {session.status.value}")
+    print(f"  Started: {session.start_time.strftime('%Y-%m-%d %H:%M:%S')}")
+    
+    if session.active_tasks:
+        print(f"  Active tasks: {len(session.active_tasks)}")
+    if session.checkpoint_id:
+        print(f"  Last checkpoint: {session.checkpoint_id[:8]}...")
+    
+    # If a specific checkpoint was requested, restore it
+    if checkpoint_id:
+        print(f"\nRestoring from checkpoint: {checkpoint_id[:8]}...")
+        success = checkpoint_mgr.restore(
+            checkpoint_id,
+            dry_run=args.dry_run,
+            preserve_user_work=not args.force
+        )
+        
+        if success:
+            print(f"✓ Checkpoint restored successfully!")
+        else:
+            print(f"✗ Failed to restore checkpoint: {checkpoint_id}")
+            return
+    
+    # If --start flag is set, start the orchestrator
+    if args.start:
+        print("\nStarting development loop...")
+        cmd_start(args)
+
+
+def cmd_checkpoints_list(args):
+    """List available checkpoints."""
+    from v2.data.checkpoint_manager import CheckpointManager
+    
+    checkpoint_mgr = CheckpointManager()
+    
+    # List checkpoints with optional filters
+    checkpoints = checkpoint_mgr.list(
+        snapshot_type=args.type,
+        task_id=args.task_id,
+        operation_id=args.operation_id,
+        limit=args.limit
+    )
+    
+    if not checkpoints:
+        print("No checkpoints found.")
+        return
+    
+    print(f"\nFound {len(checkpoints)} checkpoints:\n")
+    
+    for i, chkp in enumerate(checkpoints, 1):
+        timestamp = chkp['timestamp'].replace('T', ' ').split('.')[0]
+        print(f"{i}. [{chkp['snapshot_type']}] {chkp['snapshot_id'][:16]}...")
+        print(f"   Time: {timestamp}")
+        print(f"   Reason: {chkp['reason']}")
+        
+        if chkp['task_id']:
+            print(f"   Task ID: {chkp['task_id']}")
+        if chkp['operation_id']:
+            print(f"   Operation: {chkp['operation_id'][:16]}...")
+        
+        # Show metadata
+        metadata = chkp.get('metadata', {})
+        if metadata:
+            included = []
+            if metadata.get('include_databases'):
+                included.append('databases')
+            if metadata.get('include_files'):
+                included.append('files')
+            if metadata.get('include_git'):
+                included.append('git')
+            if metadata.get('include_cache'):
+                included.append('cache')
+            if included:
+                print(f"   Includes: {', '.join(included)}")
+        
+        print()
+
+
+def cmd_checkpoints_restore(args):
+    """Restore from a specific checkpoint."""
+    from v2.data.checkpoint_manager import CheckpointManager
+    
+    checkpoint_mgr = CheckpointManager()
+    
+    checkpoint_id = args.id
+    
+    if not checkpoint_id:
+        print("Error: --id is required for checkpoint restore")
+        print("Use 'l4-dev checkpoints list' to see available checkpoints")
+        return
+    
+    # Get checkpoint details
+    checkpoint = checkpoint_mgr.get(checkpoint_id)
+    if not checkpoint:
+        print(f"Error: Checkpoint not found: {checkpoint_id}")
+        return
+    
+    print(f"\nCheckpoint Details:")
+    print(f"  ID: {checkpoint['snapshot_id']}")
+    print(f"  Type: {checkpoint['snapshot_type']}")
+    print(f"  Time: {checkpoint['timestamp']}")
+    print(f"  Reason: {checkpoint['reason']}")
+    
+    if checkpoint['task_id']:
+        print(f"  Task ID: {checkpoint['task_id']}")
+    if checkpoint['operation_id']:
+        print(f"  Operation: {checkpoint['operation_id']}")
+    
+    # Show what will be restored
+    print(f"\nWill restore:")
+    db_state = checkpoint.get('db_state', [])
+    if db_state:
+        print(f"  Databases: {len(db_state)} files")
+    file_state = checkpoint.get('file_state', [])
+    if file_state:
+        print(f"  Files: {len(file_state)} files")
+    git_state = checkpoint.get('git_state', [])
+    if git_state:
+        print(f"  Git state: branch={git_state[0].get('branch')}, commit={git_state[0].get('commit_hash')[:8]}...")
+    cache_state = checkpoint.get('cache_state', [])
+    if cache_state:
+        print(f"  Cache: {len(cache_state)} entries")
+    
+    # Warn about user work
+    if not args.dry_run and not args.force:
+        print(f"\n⚠️  WARNING: Restoring will overwrite current state.")
+        print(f"Any uncommitted changes may be lost.")
+        
+        choice = input("\nProceed with restore? [y/N]: ").strip().lower()
+        if choice != 'y':
+            print("Restore cancelled.")
+            return
+    
+    # Perform restore
+    print(f"\nRestoring from checkpoint: {checkpoint_id[:16]}...")
+    
+    success = checkpoint_mgr.restore(
+        checkpoint_id,
+        restore_databases=args.databases,
+        restore_files=args.files,
+        restore_git=args.git,
+        restore_cache=args.cache,
+        validate_before=args.validate,
+        validate_after=args.validate,
+        dry_run=args.dry_run,
+        preserve_user_work=not args.force
+    )
+    
+    if success:
+        print(f"✓ Checkpoint restored successfully!")
+        if args.dry_run:
+            print(f"  (This was a dry-run, no changes were made)")
+    else:
+        print(f"✗ Failed to restore checkpoint: {checkpoint_id}")
+        return
+    
+    # If --start flag is set, start the orchestrator
+    if args.start and not args.dry_run:
+        print("\nStarting development loop...")
+        cmd_start(args)
+
+
+def cmd_checkpoints_delete(args):
+    """Delete a specific checkpoint."""
+    from v2.data.checkpoint_manager import CheckpointManager
+    
+    checkpoint_mgr = CheckpointManager()
+    
+    checkpoint_id = args.id
+    
+    if not checkpoint_id:
+        print("Error: --id is required for checkpoint delete")
+        return
+    
+    # Get checkpoint details first
+    checkpoint = checkpoint_mgr.get(checkpoint_id)
+    if not checkpoint:
+        print(f"Error: Checkpoint not found: {checkpoint_id}")
+        return
+    
+    # Confirm deletion
+    if not args.force:
+        print(f"\nCheckpoint Details:")
+        print(f"  ID: {checkpoint['snapshot_id']}")
+        print(f"  Type: {checkpoint['snapshot_type']}")
+        print(f"  Time: {checkpoint['timestamp']}")
+        print(f"  Reason: {checkpoint['reason']}")
+        
+        choice = input(f"\nDelete this checkpoint? [y/N]: ").strip().lower()
+        if choice != 'y':
+            print("Deletion cancelled.")
+            return
+    
+    # Delete checkpoint
+    success = checkpoint_mgr.delete(checkpoint_id)
+    
+    if success:
+        print(f"✓ Checkpoint deleted successfully: {checkpoint_id[:16]}...")
+    else:
+        print(f"✗ Failed to delete checkpoint: {checkpoint_id}")
+
+
+def cmd_sessions_list(args):
+    """List available sessions."""
+    from v2.core.session_manager import SessionManager
+    
+    session_mgr = SessionManager()
+    
+    # List sessions with optional filter
+    from v2.core.session_manager import SessionStatus
+    
+    status_filter = None
+    if args.status:
+        try:
+            status_filter = SessionStatus(args.status)
+        except ValueError:
+            print(f"Invalid status: {args.status}")
+            print(f"Valid statuses: {', '.join([s.value for s in SessionStatus])}")
+            return
+    
+    sessions = session_mgr.list_sessions(
+        status=status_filter,
+        limit=args.limit
+    )
+    
+    if not sessions:
+        print("No sessions found.")
+        return
+    
+    print(f"\nFound {len(sessions)} sessions:\n")
+    
+    for i, session in enumerate(sessions, 1):
+        status_icon = "🟢" if session.status == SessionStatus.ACTIVE else \
+                     "🟡" if session.status == SessionStatus.PAUSED else \
+                     "🔵" if session.status == SessionStatus.COMPLETED else \
+                     "📦" if session.status == SessionStatus.ARCHIVED else \
+                     "❌"
+        
+        print(f"{i}. {status_icon} {session.session_id[:8]}...")
+        print(f"   Status: {session.status.value}")
+        print(f"   Start: {session.start_time.strftime('%Y-%m-%d %H:%M:%S')}")
+        
+        if session.end_time:
+            print(f"   End: {session.end_time.strftime('%Y-%m-%d %H:%M:%S')}")
+        
+        if session.active_tasks:
+            print(f"   Active tasks: {len(session.active_tasks)}")
+        if session.active_operations:
+            print(f"   Active operations: {len(session.active_operations)}")
+        if session.checkpoint_id:
+            print(f"   Last checkpoint: {session.checkpoint_id[:8]}...")
+        
+        print()
+
+
+def cmd_recover(args):
+    """Interactive recovery wizard."""
+    from v2.core.session_manager import SessionManager
+    from v2.data.checkpoint_manager import CheckpointManager
+    
+    session_mgr = SessionManager()
+    checkpoint_mgr = CheckpointManager()
+    
+    print("\n" + "="*60)
+    print("L4D Recovery Wizard")
+    print("="*60)
+    
+    # Step 1: Detect interrupted sessions
+    print("\n[1/4] Detecting interrupted sessions...")
+    interrupted = session_mgr.detect_interrupted_sessions()
+    
+    if interrupted:
+        print(f"Found {len(interrupted)} interrupted session(s):\n")
+        for i, session in enumerate(interrupted, 1):
+            print(f"{i}. {session.session_id[:8]}... - {session.status.value}")
+            print(f"   Started: {session.start_time.strftime('%Y-%m-%d %H:%M:%S')}")
+            if session.active_tasks:
+                print(f"   Tasks: {len(session.active_tasks)}")
+            print()
+    else:
+        print("No interrupted sessions found.")
+        print("You can start a new session with: l4-dev start")
+        return
+    
+    # Step 2: Select session to recover
+    print("Select a session to recover:")
+    print("[1-{}] Resume from session".format(len(interrupted)))
+    print("[c]   Choose a specific checkpoint")
+    print("[q]   Quit")
+    
+    choice = input("\nYour choice: ").strip().lower()
+    
+    if choice == 'q':
+        print("Recovery cancelled.")
+        return
+    
+    session_id = None
+    checkpoint_id = None
+    
+    if choice.isdigit():
+        index = int(choice) - 1
+        if 0 <= index < len(interrupted):
+            session_id = interrupted[index].session_id
+        else:
+            print("Invalid selection.")
+            return
+    elif choice == 'c':
+        # Step 3: Select checkpoint
+        print("\n[2/4] Loading available checkpoints...")
+        checkpoints = checkpoint_mgr.list(limit=50)
+        
+        if not checkpoints:
+            print("No checkpoints found.")
+            return
+        
+        print(f"\nFound {len(checkpoints)} checkpoint(s):\n")
+        for i, chkp in enumerate(checkpoints, 1):
+            timestamp = chkp['timestamp'].replace('T', ' ').split('.')[0]
+            print(f"{i}. [{chkp['snapshot_type']}] {chkp['snapshot_id'][:16]}...")
+            print(f"   Time: {timestamp}")
+            print(f"   Reason: {chkp['reason']}")
+            print()
+        
+        print(f"Select a checkpoint (1-{len(checkpoints)}) or 'q' to go back:")
+        choice = input("\nYour choice: ").strip().lower()
+        
+        if choice == 'q':
+            print("Going back...")
+            return cmd_recover(args)
+        
+        try:
+            index = int(choice) - 1
+            if 0 <= index < len(checkpoints):
+                checkpoint_id = checkpoints[index]['snapshot_id']
+            else:
+                print("Invalid selection.")
+                return
+        except ValueError:
+            print("Invalid input.")
+            return
+    else:
+        print("Invalid choice.")
+        return
+    
+    # Step 4: Review and confirm
+    print("\n[3/4] Review recovery plan:")
+    
+    if session_id:
+        session = session_mgr._load_session(session_id)
+        if session:
+            print(f"\nSession: {session.session_id[:8]}...")
+            print(f"  Status: {session.status.value}")
+            print(f"  Started: {session.start_time.strftime('%Y-%m-%d %H:%M:%S')}")
+            if session.checkpoint_id:
+                print(f"  Checkpoint: {session.checkpoint_id[:8]}...")
+    
+    if checkpoint_id:
+        checkpoint = checkpoint_mgr.get(checkpoint_id)
+        if checkpoint:
+            print(f"\nCheckpoint: {checkpoint['snapshot_id'][:16]}...")
+            print(f"  Type: {checkpoint['snapshot_type']}")
+            print(f"  Time: {checkpoint['timestamp']}")
+            print(f"  Reason: {checkpoint['reason']}")
+    
+    # Check for external changes
+    print("\n[4/4] Checking for external changes...")
+    has_external = session_mgr._check_external_changes()
+    
+    if has_external:
+        print("⚠️  WARNING: External changes detected!")
+        print("You have uncommitted changes in the repository.")
+        print("Recovering may overwrite your work.")
+    
+    # Confirm
+    print("\n" + "-"*60)
+    if args.dry_run:
+        print("DRY RUN MODE: No changes will be made")
+    print("-"*60)
+    
+    choice = input("\nProceed with recovery? [y/N]: ").strip().lower()
+    if choice != 'y':
+        print("Recovery cancelled.")
+        return
+    
+    # Perform recovery
+    print("\nRecovering...")
+    
+    if checkpoint_id:
+        success = checkpoint_mgr.restore(
+            checkpoint_id,
+            dry_run=args.dry_run,
+            preserve_user_work=True
+        )
+        if success:
+            print(f"✓ Checkpoint restored successfully!")
+        else:
+            print(f"✗ Failed to restore checkpoint")
+            return
+    elif session_id:
+        session, has_ext = session_mgr.restore_session_on_startup(
+            session_id,
+            checkpoint_manager=checkpoint_mgr
+        )
+        if session:
+            print(f"✓ Session restored successfully!")
+            if has_ext:
+                print("⚠️  External changes were detected - review carefully")
+        else:
+            print(f"✗ Failed to restore session")
+            return
+    
+    # Offer to start orchestrator
+    if not args.dry_run:
+        choice = input("\nStart development loop? [y/N]: ").strip().lower()
+        if choice == 'y':
+            print("\nStarting development loop...")
+            cmd_start(args)
+    
+    print("\n✓ Recovery complete!")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="L4 Self-Evolving Development Platform CLI"
@@ -522,6 +1016,58 @@ def main():
     health_p.add_argument("--fix", action="store_true", help="Auto-fix fixable issues")
     health_p.add_argument("--export", help="Export health report to JSON file")
 
+    # Resume command
+    resume_p = subparsers.add_parser("resume", help="Resume a previous session")
+    resume_p.add_argument("--session-id", help="Specific session ID to resume")
+    resume_p.add_argument("--checkpoint-id", help="Restore from specific checkpoint")
+    resume_p.add_argument("--auto", action="store_true", help="Auto-resume most recent interrupted session")
+    resume_p.add_argument("--force", action="store_true", help="Force resume even with external changes")
+    resume_p.add_argument("--dry-run", action="store_true", help="Preview resume without making changes")
+    resume_p.add_argument("--start", action="store_true", help="Start orchestrator after resume")
+    add_common_args(resume_p)
+
+    # Checkpoints subcommand group
+    checkpoints_p = subparsers.add_parser("checkpoints", help="Manage system checkpoints")
+    checkpoints_subparsers = checkpoints_p.add_subparsers(dest="checkpoints_command", help="Checkpoint commands")
+
+    # Checkpoints list command
+    checkpoints_list_p = checkpoints_subparsers.add_parser("list", help="List available checkpoints")
+    checkpoints_list_p.add_argument("--type", help="Filter by snapshot type")
+    checkpoints_list_p.add_argument("--task-id", type=int, help="Filter by task ID")
+    checkpoints_list_p.add_argument("--operation-id", help="Filter by operation ID")
+    checkpoints_list_p.add_argument("--limit", type=int, default=50, help="Maximum number to show (default: 50)")
+    add_common_args(checkpoints_list_p)
+
+    # Checkpoints restore command
+    checkpoints_restore_p = checkpoints_subparsers.add_parser("restore", help="Restore from a checkpoint")
+    checkpoints_restore_p.add_argument("--id", required=True, help="Checkpoint ID to restore")
+    checkpoints_restore_p.add_argument("--databases", action="store_true", help="Restore database state")
+    checkpoints_restore_p.add_argument("--files", action="store_true", help="Restore file system state")
+    checkpoints_restore_p.add_argument("--git", action="store_true", help="Restore git state")
+    checkpoints_restore_p.add_argument("--cache", action="store_true", help="Restore cache state")
+    checkpoints_restore_p.add_argument("--no-validate", dest="validate", action="store_false", default=True, help="Skip validation")
+    checkpoints_restore_p.add_argument("--dry-run", action="store_true", help="Preview restore without making changes")
+    checkpoints_restore_p.add_argument("--force", action="store_true", help="Force restore without confirmation")
+    checkpoints_restore_p.add_argument("--start", action="store_true", help="Start orchestrator after restore")
+    add_common_args(checkpoints_restore_p)
+
+    # Checkpoints delete command
+    checkpoints_delete_p = checkpoints_subparsers.add_parser("delete", help="Delete a checkpoint")
+    checkpoints_delete_p.add_argument("--id", required=True, help="Checkpoint ID to delete")
+    checkpoints_delete_p.add_argument("--force", action="store_true", help="Delete without confirmation")
+    add_common_args(checkpoints_delete_p)
+
+    # Sessions list command
+    sessions_list_p = subparsers.add_parser("sessions", help="List available sessions")
+    sessions_list_p.add_argument("--status", help="Filter by session status (active, paused, completed, archived)")
+    sessions_list_p.add_argument("--limit", type=int, default=50, help="Maximum number to show (default: 50)")
+    add_common_args(sessions_list_p)
+
+    # Recover command (interactive wizard)
+    recover_p = subparsers.add_parser("recover", help="Interactive recovery wizard")
+    recover_p.add_argument("--dry-run", action="store_true", help="Preview recovery without making changes")
+    add_common_args(recover_p)
+
     args = parser.parse_args()
 
     # Change CWD to project root
@@ -554,6 +1100,21 @@ def main():
         cmd_logs_timeline(args)
     elif args.command == "health":
         cmd_health(args)
+    elif args.command == "resume":
+        cmd_resume(args)
+    elif args.command == "checkpoints":
+        if args.checkpoints_command == "list":
+            cmd_checkpoints_list(args)
+        elif args.checkpoints_command == "restore":
+            cmd_checkpoints_restore(args)
+        elif args.checkpoints_command == "delete":
+            cmd_checkpoints_delete(args)
+        else:
+            print("Please specify a checkpoints command: list, restore, delete")
+    elif args.command == "sessions":
+        cmd_sessions_list(args)
+    elif args.command == "recover":
+        cmd_recover(args)
     else:
         parser.print_help()
 

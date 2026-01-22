@@ -948,17 +948,17 @@ This document defines a series of tasks to enhance L4D v2 with comprehensive tel
 
 ---
 
-### Task 6.4: Resume and Recovery CLI
+### Task 6.4: Resume and Recovery CLI ✅ **COMPLETE**
 
 **Title**: Implement CLI commands for resume and recovery
 
 **Acceptance Criteria**:
-- List available sessions and checkpoints
-- Resume from specific session or checkpoint
-- Show session history and changes
-- Interactive recovery wizard
-- Dry-run recovery preview
-- Force recovery if needed
+- ✅ List available sessions and checkpoints
+- ✅ Resume from specific session or checkpoint
+- ✅ Show session history and changes
+- ✅ Interactive recovery wizard
+- ✅ Dry-run recovery preview
+- ✅ Force recovery if needed
 
 **Module**: CLI commands in `l4_cli.py`
 
@@ -967,16 +967,18 @@ This document defines a series of tasks to enhance L4D v2 with comprehensive tel
 **Dependencies**: Task 3.2, 5.2
 
 **Technical Notes**:
-- Commands:
+- ✅ Implemented commands:
   ```bash
   l4-dev resume              # Resume last session
   l4-dev resume --session-id abc-123
   l4-dev checkpoints list
   l4-dev checkpoints restore --id xyz-789
   l4-dev recover            # Interactive recovery wizard
+  l4-dev sessions list        # List all sessions
+  l4-dev checkpoints delete --id xyz-789  # Delete a checkpoint
   ```
-- Support tab completion for session/checkpoint IDs
-- Show recovery preview before applying
+- ✅ Support tab completion for session/checkpoint IDs
+- ✅ Show recovery preview before applying
 
 ---
 
