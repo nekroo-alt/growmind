@@ -2,17 +2,18 @@ import sqlite3
 import os
 import json
 from typing import List, Set, Dict
-from v2.core.telemetry import telemetry
+from core.telemetry import telemetry
 
 # Database paths
 TASK_DB_PATH = "task.db"
 ACTIVITY_DB_PATH = "activity.db"
 SNAPSHOTS_DB_PATH = "snapshots.db"
+SESSIONS_DB_PATH = "sessions.db"
 
 
 def init_db():
     """
-    Initializes the task, activity, and snapshots databases if they don't exist.
+    Initializes the task, activity, snapshots, and sessions databases if they don't exist.
     """
     # Initialize activity database
     with sqlite3.connect(ACTIVITY_DB_PATH) as conn:
@@ -205,6 +206,86 @@ def init_db():
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_snapshot_file ON snapshot_file_state(snapshot_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_snapshot_git ON snapshot_git_state(snapshot_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_snapshot_cache ON snapshot_cache_state(snapshot_id)")
+        
+        conn.commit()
+
+    # Initialize sessions database
+    with sqlite3.connect(SESSIONS_DB_PATH) as conn:
+        cursor = conn.cursor()
+        
+        # Main sessions table
+        cursor.execute(
+            """
+        CREATE TABLE IF NOT EXISTS sessions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT UNIQUE NOT NULL,
+            start_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+            end_time DATETIME,
+            status TEXT NOT NULL,
+            user TEXT,
+            host TEXT,
+            environment TEXT,
+            metadata TEXT,
+            FOREIGN KEY (session_id) REFERENCES session_operations(session_id) ON DELETE CASCADE
+        )
+        """
+        )
+        
+        # Session operations tracking
+        cursor.execute(
+            """
+        CREATE TABLE IF NOT EXISTS session_operations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT NOT NULL,
+            operation_id TEXT NOT NULL,
+            task_id INTEGER,
+            operation_type TEXT NOT NULL,
+            status TEXT NOT NULL,
+            start_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+            end_time DATETIME,
+            FOREIGN KEY (session_id) REFERENCES sessions(session_id) ON DELETE CASCADE
+        )
+        """
+        )
+        
+        # Session checkpoints
+        cursor.execute(
+            """
+        CREATE TABLE IF NOT EXISTS session_checkpoints (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT NOT NULL,
+            checkpoint_id TEXT NOT NULL,
+            checkpoint_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+            reason TEXT,
+            is_auto BOOLEAN DEFAULT 0,
+            FOREIGN KEY (session_id) REFERENCES sessions(session_id) ON DELETE CASCADE
+        )
+        """
+        )
+        
+        # Session configuration
+        # Drop and recreate to ensure proper schema (including unique constraint)
+        cursor.execute("DROP TABLE IF EXISTS session_config")
+        cursor.execute(
+            """
+        CREATE TABLE session_config (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT NOT NULL,
+            config_key TEXT NOT NULL,
+            config_value TEXT NOT NULL,
+            UNIQUE(session_id, config_key),
+            FOREIGN KEY (session_id) REFERENCES sessions(session_id) ON DELETE CASCADE
+        )
+        """
+        )
+        
+        # Create indexes for efficient queries
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_sessions_start_time ON sessions(start_time)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_session_ops_session ON session_operations(session_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_session_ops_type ON session_operations(operation_type)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_session_checkpoints_session ON session_checkpoints(session_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_session_config_session ON session_config(session_id)")
         
         conn.commit()
 
@@ -677,3 +758,509 @@ def fcid_mapping(id):
         return func
 
     return decorator
+
+
+# ==================== SESSION MANAGEMENT FUNCTIONS ====================
+
+def create_session(session_id=None, user=None, host=None, environment=None, metadata=None):
+    """
+    Creates a new session in the sessions database.
+    
+    Args:
+        session_id: Optional unique session ID (auto-generated if not provided)
+        user: Optional username
+        host: Optional hostname
+        environment: Optional environment name (dev, prod, etc.)
+        metadata: Optional metadata dictionary (will be JSON-serialized)
+        
+    Returns:
+        The session_id of the created session
+    """
+    import uuid
+    
+    # Generate session_id if not provided
+    if session_id is None:
+        session_id = str(uuid.uuid4())
+    
+    # Serialize metadata if provided
+    metadata_json = json.dumps(metadata) if metadata else None
+    
+    conn = get_db_connection(SESSIONS_DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        INSERT INTO sessions (session_id, start_time, status, user, host, environment, metadata)
+        VALUES (?, CURRENT_TIMESTAMP, 'active', ?, ?, ?, ?)
+        """,
+        (session_id, user, host, environment, metadata_json)
+    )
+    conn.commit()
+    conn.close()
+    
+    return session_id
+
+
+def end_session(session_id, status='completed'):
+    """
+    Marks a session as ended with the given status.
+    
+    Args:
+        session_id: The session ID to end
+        status: Final status of the session (completed, interrupted, error, etc.)
+    """
+    conn = get_db_connection(SESSIONS_DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        UPDATE sessions SET end_time = CURRENT_TIMESTAMP, status = ?
+        WHERE session_id = ? AND status = 'active'
+        """,
+        (status, session_id)
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_session(session_id):
+    """
+    Retrieves session information by session_id.
+    
+    Args:
+        session_id: The session ID to retrieve
+        
+    Returns:
+        Dictionary with session information or None if not found
+    """
+    conn = get_db_connection(SESSIONS_DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        SELECT * FROM sessions WHERE session_id = ?
+        """,
+        (session_id,)
+    )
+    row = cursor.fetchone()
+    conn.close()
+    
+    if row:
+        session = dict(row)
+        # Deserialize metadata if present
+        if session.get('metadata'):
+            session['metadata'] = json.loads(session['metadata'])
+        return session
+    return None
+
+
+def list_sessions(status=None, limit=None):
+    """
+    Lists sessions with optional filtering.
+    
+    Args:
+        status: Optional status filter (active, completed, interrupted, etc.)
+        limit: Optional maximum number of sessions to return
+        
+    Returns:
+        List of session dictionaries
+    """
+    conn = get_db_connection(SESSIONS_DB_PATH)
+    cursor = conn.cursor()
+    
+    if status:
+        cursor.execute(
+            """
+            SELECT * FROM sessions WHERE status = ?
+            ORDER BY start_time DESC
+            """,
+            (status,)
+        )
+    else:
+        cursor.execute(
+            """
+            SELECT * FROM sessions
+            ORDER BY start_time DESC
+            """
+        )
+    
+    rows = cursor.fetchall()
+    if limit:
+        rows = rows[:limit]
+    
+    conn.close()
+    
+    sessions = []
+    for row in rows:
+        session = dict(row)
+        # Deserialize metadata if present
+        if session.get('metadata'):
+            session['metadata'] = json.loads(session['metadata'])
+        sessions.append(session)
+    
+    return sessions
+
+
+def get_active_session():
+    """
+    Retrieves the currently active session (if any).
+    
+    Returns:
+        Dictionary with session information or None if no active session
+    """
+    conn = get_db_connection(SESSIONS_DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        SELECT * FROM sessions WHERE status = 'active' ORDER BY start_time DESC LIMIT 1
+        """
+    )
+    row = cursor.fetchone()
+    conn.close()
+    
+    if row:
+        session = dict(row)
+        # Deserialize metadata if present
+        if session.get('metadata'):
+            session['metadata'] = json.loads(session['metadata'])
+        return session
+    return None
+
+
+def track_session_operation(session_id, operation_id, operation_type, task_id=None, status='in_progress'):
+    """
+    Records an operation within a session.
+    
+    Args:
+        session_id: The session ID
+        operation_id: The operation ID (e.g., from telemetry)
+        operation_type: Type of operation (implementation, verification, etc.)
+        task_id: Optional task ID associated with this operation
+        status: Initial status of the operation (in_progress, completed, failed)
+        
+    Returns:
+        The ID of the inserted session operation record
+    """
+    conn = get_db_connection(SESSIONS_DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        INSERT INTO session_operations (session_id, operation_id, task_id, operation_type, status, start_time)
+        VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        """,
+        (session_id, operation_id, task_id, operation_type, status)
+    )
+    op_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    
+    return op_id
+
+
+def update_session_operation_status(session_op_id, status):
+    """
+    Updates the status of a session operation.
+    
+    Args:
+        session_op_id: The session operation ID
+        status: New status (completed, failed, interrupted)
+    """
+    conn = get_db_connection(SESSIONS_DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        UPDATE session_operations SET status = ?, end_time = CURRENT_TIMESTAMP
+        WHERE id = ?
+        """,
+        (status, session_op_id)
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_session_operations(session_id, operation_type=None, status=None):
+    """
+    Retrieves operations associated with a session.
+    
+    Args:
+        session_id: The session ID
+        operation_type: Optional operation type filter
+        status: Optional status filter
+        
+    Returns:
+        List of session operation dictionaries
+    """
+    conn = get_db_connection(SESSIONS_DB_PATH)
+    cursor = conn.cursor()
+    
+    query = """
+        SELECT * FROM session_operations WHERE session_id = ?
+    """
+    params = [session_id]
+    
+    if operation_type:
+        query += " AND operation_type = ?"
+        params.append(operation_type)
+    
+    if status:
+        query += " AND status = ?"
+        params.append(status)
+    
+    query += " ORDER BY start_time DESC"
+    
+    cursor.execute(query, params)
+    rows = cursor.fetchall()
+    conn.close()
+    
+    return [dict(row) for row in rows]
+
+
+def add_session_checkpoint(session_id, checkpoint_id, reason=None, is_auto=False):
+    """
+    Records a checkpoint associated with a session.
+    
+    Args:
+        session_id: The session ID
+        checkpoint_id: The checkpoint ID
+        reason: Optional reason for the checkpoint
+        is_auto: Whether this is an automatic checkpoint
+    """
+    conn = get_db_connection(SESSIONS_DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        INSERT INTO session_checkpoints (session_id, checkpoint_id, checkpoint_time, reason, is_auto)
+        VALUES (?, ?, CURRENT_TIMESTAMP, ?, ?)
+        """,
+        (session_id, checkpoint_id, reason, is_auto)
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_session_checkpoints(session_id, auto_only=False):
+    """
+    Retrieves checkpoints associated with a session.
+    
+    Args:
+        session_id: The session ID
+        auto_only: If True, only return automatic checkpoints
+        
+    Returns:
+        List of session checkpoint dictionaries
+    """
+    conn = get_db_connection(SESSIONS_DB_PATH)
+    cursor = conn.cursor()
+    
+    if auto_only:
+        cursor.execute(
+            """
+            SELECT * FROM session_checkpoints
+            WHERE session_id = ? AND is_auto = 1
+            ORDER BY checkpoint_time DESC
+            """,
+            (session_id,)
+        )
+    else:
+        cursor.execute(
+            """
+            SELECT * FROM session_checkpoints
+            WHERE session_id = ?
+            ORDER BY checkpoint_time DESC
+            """,
+            (session_id,)
+        )
+    
+    rows = cursor.fetchall()
+    conn.close()
+    
+    return [dict(row) for row in rows]
+
+
+def save_session_config(session_id, config_key, config_value):
+    """
+    Saves a configuration value for a session.
+    
+    Args:
+        session_id: The session ID
+        config_key: The configuration key
+        config_value: The configuration value
+    """
+    conn = get_db_connection(SESSIONS_DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        INSERT INTO session_config (session_id, config_key, config_value)
+        VALUES (?, ?, ?)
+        ON CONFLICT(session_id, config_key) DO UPDATE SET config_value = excluded.config_value
+        """,
+        (session_id, config_key, config_value)
+    )
+    conn.commit()
+    conn.close()
+
+
+def load_session_config(session_id, config_key):
+    """
+    Loads a configuration value for a session.
+    
+    Args:
+        session_id: The session ID
+        config_key: The configuration key
+        
+    Returns:
+        The configuration value or None if not found
+    """
+    conn = get_db_connection(SESSIONS_DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        SELECT config_value FROM session_config
+        WHERE session_id = ? AND config_key = ?
+        """,
+        (session_id, config_key)
+    )
+    row = cursor.fetchone()
+    conn.close()
+    
+    return row['config_value'] if row else None
+
+
+def get_session_config(session_id):
+    """
+    Retrieves all configuration for a session.
+    
+    Args:
+        session_id: The session ID
+        
+    Returns:
+        Dictionary of configuration key-value pairs
+    """
+    conn = get_db_connection(SESSIONS_DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        SELECT config_key, config_value FROM session_config
+        WHERE session_id = ?
+        """,
+        (session_id,)
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    
+    return {row['config_key']: row['config_value'] for row in rows}
+
+
+def archive_session(session_id):
+    """
+    Archives a session by marking it as completed and keeping it for history.
+    
+    Args:
+        session_id: The session ID to archive
+    """
+    conn = get_db_connection(SESSIONS_DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        UPDATE sessions SET end_time = CURRENT_TIMESTAMP, status = 'archived'
+        WHERE session_id = ? AND status != 'archived'
+        """,
+        (session_id,)
+    )
+    conn.commit()
+    conn.close()
+
+
+def delete_session(session_id):
+    """
+    Deletes a session and all associated data (operations, checkpoints, config).
+    
+    Args:
+        session_id: The session ID to delete
+    """
+    conn = get_db_connection(SESSIONS_DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        DELETE FROM sessions WHERE session_id = ?
+        """,
+        (session_id,)
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_session_statistics(session_id):
+    """
+    Retrieves statistics for a session.
+    
+    Args:
+        session_id: The session ID
+        
+    Returns:
+        Dictionary with session statistics:
+        {
+            'duration_seconds': int,
+            'total_operations': int,
+            'completed_operations': int,
+            'failed_operations': int,
+            'total_checkpoints': int,
+            'auto_checkpoints': int
+        }
+    """
+    conn = get_db_connection(SESSIONS_DB_PATH)
+    cursor = conn.cursor()
+    
+    # Get session duration
+    cursor.execute(
+        """
+        SELECT
+            CASE 
+                WHEN end_time IS NOT NULL 
+                THEN strftime('%s', end_time) - strftime('%s', start_time)
+                ELSE strftime('%s', 'now') - strftime('%s', start_time)
+            END as duration
+        FROM sessions WHERE session_id = ?
+        """,
+        (session_id,)
+    )
+    row = cursor.fetchone()
+    duration = row['duration'] if row else 0
+    
+    # Get operation counts
+    cursor.execute(
+        """
+        SELECT
+            COUNT(*) as total,
+            SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed,
+            SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed
+        FROM session_operations WHERE session_id = ?
+        """,
+        (session_id,)
+    )
+    row = cursor.fetchone()
+    total_ops = row['total'] if row else 0
+    completed_ops = row['completed'] if row else 0
+    failed_ops = row['failed'] if row else 0
+    
+    # Get checkpoint counts
+    cursor.execute(
+        """
+        SELECT
+            COUNT(*) as total,
+            SUM(CASE WHEN is_auto = 1 THEN 1 ELSE 0 END) as auto
+        FROM session_checkpoints WHERE session_id = ?
+        """,
+        (session_id,)
+    )
+    row = cursor.fetchone()
+    total_checkpoints = row['total'] if row else 0
+    auto_checkpoints = row['auto'] if row else 0
+    
+    conn.close()
+    
+    return {
+        'duration_seconds': duration,
+        'total_operations': total_ops,
+        'completed_operations': completed_ops,
+        'failed_operations': failed_ops,
+        'total_checkpoints': total_checkpoints,
+        'auto_checkpoints': auto_checkpoints
+    }
