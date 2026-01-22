@@ -2,6 +2,7 @@
 *.db
 logs/
 .DS_Store
+.l4_cache/
 
 # ======= Common =======
 # Byte-compiled / optimized / DLL files
