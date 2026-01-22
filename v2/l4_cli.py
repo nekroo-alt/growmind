@@ -25,71 +25,206 @@ def cmd_start(args):
 
 
 def cmd_status(args):
-    print("L4 Platform v1.0 Status")
-
-    # Cost Summary
-    total_tokens, total_cost = get_cost_summary()
-    print("\n--- Cost Summary ---")
-    print(f"Total Tokens Used: {total_tokens}")
-    print(f"Total Estimated Cost: ${total_cost:.4f}")
-
-    # Learned Patterns
-    print("\n--- Learned Patterns ---")
-    patterns_path = os.path.join(".patterns", "coding_style.md")
-    if os.path.exists(patterns_path):
-        with open(patterns_path, "r") as f:
-            lines = f.readlines()
-            # Just show headers as a summary
-            headers = [
-                line.strip("# ").strip() for line in lines if line.startswith("##")
-            ]
-            if headers:
-                # Remove duplicates while preserving order
-                unique_headers = []
-                for h in headers:
-                    if h not in unique_headers:
-                        unique_headers.append(h)
-                for h in unique_headers:
-                    print(f"- {h}")
-            else:
-                print("No specific patterns identified yet.")
-    else:
-        print("No patterns directory found.")
-
-    # Activity Status
-    if os.path.exists(ACTIVITY_DB_PATH):
-        conn = sqlite3.connect(ACTIVITY_DB_PATH)
-        cursor = conn.cursor()
-        # Querying with tokens and cost if they exist (Task 0.2)
-        cursor.execute(
-            "SELECT timestamp, action, status, summary, tokens_used, estimated_cost FROM activities ORDER BY timestamp DESC LIMIT 5"
-        )
-        rows = cursor.fetchall()
-        print("\nRecent Activities (activity.db):")
-        for row in rows:
-            tokens = row[4] if row[4] is not None else 0
-            cost = row[5] if row[5] is not None else 0.0
-            print(
-                f"{row[0]} | {row[1]} | {row[2]} | {row[3]} | Tokens: {tokens} | Cost: ${cost:.4f}"
+    from v2.core.ui import create_status_dashboard
+    from v2.core.health_check import run_health_check
+    from v2.core.session_manager import SessionManager
+    from v2.data.cache_manager import CacheManager
+    import psutil
+    
+    # Try to use enhanced dashboard first
+    try:
+        dashboard = create_status_dashboard()
+        
+        # Gather session information
+        session_info = None
+        try:
+            session_mgr = SessionManager()
+            active_sessions = session_mgr.list_sessions()
+            if active_sessions:
+                # Get the most recent active session
+                latest_session = sorted(active_sessions, key=lambda s: s.get('start_time', ''), reverse=True)[0]
+                session_info = {
+                    'id': latest_session.get('id'),
+                    'status': latest_session.get('status'),
+                    'start_time': latest_session.get('start_time'),
+                    'tasks_completed': latest_session.get('tasks_completed', 0)
+                }
+        except Exception:
+            pass  # Session manager might not be initialized yet
+        
+        # Gather active operation information
+        active_operation = None
+        try:
+            from v2.data.telemetry_manager import TelemetryManager
+            telemetry_mgr = TelemetryManager()
+            in_progress_ops = telemetry_mgr.query_operations(status='in_progress', limit=1)
+            if in_progress_ops:
+                op = in_progress_ops[0]
+                active_operation = {
+                    'operation_type': op.get('operation_type'),
+                    'status': op.get('status'),
+                    'task_id': op.get('task_id'),
+                    'task_title': op.get('task_title'),
+                    'progress': {
+                        'completed': op.get('completed', 0),
+                        'total': op.get('total', 100),
+                        'percentage': op.get('percentage', 0)
+                    }
+                }
+        except Exception:
+            pass  # Telemetry might not be initialized
+        
+        # Gather recent activities
+        recent_activities = []
+        if os.path.exists(ACTIVITY_DB_PATH):
+            conn = sqlite3.connect(ACTIVITY_DB_PATH)
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT timestamp, action, status, summary, tokens_used, estimated_cost FROM activities ORDER BY timestamp DESC LIMIT 5"
             )
-        conn.close()
-    else:
-        print("Activity database not found.")
-
-    # Task Status
-    if os.path.exists(TASK_DB_PATH):
-        conn = sqlite3.connect(TASK_DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT id, title, status, module FROM tasks ORDER BY id DESC LIMIT 5"
+            rows = cursor.fetchall()
+            conn.close()
+            
+            for row in rows:
+                recent_activities.append({
+                    'timestamp': row[0],
+                    'action_type': row[1],
+                    'status': row[2],
+                    'summary': row[3],
+                    'tokens_used': row[4] if row[4] else 0,
+                    'estimated_cost': row[5] if row[5] else 0.0
+                })
+        
+        # Gather health report
+        health_report = None
+        try:
+            report = run_health_check(verbose=False, auto_fix=False)
+            health_report = {
+                'overall_status': report.overall_status.value,
+                'checks': {}
+            }
+            for check_name, check_result in report.checks.items():
+                health_report['checks'][check_name] = {
+                    'status': check_result.status.value,
+                    'details': check_result.details if hasattr(check_result, 'details') else {}
+                }
+        except Exception:
+            pass
+        
+        # Gather resource usage
+        resource_usage = {}
+        try:
+            # CPU usage
+            cpu_percent = psutil.cpu_percent(interval=0.1)
+            resource_usage['cpu'] = cpu_percent
+            
+            # Memory usage
+            memory = psutil.virtual_memory()
+            resource_usage['memory'] = memory.used / (1024 ** 3)  # Convert to GB
+            
+            # Cache information
+            try:
+                cache_mgr = CacheManager()
+                stats = cache_mgr.get_stats()
+                resource_usage['cache_size'] = stats.get('total_size_mb', 0)
+                resource_usage['cache_hit_rate'] = stats.get('hit_rate', 0) * 100
+            except Exception:
+                pass
+        except Exception:
+            pass
+        
+        # Display the dashboard
+        dashboard.display(
+            session_info=session_info,
+            active_operation=active_operation,
+            recent_activities=recent_activities if args.verbose else None,
+            health_report=health_report,
+            resource_usage=resource_usage,
+            verbose=args.verbose
         )
-        rows = cursor.fetchall()
-        print("\nRecent Tasks (task.db):")
-        for row in rows:
-            print(f"{row[0]} | {row[1]} | {row[2]} | {row[3]}")
-        conn.close()
-    else:
-        print("Task database not found.")
+        
+        # Show cost summary separately
+        total_tokens, total_cost = get_cost_summary()
+        print(f"\n💰 Cost Summary: {total_tokens:,} tokens | ${total_cost:.4f}")
+        
+        # Handle watch mode
+        if args.watch:
+            dashboard.watch(
+                interval=args.interval,
+                max_iterations=args.iterations,
+                session_info=session_info,
+                active_operation=active_operation,
+                recent_activities=recent_activities if args.verbose else None,
+                health_report=health_report,
+                resource_usage=resource_usage,
+                verbose=args.verbose
+            )
+        
+    except Exception as e:
+        # Fallback to original status display if dashboard fails
+        print(f"L4 Platform v3.0 Status (Dashboard unavailable: {e})")
+        print("\n--- Cost Summary ---")
+        total_tokens, total_cost = get_cost_summary()
+        print(f"Total Tokens Used: {total_tokens}")
+        print(f"Total Estimated Cost: ${total_cost:.4f}")
+
+        # Learned Patterns
+        print("\n--- Learned Patterns ---")
+        patterns_path = os.path.join(".patterns", "coding_style.md")
+        if os.path.exists(patterns_path):
+            with open(patterns_path, "r") as f:
+                lines = f.readlines()
+                # Just show headers as a summary
+                headers = [
+                    line.strip("# ").strip() for line in lines if line.startswith("##")
+                ]
+                if headers:
+                    # Remove duplicates while preserving order
+                    unique_headers = []
+                    for h in headers:
+                        if h not in unique_headers:
+                            unique_headers.append(h)
+                    for h in unique_headers:
+                        print(f"- {h}")
+                else:
+                    print("No specific patterns identified yet.")
+        else:
+            print("No patterns directory found.")
+
+        # Activity Status
+        if os.path.exists(ACTIVITY_DB_PATH):
+            conn = sqlite3.connect(ACTIVITY_DB_PATH)
+            cursor = conn.cursor()
+            # Querying with tokens and cost if they exist (Task 0.2)
+            cursor.execute(
+                "SELECT timestamp, action, status, summary, tokens_used, estimated_cost FROM activities ORDER BY timestamp DESC LIMIT 5"
+            )
+            rows = cursor.fetchall()
+            print("\nRecent Activities (activity.db):")
+            for row in rows:
+                tokens = row[4] if row[4] is not None else 0
+                cost = row[5] if row[5] is not None else 0.0
+                print(
+                    f"{row[0]} | {row[1]} | {row[2]} | {row[3]} | Tokens: {tokens} | Cost: ${cost:.4f}"
+                )
+            conn.close()
+        else:
+            print("Activity database not found.")
+
+        # Task Status
+        if os.path.exists(TASK_DB_PATH):
+            conn = sqlite3.connect(TASK_DB_PATH)
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT id, title, status, module FROM tasks ORDER BY id DESC LIMIT 5"
+            )
+            rows = cursor.fetchall()
+            print("\nRecent Tasks (task.db):")
+            for row in rows:
+                print(f"{row[0]} | {row[1]} | {row[2]} | {row[3]}")
+            conn.close()
+        else:
+            print("Task database not found.")
 
 
 def cmd_retro(args):
@@ -324,7 +459,11 @@ def main():
     add_common_args(start_p)
 
     # Status command
-    status_p = subparsers.add_parser("status", help="Show summary of tasks and costs")
+    status_p = subparsers.add_parser("status", help="Show comprehensive status dashboard")
+    status_p.add_argument("-v", "--verbose", action="store_true", help="Show detailed information")
+    status_p.add_argument("--watch", action="store_true", help="Auto-refresh dashboard")
+    status_p.add_argument("--interval", type=int, default=5, help="Refresh interval in seconds (default: 5)")
+    status_p.add_argument("--iterations", type=int, help="Maximum number of refreshes (default: infinite)")
     add_common_args(status_p)
 
     # Retro command

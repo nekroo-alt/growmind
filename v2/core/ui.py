@@ -769,3 +769,420 @@ def display_recovery_result(
     """
     display = create_error_display()
     display.display_recovery_result(success, message, action_taken)
+
+
+# ============================================================================
+# Status Dashboard
+# ============================================================================
+
+class StatusDashboard:
+    """
+    CLI status dashboard for monitoring system state.
+    
+    Displays current session status, active operations, recent activity,
+    system health, and resource usage with support for auto-refresh.
+    """
+    
+    def __init__(self, use_rich: Optional[bool] = None):
+        """
+        Initialize status dashboard.
+        
+        Args:
+            use_rich: Force use of rich library (None = auto-detect)
+        """
+        self.use_rich = RICH_AVAILABLE if use_rich is None else use_rich and RICH_AVAILABLE
+        self.console = Console() if self.use_rich else None
+    
+    def display(
+        self,
+        session_info: Optional[Dict[str, Any]] = None,
+        active_operation: Optional[Dict[str, Any]] = None,
+        recent_activities: Optional[List[Dict[str, Any]]] = None,
+        health_report: Optional[Dict[str, Any]] = None,
+        resource_usage: Optional[Dict[str, Any]] = None,
+        verbose: bool = False
+    ) -> None:
+        """
+        Display comprehensive status dashboard.
+        
+        Args:
+            session_info: Session information (id, status, duration, etc.)
+            active_operation: Currently active operation (type, task, progress)
+            recent_activities: Recent activity list
+            health_report: Health check results
+            resource_usage: Resource usage metrics (CPU, memory, cache)
+            verbose: Show detailed information
+        """
+        if self.use_rich and self.console:
+            self._display_rich_dashboard(
+                session_info,
+                active_operation,
+                recent_activities,
+                health_report,
+                resource_usage,
+                verbose
+            )
+        else:
+            self._display_plain_dashboard(
+                session_info,
+                active_operation,
+                recent_activities,
+                health_report,
+                resource_usage,
+                verbose
+            )
+    
+    def _display_rich_dashboard(
+        self,
+        session_info: Optional[Dict[str, Any]],
+        active_operation: Optional[Dict[str, Any]],
+        recent_activities: Optional[List[Dict[str, Any]]],
+        health_report: Optional[Dict[str, Any]],
+        resource_usage: Optional[Dict[str, Any]],
+        verbose: bool
+    ) -> None:
+        """Display dashboard with rich formatting."""
+        from datetime import datetime
+        
+        # Session panel
+        if session_info:
+            session_text = Text()
+            session_id = session_info.get('id', 'N/A')
+            session_status = session_info.get('status', 'unknown')
+            
+            # Color code status
+            status_color = {
+                'active': 'green',
+                'paused': 'yellow',
+                'completed': 'blue',
+                'failed': 'red'
+            }.get(session_status, 'white')
+            
+            session_text.append(f"ID: {session_id}\n", style="cyan")
+            session_text.append(f"Status: ", style="white")
+            session_text.append(f"{session_status.upper()}\n", style=f"bold {status_color}")
+            
+            if 'start_time' in session_info:
+                start_time = session_info['start_time']
+                if isinstance(start_time, str):
+                    start_time = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
+                elapsed = (datetime.now() - start_time).total_seconds()
+                hours = int(elapsed // 3600)
+                minutes = int((elapsed % 3600) // 60)
+                session_text.append(f"Duration: {hours}h {minutes}m\n")
+            
+            if 'tasks_completed' in session_info:
+                session_text.append(f"Tasks Completed: {session_info['tasks_completed']}\n")
+            
+            self.console.print(Panel(session_text, title="📊 Session", border_style="cyan"))
+        
+        # Active operation panel
+        if active_operation:
+            op_text = Text()
+            op_type = active_operation.get('operation_type', 'N/A')
+            op_status = active_operation.get('status', 'unknown')
+            
+            op_text.append(f"Type: {op_type}\n", style="cyan")
+            op_text.append(f"Status: ", style="white")
+            op_text.append(f"{op_status.upper()}\n", style="green" if op_status == "in_progress" else "yellow")
+            
+            if 'task_id' in active_operation:
+                op_text.append(f"Task: {active_operation['task_id']}\n")
+            if 'task_title' in active_operation:
+                op_text.append(f"Title: {active_operation['task_title']}\n")
+            if 'progress' in active_operation:
+                progress = active_operation['progress']
+                op_text.append(f"Progress: {progress.get('completed', 0)}/{progress.get('total', 0)}")
+                if 'percentage' in progress:
+                    op_text.append(f" ({progress['percentage']:.1f}%)\n")
+            
+            self.console.print(Panel(op_text, title="⚡ Active Operation", border_style="green"))
+        
+        # Health report panel
+        if health_report:
+            health_text = Text()
+            overall_status = health_report.get('overall_status', 'unknown')
+            
+            status_emoji = {
+                'healthy': '✅',
+                'warning': '⚠️',
+                'error': '❌',
+                'critical': '🔴'
+            }.get(overall_status, '❓')
+            
+            health_text.append(f"{status_emoji} {overall_status.upper()}\n\n", style="bold green" if overall_status == 'healthy' else "bold red")
+            
+            checks = health_report.get('checks', {})
+            for check_name, check_info in checks.items():
+                check_status = check_info.get('status', 'unknown')
+                status_icon = '✓' if check_status == 'ok' else '✗'
+                status_color = 'green' if check_status == 'ok' else 'red'
+                
+                health_text.append(f"{status_icon} {check_name}: ", style="white")
+                health_text.append(f"{check_status}\n", style=status_color)
+                
+                if verbose and 'details' in check_info:
+                    for detail_key, detail_value in check_info['details'].items():
+                        health_text.append(f"  {detail_key}: {detail_value}\n", style="dim")
+            
+            self.console.print(Panel(health_text, title="🏥 System Health", border_style="blue"))
+        
+        # Resource usage panel
+        if resource_usage:
+            resource_text = Text()
+            
+            if 'cpu' in resource_usage:
+                cpu = resource_usage['cpu']
+                resource_text.append(f"CPU: {cpu:.1f}%\n", style="cyan")
+            
+            if 'memory' in resource_usage:
+                memory = resource_usage['memory']
+                resource_text.append(f"Memory: {memory:.2f} GB\n", style="cyan")
+            
+            if 'cache_size' in resource_usage:
+                cache = resource_usage['cache_size']
+                resource_text.append(f"Cache: {cache:.2f} MB\n", style="cyan")
+            
+            if 'cache_hit_rate' in resource_usage:
+                hit_rate = resource_usage['cache_hit_rate']
+                resource_text.append(f"Cache Hit Rate: {hit_rate:.1f}%\n", style="green")
+            
+            self.console.print(Panel(resource_text, title="💻 Resources", border_style="yellow"))
+        
+        # Recent activities panel
+        if recent_activities and verbose:
+            activities_table = Table(title="📝 Recent Activity")
+            activities_table.add_column("Time", style="dim")
+            activities_table.add_column("Type", style="cyan")
+            activities_table.add_column("Status")
+            activities_table.add_column("Summary")
+            
+            for activity in recent_activities[:5]:  # Show last 5
+                timestamp = activity.get('timestamp', '')
+                if isinstance(timestamp, datetime):
+                    timestamp = timestamp.strftime("%H:%M:%S")
+                
+                status = activity.get('status', '')
+                status_color = 'green' if status == 'success' else 'red'
+                
+                activities_table.add_row(
+                    str(timestamp),
+                    activity.get('action_type', ''),
+                    f"[{status_color}]{status}[/{status_color}]",
+                    activity.get('summary', '')[:50]
+                )
+            
+            self.console.print(activities_table)
+    
+    def _display_plain_dashboard(
+        self,
+        session_info: Optional[Dict[str, Any]],
+        active_operation: Optional[Dict[str, Any]],
+        recent_activities: Optional[List[Dict[str, Any]]],
+        health_report: Optional[Dict[str, Any]],
+        resource_usage: Optional[Dict[str, Any]],
+        verbose: bool
+    ) -> None:
+        """Display dashboard with plain text formatting."""
+        from datetime import datetime
+        
+        print("\n" + "="*60)
+        print("L4 PLATFORM STATUS DASHBOARD")
+        print("="*60 + "\n")
+        
+        # Session info
+        if session_info:
+            print("📊 SESSION")
+            print("-" * 60)
+            session_id = session_info.get('id', 'N/A')
+            session_status = session_info.get('status', 'unknown')
+            print(f"ID: {session_id}")
+            print(f"Status: {session_status.upper()}")
+            
+            if 'start_time' in session_info:
+                start_time = session_info['start_time']
+                if isinstance(start_time, str):
+                    start_time = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
+                elapsed = (datetime.now() - start_time).total_seconds()
+                hours = int(elapsed // 3600)
+                minutes = int((elapsed % 3600) // 60)
+                print(f"Duration: {hours}h {minutes}m")
+            
+            if 'tasks_completed' in session_info:
+                print(f"Tasks Completed: {session_info['tasks_completed']}")
+            
+            print()
+        
+        # Active operation
+        if active_operation:
+            print("⚡ ACTIVE OPERATION")
+            print("-" * 60)
+            op_type = active_operation.get('operation_type', 'N/A')
+            op_status = active_operation.get('status', 'unknown')
+            print(f"Type: {op_type}")
+            print(f"Status: {op_status.upper()}")
+            
+            if 'task_id' in active_operation:
+                print(f"Task: {active_operation['task_id']}")
+            if 'task_title' in active_operation:
+                print(f"Title: {active_operation['task_title']}")
+            if 'progress' in active_operation:
+                progress = active_operation['progress']
+                completed = progress.get('completed', 0)
+                total = progress.get('total', 0)
+                print(f"Progress: {completed}/{total}")
+                if 'percentage' in progress:
+                    print(f"Progress: {progress['percentage']:.1f}%")
+            
+            print()
+        
+        # Health report
+        if health_report:
+            print("🏥 SYSTEM HEALTH")
+            print("-" * 60)
+            overall_status = health_report.get('overall_status', 'unknown')
+            status_emoji = {
+                'healthy': '✅',
+                'warning': '⚠️',
+                'error': '❌',
+                'critical': '🔴'
+            }.get(overall_status, '❓')
+            print(f"Overall: {status_emoji} {overall_status.upper()}")
+            print()
+            
+            checks = health_report.get('checks', {})
+            for check_name, check_info in checks.items():
+                check_status = check_info.get('status', 'unknown')
+                status_icon = '✓' if check_status == 'ok' else '✗'
+                print(f"  {status_icon} {check_name}: {check_status}")
+                
+                if verbose and 'details' in check_info:
+                    for detail_key, detail_value in check_info['details'].items():
+                        print(f"    {detail_key}: {detail_value}")
+            
+            print()
+        
+        # Resource usage
+        if resource_usage:
+            print("💻 RESOURCES")
+            print("-" * 60)
+            
+            if 'cpu' in resource_usage:
+                cpu = resource_usage['cpu']
+                print(f"CPU: {cpu:.1f}%")
+            
+            if 'memory' in resource_usage:
+                memory = resource_usage['memory']
+                print(f"Memory: {memory:.2f} GB")
+            
+            if 'cache_size' in resource_usage:
+                cache = resource_usage['cache_size']
+                print(f"Cache: {cache:.2f} MB")
+            
+            if 'cache_hit_rate' in resource_usage:
+                hit_rate = resource_usage['cache_hit_rate']
+                print(f"Cache Hit Rate: {hit_rate:.1f}%")
+            
+            print()
+        
+        # Recent activities
+        if recent_activities and verbose:
+            print("📝 RECENT ACTIVITY")
+            print("-" * 60)
+            
+            for activity in recent_activities[:5]:  # Show last 5
+                timestamp = activity.get('timestamp', '')
+                if isinstance(timestamp, datetime):
+                    timestamp = timestamp.strftime("%H:%M:%S")
+                
+                status = activity.get('status', '')
+                action_type = activity.get('action_type', '')
+                summary = activity.get('summary', '')[:50]
+                
+                print(f"[{timestamp}] {action_type} | {status} | {summary}")
+            
+            print()
+        
+        print("="*60 + "\n")
+    
+    def watch(
+        self,
+        interval: int = 5,
+        max_iterations: Optional[int] = None,
+        **kwargs
+    ) -> None:
+        """
+        Watch mode - auto-refresh dashboard at interval.
+        
+        Args:
+            interval: Refresh interval in seconds
+            max_iterations: Maximum number of refreshes (None = infinite)
+            **kwargs: Arguments passed to display()
+        """
+        import time
+        
+        iteration = 0
+        try:
+            while True:
+                # Clear screen (works on most terminals)
+                if self.use_rich:
+                    self.console.clear()
+                else:
+                    import os
+                    os.system('cls' if os.name == 'nt' else 'clear')
+                
+                # Display dashboard
+                self.display(**kwargs)
+                
+                iteration += 1
+                if max_iterations and iteration >= max_iterations:
+                    break
+                
+                print(f"\nRefreshing in {interval}s... (Press Ctrl+C to stop)")
+                time.sleep(interval)
+        
+        except KeyboardInterrupt:
+            print("\nWatch mode stopped.")
+
+
+def create_status_dashboard(use_rich: Optional[bool] = None) -> StatusDashboard:
+    """
+    Factory function to create a status dashboard.
+    
+    Args:
+        use_rich: Force use of rich library (None = auto-detect)
+        
+    Returns:
+        StatusDashboard instance
+    """
+    return StatusDashboard(use_rich)
+
+
+def display_status(
+    session_info: Optional[Dict[str, Any]] = None,
+    active_operation: Optional[Dict[str, Any]] = None,
+    recent_activities: Optional[List[Dict[str, Any]]] = None,
+    health_report: Optional[Dict[str, Any]] = None,
+    resource_usage: Optional[Dict[str, Any]] = None,
+    verbose: bool = False
+) -> None:
+    """
+    Convenience function to display status dashboard.
+    
+    Args:
+        session_info: Session information
+        active_operation: Currently active operation
+        recent_activities: Recent activity list
+        health_report: Health check results
+        resource_usage: Resource usage metrics
+        verbose: Show detailed information
+    """
+    dashboard = create_status_dashboard()
+    dashboard.display(
+        session_info=session_info,
+        active_operation=active_operation,
+        recent_activities=recent_activities,
+        health_report=health_report,
+        resource_usage=resource_usage,
+        verbose=verbose
+    )
