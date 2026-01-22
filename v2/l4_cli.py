@@ -765,6 +765,594 @@ def cmd_sessions_list(args):
         print()
 
 
+def cmd_telemetry_list(args):
+    """List and query telemetry operations."""
+    from v2.data.telemetry_manager import get_telemetry_manager
+    from datetime import datetime, timedelta
+    
+    telemetry_mgr = get_telemetry_manager()
+    
+    # Parse time range if provided
+    start_time = None
+    end_time = None
+    
+    if args.last:
+        try:
+            hours = int(args.last.rstrip('h'))
+            start_time = (datetime.utcnow() - timedelta(hours=hours)).isoformat()
+        except ValueError:
+            print(f"Invalid time range: {args.last}")
+            return
+    
+    if args.start:
+        try:
+            start_time = args.start
+        except ValueError:
+            print(f"Invalid start time format: {args.start}")
+            return
+    
+    if args.end:
+        try:
+            end_time = args.end
+        except ValueError:
+            print(f"Invalid end time format: {args.end}")
+            return
+    
+    # Query operations
+    operations = telemetry_mgr.query_operations(
+        operation_type=args.type,
+        status=args.status,
+        start_time=start_time,
+        end_time=end_time,
+        limit=args.limit
+    )
+    
+    if not operations:
+        print("No matching operations found.")
+        return
+    
+    # Display results
+    print(f"\nFound {len(operations)} matching operations:\n")
+    
+    for i, op in enumerate(operations, 1):
+        op_id = op.get('id', 'N/A')[:16]
+        op_type = op.get('operation_type', 'N/A')
+        title = op.get('title', 'N/A')
+        status = op.get('status', 'N/A')
+        start = op.get('start_time', 'N/A').replace('T', ' ').split('.')[0]
+        
+        # Format status with emoji
+        status_emoji = {
+            'started': '🔄',
+            'completed': '✅',
+            'failed': '❌',
+            'interrupted': '⚠️',
+            'cancelled': '🚫'
+        }.get(status, '')
+        
+        print(f"{i}. {status_emoji} [{op_type}] {title}")
+        print(f"   ID: {op_id}...")
+        print(f"   Status: {status}")
+        print(f"   Started: {start}")
+        
+        # Show task ID if available
+        metadata = op.get('metadata', {})
+        if isinstance(metadata, dict) and 'task_id' in metadata:
+            print(f"   Task ID: {metadata['task_id']}")
+            if 'task_title' in metadata:
+                print(f"   Task: {metadata['task_title']}")
+        
+        # Show end time if available
+        if op.get('end_time'):
+            end = op['end_time'].replace('T', ' ').split('.')[0]
+            print(f"   Ended: {end}")
+        
+        print()
+    
+    # Export if requested
+    if args.export:
+        cmd_telemetry_export_from_ops(operations, args.export, args.format)
+
+
+def cmd_telemetry_show(args):
+    """Show detailed telemetry for an operation."""
+    from v2.data.telemetry_manager import get_telemetry_manager
+    
+    if not args.id:
+        print("Error: --id is required to show operation details")
+        return
+    
+    telemetry_mgr = get_telemetry_manager()
+    
+    # Get operation details
+    operation = telemetry_mgr.get_operation(args.id)
+    if not operation:
+        print(f"Error: Operation not found: {args.id}")
+        return
+    
+    print("\n" + "="*60)
+    print("Operation Details")
+    print("="*60)
+    print(f"\nID: {operation.get('id')}")
+    print(f"Type: {operation.get('operation_type')}")
+    print(f"Title: {operation.get('title')}")
+    print(f"Status: {operation.get('status')}")
+    print(f"Started: {operation.get('start_time')}")
+    
+    if operation.get('end_time'):
+        print(f"Ended: {operation.get('end_time')}")
+        
+        # Calculate duration
+        try:
+            from datetime import datetime
+            start = datetime.fromisoformat(operation['start_time'].replace('Z', '+00:00'))
+            end = datetime.fromisoformat(operation['end_time'].replace('Z', '+00:00'))
+            duration = (end - start).total_seconds()
+            print(f"Duration: {duration:.2f} seconds")
+        except:
+            pass
+    
+    if operation.get('parent_id'):
+        print(f"Parent: {operation['parent_id'][:16]}...")
+    
+    # Show metadata
+    metadata = operation.get('metadata')
+    if metadata:
+        print(f"\nMetadata:")
+        for key, value in metadata.items():
+            if key not in ['task_id', 'task_title']:  # Already shown
+                print(f"  {key}: {value}")
+    
+    # Show events
+    print(f"\n{'='*60}")
+    print("Events")
+    print("="*60)
+    events = telemetry_mgr.get_operation_events(args.id)
+    if events:
+        for event in events:
+            timestamp = event['timestamp'].replace('T', ' ').split('.')[0]
+            severity = event['severity']
+            event_type = event['event_type']
+            message = event['message']
+            
+            severity_emoji = {
+                'info': 'ℹ️',
+                'warning': '⚠️',
+                'error': '❌',
+                'critical': '🔴'
+            }.get(severity, '')
+            
+            print(f"\n[{timestamp}] {severity_emoji} [{event_type}] {message}")
+            if event.get('context'):
+                print(f"  Context: {event['context']}")
+    else:
+        print("No events recorded.")
+    
+    # Show metrics
+    print(f"\n{'='*60}")
+    print("Metrics")
+    print("="*60)
+    metrics = telemetry_mgr.get_operation_metrics(args.id)
+    if metrics:
+        # Group metrics by name
+        metric_groups = {}
+        for metric in metrics:
+            name = metric['metric_name']
+            if name not in metric_groups:
+                metric_groups[name] = []
+            metric_groups[name].append(metric)
+        
+        for metric_name, metric_list in metric_groups.items():
+            values = [m['metric_value'] for m in metric_list]
+            unit = metric_list[0].get('unit', '')
+            avg = sum(values) / len(values)
+            
+            print(f"\n{metric_name}:")
+            print(f"  Count: {len(values)}")
+            print(f"  Average: {avg:.2f} {unit}")
+            print(f"  Min: {min(values):.2f} {unit}")
+            print(f"  Max: {max(values):.2f} {unit}")
+    else:
+        print("No metrics recorded.")
+    
+    # Show resources
+    print(f"\n{'='*60}")
+    print("Resources")
+    print("="*60)
+    resources = telemetry_mgr.get_operation_resources(args.id)
+    if resources:
+        for resource in resources:
+            timestamp = resource['timestamp'].replace('T', ' ').split('.')[0]
+            rtype = resource['resource_type']
+            name = resource.get('resource_name', '')
+            value = resource['value']
+            unit = resource['unit']
+            
+            print(f"\n[{timestamp}] {rtype} {name}: {value} {unit}")
+    else:
+        print("No resource usage recorded.")
+    
+    # Show logs
+    if args.logs:
+        print(f"\n{'='*60}")
+        print("Logs")
+        print("="*60)
+        logs = telemetry_mgr.get_operation_logs(args.id)
+        if logs:
+            for log in logs:
+                timestamp = log['timestamp'].replace('T', ' ').split('.')[0]
+                level = log['log_level']
+                logger = log.get('logger_name', '')
+                message = log['message']
+                
+                print(f"\n[{timestamp}] [{level}] {logger}: {message}")
+                if log.get('log_data'):
+                    print(f"  Data: {log['log_data']}")
+        else:
+            print("No logs recorded.")
+
+
+def cmd_telemetry_export(args):
+    """Export telemetry data to file."""
+    from v2.data.telemetry_manager import get_telemetry_manager
+    
+    telemetry_mgr = get_telemetry_manager()
+    
+    if not args.id:
+        print("Error: --id is required for export")
+        return
+    
+    # Get operation with logs
+    result = telemetry_mgr.export_operation_with_logs(args.id, format='dict')
+    
+    if 'error' in result:
+        print(f"Error: {result['error']}")
+        return
+    
+    # Export based on format
+    if args.format == 'json':
+        import json
+        with open(args.export, 'w') as f:
+            json.dump(result, f, indent=2, default=str)
+        print(f"✓ Telemetry exported to {args.export}")
+    
+    elif args.format == 'csv':
+        import csv
+        with open(args.export, 'w', newline='') as f:
+            writer = csv.writer(f)
+            
+            # Write operation summary
+            writer.writerow(['Type', 'Field', 'Value'])
+            operation = result.get('operation', {})
+            writer.writerow(['Operation', 'ID', operation.get('id')])
+            writer.writerow(['Operation', 'Type', operation.get('operation_type')])
+            writer.writerow(['Operation', 'Title', operation.get('title')])
+            writer.writerow(['Operation', 'Status', operation.get('status')])
+            writer.writerow(['Operation', 'Start', operation.get('start_time')])
+            writer.writerow(['Operation', 'End', operation.get('end_time')])
+            writer.writerow([])
+            
+            # Write events
+            writer.writerow(['Events'])
+            writer.writerow(['Timestamp', 'Type', 'Severity', 'Message'])
+            for event in result.get('events', []):
+                writer.writerow([
+                    event.get('timestamp'),
+                    event.get('event_type'),
+                    event.get('severity'),
+                    event.get('message')
+                ])
+            writer.writerow([])
+            
+            # Write metrics
+            writer.writerow(['Metrics'])
+            writer.writerow(['Timestamp', 'Name', 'Value', 'Unit'])
+            for metric in result.get('metrics', []):
+                writer.writerow([
+                    metric.get('timestamp'),
+                    metric.get('metric_name'),
+                    metric.get('metric_value'),
+                    metric.get('unit')
+                ])
+            writer.writerow([])
+            
+            # Write resources
+            writer.writerow(['Resources'])
+            writer.writerow(['Timestamp', 'Type', 'Name', 'Value', 'Unit'])
+            for resource in result.get('resources', []):
+                writer.writerow([
+                    resource.get('timestamp'),
+                    resource.get('resource_type'),
+                    resource.get('resource_name'),
+                    resource.get('value'),
+                    resource.get('unit')
+                ])
+            writer.writerow([])
+            
+            # Write logs
+            writer.writerow(['Logs'])
+            writer.writerow(['Timestamp', 'Level', 'Logger', 'Message'])
+            for log in result.get('logs', []):
+                writer.writerow([
+                    log.get('timestamp'),
+                    log.get('log_level'),
+                    log.get('logger_name'),
+                    log.get('message')
+                ])
+        
+        print(f"✓ Telemetry exported to {args.export}")
+    
+    else:
+        print(f"Unsupported export format: {args.format}")
+
+
+def cmd_telemetry_export_from_ops(operations, export_path, format='json'):
+    """Helper function to export list of operations."""
+    if format == 'json':
+        import json
+        with open(export_path, 'w') as f:
+            json.dump(operations, f, indent=2, default=str)
+        print(f"\n✓ Operations exported to {export_path}")
+    
+    elif format == 'csv':
+        import csv
+        with open(export_path, 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow(['ID', 'Type', 'Title', 'Status', 'Start Time', 'End Time'])
+            for op in operations:
+                writer.writerow([
+                    op.get('id'),
+                    op.get('operation_type'),
+                    op.get('title'),
+                    op.get('status'),
+                    op.get('start_time'),
+                    op.get('end_time')
+                ])
+        print(f"\n✓ Operations exported to {export_path}")
+    
+    else:
+        print(f"\nUnsupported export format: {format}")
+
+
+def cmd_telemetry_stats(args):
+    """Show telemetry statistics."""
+    from v2.data.telemetry_manager import get_telemetry_manager
+    
+    telemetry_mgr = get_telemetry_manager()
+    
+    # Get statistics
+    stats = telemetry_mgr.get_operation_stats(operation_type=args.type)
+    
+    print("\n" + "="*60)
+    print("Telemetry Statistics")
+    print("="*60)
+    
+    if args.type:
+        print(f"\nOperation Type: {args.type}")
+    
+    print(f"\nTotal Operations: {stats.get('count', 0)}")
+    
+    if stats.get('avg_duration_seconds', 0) > 0:
+        print(f"Average Duration: {stats['avg_duration_seconds']:.2f} seconds")
+    
+    print(f"Success Rate: {stats.get('success_rate_percent', 0):.1f}%")
+    
+    # Status breakdown
+    breakdown = stats.get('status_breakdown', {})
+    if breakdown:
+        print(f"\nStatus Breakdown:")
+        for status, count in breakdown.items():
+            emoji = {
+                'started': '🔄',
+                'completed': '✅',
+                'failed': '❌',
+                'interrupted': '⚠️',
+                'cancelled': '🚫'
+            }.get(status, '')
+            print(f"  {emoji} {status}: {count}")
+    
+    # Get statistics by operation type if not filtering
+    if not args.type:
+        print(f"\n{'='*60}")
+        print("Statistics by Operation Type")
+        print("="*60)
+        
+        all_ops = telemetry_mgr.list_operations(limit=10000)
+        type_counts = {}
+        
+        for op in all_ops:
+            op_type = op.get('operation_type', 'unknown')
+            if op_type not in type_counts:
+                type_counts[op_type] = {'total': 0, 'completed': 0, 'failed': 0}
+            type_counts[op_type]['total'] += 1
+            status = op.get('status')
+            if status == 'completed':
+                type_counts[op_type]['completed'] += 1
+            elif status == 'failed':
+                type_counts[op_type]['failed'] += 1
+        
+        for op_type, counts in sorted(type_counts.items()):
+            total = counts['total']
+            completed = counts['completed']
+            failed = counts['failed']
+            success_rate = (completed / total * 100) if total > 0 else 0
+            print(f"\n{op_type}:")
+            print(f"  Total: {total}")
+            print(f"  Completed: {completed} ({success_rate:.1f}%)")
+            print(f"  Failed: {failed}")
+
+
+def cmd_report_generate(args):
+    """Generate analytics reports."""
+    from v2.data.telemetry_manager import get_telemetry_manager
+    from v2.data.db_manager import get_cost_summary
+    from datetime import datetime, timedelta
+    import json
+    
+    telemetry_mgr = get_telemetry_manager()
+    
+    # Determine time range
+    if args.period == 'day':
+        start_time = (datetime.utcnow() - timedelta(days=1)).isoformat()
+        period_label = "Last 24 Hours"
+    elif args.period == 'week':
+        start_time = (datetime.utcnow() - timedelta(days=7)).isoformat()
+        period_label = "Last 7 Days"
+    elif args.period == 'month':
+        start_time = (datetime.utcnow() - timedelta(days=30)).isoformat()
+        period_label = "Last 30 Days"
+    else:
+        start_time = None
+        period_label = "All Time"
+    
+    print("\n" + "="*60)
+    print("L4D Analytics Report")
+    print("="*60)
+    print(f"\nPeriod: {period_label}")
+    print(f"Generated: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}")
+    
+    # Operation Statistics
+    print(f"\n{'='*60}")
+    print("Operation Statistics")
+    print("="*60)
+    
+    ops = telemetry_mgr.query_operations(start_time=start_time, limit=10000)
+    print(f"\nTotal Operations: {len(ops)}")
+    
+    if ops:
+        # Group by type
+        type_counts = {}
+        status_counts = {}
+        
+        for op in ops:
+            op_type = op.get('operation_type', 'unknown')
+            status = op.get('status', 'unknown')
+            
+            if op_type not in type_counts:
+                type_counts[op_type] = 0
+            type_counts[op_type] += 1
+            
+            if status not in status_counts:
+                status_counts[status] = 0
+            status_counts[status] += 1
+        
+        print(f"\nBy Operation Type:")
+        for op_type, count in sorted(type_counts.items(), key=lambda x: x[1], reverse=True):
+            print(f"  {op_type}: {count} ({count/len(ops)*100:.1f}%)")
+        
+        print(f"\nBy Status:")
+        for status, count in sorted(status_counts.items(), key=lambda x: x[1], reverse=True):
+            emoji = {
+                'started': '🔄',
+                'completed': '✅',
+                'failed': '❌',
+                'interrupted': '⚠️',
+                'cancelled': '🚫'
+            }.get(status, '')
+            print(f"  {emoji} {status}: {count} ({count/len(ops)*100:.1f}%)")
+        
+        # Calculate success rate
+        success_count = status_counts.get('completed', 0)
+        success_rate = (success_count / len(ops) * 100) if len(ops) > 0 else 0
+        print(f"\nSuccess Rate: {success_rate:.1f}%")
+    
+    # Cost Summary
+    print(f"\n{'='*60}")
+    print("Cost Summary")
+    print("="*60)
+    
+    total_tokens, total_cost = get_cost_summary()
+    print(f"\nTotal Tokens Used: {total_tokens:,}")
+    print(f"Total Estimated Cost: ${total_cost:.4f}")
+    
+    # Resource Usage
+    print(f"\n{'='*60}")
+    print("Resource Usage Summary")
+    print("="*60)
+    
+    # Get recent resource usage
+    try:
+        import psutil
+        cpu = psutil.cpu_percent(interval=0.1)
+        memory = psutil.virtual_memory()
+        disk = psutil.disk_usage('.')
+        
+        print(f"\nCurrent System Resources:")
+        print(f"  CPU Usage: {cpu}%")
+        print(f"  Memory: {memory.used / (1024**3):.2f} GB / {memory.total / (1024**3):.2f} GB")
+        print(f"  Memory Usage: {memory.percent}%")
+        print(f"  Disk: {disk.used / (1024**3):.2f} GB / {disk.total / (1024**3):.2f} GB")
+        print(f"  Disk Usage: {disk.percent}%")
+    except ImportError:
+        print("\n(psutil not available for resource monitoring)")
+    
+    # Error Analysis
+    print(f"\n{'='*60}")
+    print("Error Analysis")
+    print("="*60)
+    
+    failed_ops = [op for op in ops if op.get('status') == 'failed']
+    if failed_ops:
+        print(f"\nFailed Operations: {len(failed_ops)} ({len(failed_ops)/len(ops)*100:.1f}%)")
+        
+        # Analyze failure patterns
+        failure_types = {}
+        for op in failed_ops:
+            metadata = op.get('metadata', {})
+            error_type = metadata.get('error_type', 'unknown')
+            if error_type not in failure_types:
+                failure_types[error_type] = 0
+            failure_types[error_type] += 1
+        
+        if failure_types:
+            print(f"\nFailure Types:")
+            for error_type, count in sorted(failure_types.items(), key=lambda x: x[1], reverse=True):
+                print(f"  {error_type}: {count}")
+    else:
+        print("\nNo failed operations in this period.")
+    
+    # Log Statistics
+    print(f"\n{'='*60}")
+    print("Log Statistics")
+    print("="*60)
+    
+    log_stats = telemetry_mgr.get_log_statistics(start_time=start_time)
+    print(f"\nTotal Logs: {log_stats.get('total_logs', 0)}")
+    print(f"Errors: {log_stats.get('error_count', 0)}")
+    print(f"Warnings: {log_stats.get('warning_count', 0)}")
+    print(f"Critical: {log_stats.get('critical_count', 0)}")
+    
+    # Export if requested
+    if args.export:
+        report_data = {
+            "period": period_label,
+            "generated_at": datetime.utcnow().isoformat(),
+            "operation_statistics": {
+                "total_operations": len(ops),
+                "by_type": type_counts if ops else {},
+                "by_status": status_counts if ops else {},
+                "success_rate": success_rate if ops else 0
+            },
+            "cost_summary": {
+                "total_tokens": total_tokens,
+                "total_cost": total_cost
+            },
+            "error_analysis": {
+                "failed_count": len(failed_ops),
+                "failure_types": failure_types
+            },
+            "log_statistics": log_stats
+        }
+        
+        with open(args.export, 'w') as f:
+            json.dump(report_data, f, indent=2, default=str)
+        print(f"\n✓ Report exported to {args.export}")
+    
+    print("\n" + "="*60)
+    print("Report Complete")
+    print("="*60 + "\n")
+
+
 def cmd_recover(args):
     """Interactive recovery wizard."""
     from v2.core.session_manager import SessionManager
@@ -1068,6 +1656,42 @@ def main():
     recover_p.add_argument("--dry-run", action="store_true", help="Preview recovery without making changes")
     add_common_args(recover_p)
 
+    # Telemetry subcommand group
+    telemetry_p = subparsers.add_parser("telemetry", help="Query and analyze telemetry data")
+    telemetry_subparsers = telemetry_p.add_subparsers(dest="telemetry_command", help="Telemetry commands")
+
+    # Telemetry list command
+    telemetry_list_p = telemetry_subparsers.add_parser("list", help="List and query operations")
+    telemetry_list_p.add_argument("--type", help="Filter by operation type (e.g., implementation, task_breakdown)")
+    telemetry_list_p.add_argument("--status", help="Filter by status (started, completed, failed, interrupted, cancelled)")
+    telemetry_list_p.add_argument("--start", help="Start time (ISO format)")
+    telemetry_list_p.add_argument("--end", help="End time (ISO format)")
+    telemetry_list_p.add_argument("--last", help="Time range (e.g., 1h, 24h, 7d)")
+    telemetry_list_p.add_argument("--limit", type=int, default=50, help="Maximum number to show (default: 50)")
+    telemetry_list_p.add_argument("--export", help="Export to file (JSON or CSV)")
+    telemetry_list_p.add_argument("--format", choices=['json', 'csv'], default='json', help="Export format")
+
+    # Telemetry show command
+    telemetry_show_p = telemetry_subparsers.add_parser("show", help="Show detailed operation telemetry")
+    telemetry_show_p.add_argument("--id", required=True, help="Operation ID to show")
+    telemetry_show_p.add_argument("--logs", action="store_true", help="Include associated logs")
+
+    # Telemetry export command
+    telemetry_export_p = telemetry_subparsers.add_parser("export", help="Export operation telemetry to file")
+    telemetry_export_p.add_argument("--id", required=True, help="Operation ID to export")
+    telemetry_export_p.add_argument("--export", required=True, help="Output file path")
+    telemetry_export_p.add_argument("--format", choices=['json', 'csv'], default='json', help="Export format")
+
+    # Telemetry stats command
+    telemetry_stats_p = telemetry_subparsers.add_parser("stats", help="Show telemetry statistics")
+    telemetry_stats_p.add_argument("--type", help="Filter by operation type")
+
+    # Report command
+    report_p = subparsers.add_parser("report", help="Generate analytics reports")
+    report_p.add_argument("--period", choices=['day', 'week', 'month', 'all'], default='all', 
+                        help="Report period (default: all)")
+    report_p.add_argument("--export", help="Export report to JSON file")
+
     args = parser.parse_args()
 
     # Change CWD to project root
@@ -1115,6 +1739,19 @@ def main():
         cmd_sessions_list(args)
     elif args.command == "recover":
         cmd_recover(args)
+    elif args.command == "telemetry":
+        if args.telemetry_command == "list":
+            cmd_telemetry_list(args)
+        elif args.telemetry_command == "show":
+            cmd_telemetry_show(args)
+        elif args.telemetry_command == "export":
+            cmd_telemetry_export(args)
+        elif args.telemetry_command == "stats":
+            cmd_telemetry_stats(args)
+        else:
+            print("Please specify a telemetry command: list, show, export, stats")
+    elif args.command == "report":
+        cmd_report_generate(args)
     else:
         parser.print_help()
 

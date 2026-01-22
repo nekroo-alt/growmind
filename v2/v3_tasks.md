@@ -982,17 +982,17 @@ This document defines a series of tasks to enhance L4D v2 with comprehensive tel
 
 ---
 
-### Task 6.5: Telemetry and Log Queries
+### Task 6.5: Telemetry and Log Queries ✅ **COMPLETE**
 
 **Title**: Implement CLI for querying telemetry and logs
 
 **Acceptance Criteria**:
-- Query operations by type, status, time range
-- Query logs by level, module, keyword
-- Show operation details and metrics
-- Export telemetry to CSV/JSON
-- Generate analytics reports
-- Visualize operation timelines
+- ✅ Query operations by type, status, time range
+- ✅ Query logs by level, module, keyword
+- ✅ Show operation details and metrics
+- ✅ Export telemetry to CSV/JSON
+- ✅ Generate analytics reports
+- ✅ Visualize operation timelines
 
 **Module**: CLI commands in `l4_cli.py`, `core/log_analyzer.py`
 
@@ -1001,14 +1001,17 @@ This document defines a series of tasks to enhance L4D v2 with comprehensive tel
 **Dependencies**: Task 1.2, 2.4
 
 **Technical Notes**:
-- Commands:
+- ✅ Commands implemented:
   ```bash
   l4-dev telemetry list --operation-type implementation --status failed
+  l4-dev telemetry show --id <operation-id> --logs
+  l4-dev telemetry export --id <operation-id> --export output.json --format json
+  l4-dev telemetry stats --type implementation
   l4-dev logs search --error --last 1h
-  l4-dev report generate --period week
+  l4-dev report generate --period week --export report.json
   ```
-- Support filtering, sorting, and aggregation
-- Output in table, JSON, or CSV format
+- ✅ Support filtering, sorting, and aggregation
+- ✅ Output in table, JSON, or CSV format
 
 ---
 
