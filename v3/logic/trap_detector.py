@@ -915,6 +915,494 @@ class TrapDetector:
         
         return detections
     
+    # ========== DEAD END DETECTION METHODS (Task 4.3) ==========
+    
+    def detect_dead_end_no_progress(
+        self,
+        progress_history: List[Dict[str, Any]],
+        threshold: Optional[int] = None
+    ) -> Optional[TrapDetection]:
+        """
+        Detect dead end: no progress for extended period.
+        
+        Args:
+            progress_history: List of progress records with 'progress' field (0-1)
+            threshold: Number of operations with no progress (default from detection_criteria)
+        
+        Returns:
+            TrapDetection if dead end detected, None otherwise
+        """
+        dead_end_def = self.get_trap_definition(TrapType.DEAD_END)
+        if not dead_end_def:
+            return None
+        
+        if threshold is None:
+            threshold = dead_end_def.detection_criteria.get("no_progress_threshold", 5)
+        
+        if not progress_history:
+            return None
+        
+        # Count operations with no meaningful progress across ALL operations
+        # This is different from window-based detection - we check all operations
+        no_progress_count = 0
+        total_progress = 0.0
+        progress_values = []
+        
+        for record in progress_history:
+            progress = record.get("progress", 0)
+            progress_values.append(progress)
+            total_progress += progress
+            
+            # Consider progress < 5% as no meaningful progress
+            if progress < 0.05:
+                no_progress_count += 1
+        
+        # Check if we've had no progress for N operations
+        if no_progress_count >= threshold:
+            severity = TrapSeverity.BLOCKING if no_progress_count >= 10 else TrapSeverity.CRITICAL
+            avg_progress = total_progress / len(progress_history) if progress_history else 0
+            confidence = min(0.95, 0.6 + (no_progress_count - threshold) * 0.05)
+            
+            return TrapDetection(
+                trap_type=TrapType.DEAD_END,
+                severity=severity,
+                confidence=confidence,
+                evidence={
+                    "dead_end_type": "no_progress",
+                    "no_progress_count": no_progress_count,
+                    "threshold": threshold,
+                    "total_operations": len(progress_history),
+                    "avg_progress": avg_progress,
+                    "progress_values": progress_values[-threshold:],
+                    "latest_progress": progress_values[-1] if progress_values else 0
+                },
+                suggestion=f"No meaningful progress detected for {no_progress_count} consecutive operations (threshold: {threshold}). Average progress: {avg_progress:.1%}. Consider backtracking to last successful state or trying a different approach."
+            )
+        
+        return None
+    
+    def detect_dead_end_exhausted_options(
+        self,
+        action_history: List[Dict[str, Any]],
+        available_actions: List[str],
+        window: int = 20
+    ) -> Optional[TrapDetection]:
+        """
+        Detect dead end: all attempted actions failed (exhausted action space).
+        
+        Args:
+            action_history: List of action records with 'action' and 'success' fields
+            available_actions: List of all possible actions that could be taken
+            window: Number of recent actions to analyze
+        
+        Returns:
+            TrapDetection if dead end detected, None otherwise
+        """
+        if not action_history:
+            return None
+        
+        # Get recent actions based on window
+        recent_actions = action_history[-window:] if len(action_history) > window else action_history
+        attempts_analyzed = len(recent_actions)
+        
+        # Track attempted actions and their success
+        attempted_actions = set()
+        failed_action_count = 0  # Count of failed attempts (not unique actions)
+        success_count = 0
+        
+        for record in recent_actions:
+            action = str(record.get("action", record))
+            success = record.get("success", True)
+            
+            attempted_actions.add(action)
+            
+            if not success:
+                failed_action_count += 1
+            else:
+                success_count += 1
+        
+        # Check if all available actions have been attempted
+        if available_actions and attempted_actions:
+            unattempted_actions = set(available_actions) - attempted_actions
+            all_attempted = len(unattempted_actions) == 0
+        else:
+            all_attempted = False
+        
+        # Check if we're approaching exhaustion (e.g., 90%+ attempted)
+        if available_actions and attempted_actions:
+            attempted_ratio = len(attempted_actions) / len(available_actions)
+            near_exhaustion = attempted_ratio >= 0.9
+        else:
+            attempted_ratio = 0
+            near_exhaustion = False
+        
+        # Check failure rate
+        total_attempts = len(recent_actions)
+        failure_rate = failed_action_count / total_attempts if total_attempts > 0 else 0
+        
+        # Detect dead end if:
+        # 1. All actions attempted AND high failure rate
+        # 2. Near exhaustion AND very high failure rate
+        if (all_attempted and failure_rate >= 0.8) or (near_exhaustion and failure_rate >= 0.95):
+            severity = TrapSeverity.BLOCKING if failure_rate >= 0.9 else TrapSeverity.CRITICAL
+            confidence = min(0.95, 0.7 + failure_rate * 0.2)
+            
+            self.logger.debug(
+                f"Dead end (exhausted_options) detected: all_attempted={all_attempted}, "
+                f"failure_rate={failure_rate:.3f}, near_exhaustion={near_exhaustion}, "
+                f"attempts_analyzed={attempts_analyzed}"
+            )
+            
+            return TrapDetection(
+                trap_type=TrapType.DEAD_END,
+                severity=severity,
+                confidence=confidence,
+                evidence={
+                    "dead_end_type": "exhausted_options",
+                    "attempted_actions": len(attempted_actions),
+                    "total_available": len(available_actions) if available_actions else 0,
+                    "attempted_ratio": attempted_ratio,
+                    "failed_action_count": failed_action_count,
+                    "success_count": success_count,
+                    "failure_rate": failure_rate,
+                    "all_attempted": all_attempted,
+                    "near_exhaustion": near_exhaustion,
+                    "attempts_analyzed": attempts_analyzed
+                },
+                suggestion=f"Action space appears exhausted ({attempted_ratio:.1%} attempted, {failure_rate:.1%} failure rate). {failed_action_count} out of {total_attempts} recent actions have failed. Consider breaking task into smaller subtasks or asking for human intervention to explore new options."
+            )
+        
+        self.logger.debug(
+            f"Dead end (exhausted_options) NOT detected: all_attempted={all_attempted}, "
+            f"failure_rate={failure_rate:.3f}, near_exhaustion={near_exhaustion}"
+        )
+        
+        return None
+    
+    def detect_dead_end_resource_exhaustion(
+        self,
+        resource_metrics: Dict[str, Any],
+        token_threshold: Optional[int] = None,
+        time_threshold: Optional[float] = None
+    ) -> Optional[TrapDetection]:
+        """
+        Detect dead end: resource exhaustion (tokens, time, compute).
+        
+        Args:
+            resource_metrics: Dictionary with resource metrics:
+                - tokens_used: Total tokens used
+                - tokens_budget: Total token budget
+                - time_elapsed: Time elapsed in seconds
+                - time_budget: Total time budget in seconds
+                - compute_usage: Compute resource usage percentage
+            token_threshold: Minimum remaining tokens threshold (default 1000)
+            time_threshold: Minimum remaining time threshold in seconds (default 300)
+        
+        Returns:
+            TrapDetection if dead end detected, None otherwise
+        """
+        if not resource_metrics:
+            return None
+        
+        if token_threshold is None:
+            token_threshold = 1000
+        if time_threshold is None:
+            time_threshold = 300  # 5 minutes
+        
+        exhausted_resources = []
+        resource_status = {}
+        
+        # Check token exhaustion
+        tokens_used = resource_metrics.get("tokens_used", 0)
+        tokens_budget = resource_metrics.get("tokens_budget", 0)
+        if tokens_budget > 0:
+            tokens_remaining = tokens_budget - tokens_used
+            tokens_percentage = (tokens_remaining / tokens_budget) * 100
+            resource_status["tokens_remaining"] = tokens_remaining
+            resource_status["tokens_percentage"] = tokens_percentage
+            
+            if tokens_remaining <= token_threshold or tokens_percentage <= 5:
+                exhausted_resources.append("tokens")
+        
+        # Check time exhaustion
+        time_elapsed = resource_metrics.get("time_elapsed", 0)
+        time_budget = resource_metrics.get("time_budget", 0)
+        if time_budget > 0:
+            time_remaining = time_budget - time_elapsed
+            time_percentage = (time_remaining / time_budget) * 100
+            resource_status["time_remaining"] = time_remaining
+            resource_status["time_percentage"] = time_percentage
+            
+            if time_remaining <= time_threshold or time_percentage <= 5:
+                exhausted_resources.append("time")
+        
+        # Check compute exhaustion
+        compute_usage = resource_metrics.get("compute_usage", 0)
+        if compute_usage >= 90:
+            exhausted_resources.append("compute")
+            resource_status["compute_usage"] = compute_usage
+        
+        # Detect dead end if any critical resource is exhausted
+        if exhausted_resources:
+            severity = TrapSeverity.BLOCKING
+            confidence = 0.9
+            
+            return TrapDetection(
+                trap_type=TrapType.DEAD_END,
+                severity=severity,
+                confidence=confidence,
+                evidence={
+                    "dead_end_type": "resource_exhaustion",
+                    "exhausted_resources": exhausted_resources,
+                    "resource_status": resource_status
+                },
+                suggestion=f"Resource exhaustion detected: {', '.join(exhausted_resources)}. {self._format_resource_exhaustion_message(exhausted_resources, resource_status)}"
+            )
+        
+        return None
+    
+    def detect_dead_end_goal_unreachable(
+        self,
+        action_history: List[Dict[str, Any]],
+        goal_state: Dict[str, Any],
+        current_state: Dict[str, Any],
+        window: int = 15
+    ) -> Optional[TrapDetection]:
+        """
+        Detect dead end: analysis shows goal appears impossible to reach.
+        
+        This method analyzes whether the gap between current state and goal
+        can be closed with available actions.
+        
+        Args:
+            action_history: List of action records
+            goal_state: Target state dictionary with required conditions
+            current_state: Current state dictionary
+            window: Number of recent actions to analyze
+        
+        Returns:
+            TrapDetection if dead end detected, None otherwise
+        """
+        if not goal_state or not current_state:
+            return None
+        
+        # Get recent actions
+        recent_actions = action_history[-window:] if len(action_history) > window else action_history
+        
+        # Calculate state gap
+        state_gap = self._calculate_state_gap(current_state, goal_state)
+        
+        # Calculate recent progress rate
+        progress_rates = []
+        for i in range(1, len(recent_actions)):
+            prev_state = recent_actions[i-1].get("state_after", {})
+            curr_state = recent_actions[i].get("state_after", {})
+            
+            if prev_state and curr_state and goal_state:
+                prev_gap = self._calculate_state_gap(prev_state, goal_state)
+                curr_gap = self._calculate_state_gap(curr_state, goal_state)
+                
+                if prev_gap > 0:
+                    progress_rate = (prev_gap - curr_gap) / prev_gap
+                    progress_rates.append(progress_rate)
+        
+        # Analyze if goal is reachable
+        avg_progress_rate = sum(progress_rates) / len(progress_rates) if progress_rates else 0
+        
+        # Detect dead end if:
+        # 1. State gap is large and not decreasing
+        # 2. Progress rate is zero or negative
+        # 3. Recent actions show no movement toward goal
+        if (state_gap > 0.5 and avg_progress_rate <= 0.01) or \
+           (len(progress_rates) >= 5 and all(rate <= 0 for rate in progress_rates[-5:])):
+            severity = TrapSeverity.BLOCKING if avg_progress_rate <= 0 else TrapSeverity.CRITICAL
+            confidence = min(0.9, 0.6 + (1 - state_gap) * 0.2)
+            
+            return TrapDetection(
+                trap_type=TrapType.DEAD_END,
+                severity=severity,
+                confidence=confidence,
+                evidence={
+                    "dead_end_type": "goal_unreachable",
+                    "state_gap": state_gap,
+                    "avg_progress_rate": avg_progress_rate,
+                    "recent_progress_rates": progress_rates[-10:] if progress_rates else [],
+                    "actions_analyzed": len(recent_actions),
+                    "current_state": current_state,
+                    "goal_state": goal_state
+                },
+                suggestion=f"Goal appears unreachable with current approach. State gap: {state_gap:.1%}, avg progress rate: {avg_progress_rate:.2%}. Current actions are not effectively moving toward goal. Consider backtracking, changing strategy, or breaking task into smaller subgoals."
+            )
+        
+        return None
+    
+    def detect_all_dead_ends(
+        self,
+        progress_history: Optional[List[Dict[str, Any]]] = None,
+        action_history: Optional[List[Dict[str, Any]]] = None,
+        available_actions: Optional[List[str]] = None,
+        resource_metrics: Optional[Dict[str, Any]] = None,
+        goal_state: Optional[Dict[str, Any]] = None,
+        current_state: Optional[Dict[str, Any]] = None
+    ) -> List[TrapDetection]:
+        """
+        Run all dead end detection algorithms.
+        
+        Args:
+            progress_history: List of progress records for no-progress detection
+            action_history: List of action records for exhausted options detection
+            available_actions: List of all possible actions for exhausted options detection
+            resource_metrics: Resource metrics for resource exhaustion detection
+            goal_state: Target state for goal unreachable detection
+            current_state: Current state for goal unreachable detection
+        
+        Returns:
+            List of all detected dead ends
+        """
+        detections = []
+        
+        if progress_history:
+            # Detect no progress dead end
+            no_progress = self.detect_dead_end_no_progress(progress_history)
+            if no_progress:
+                detections.append(no_progress)
+        
+        if action_history and available_actions:
+            # Detect exhausted options dead end
+            exhausted = self.detect_dead_end_exhausted_options(
+                action_history,
+                available_actions
+            )
+            if exhausted:
+                detections.append(exhausted)
+        
+        if resource_metrics:
+            # Detect resource exhaustion dead end
+            resource_dead_end = self.detect_dead_end_resource_exhaustion(resource_metrics)
+            if resource_dead_end:
+                detections.append(resource_dead_end)
+        
+        if action_history and goal_state and current_state:
+            # Detect goal unreachable dead end
+            goal_unreachable = self.detect_dead_end_goal_unreachable(
+                action_history,
+                goal_state,
+                current_state
+            )
+            if goal_unreachable:
+                detections.append(goal_unreachable)
+        
+        return detections
+    
+    def _format_resource_exhaustion_message(
+        self,
+        exhausted_resources: List[str],
+        resource_status: Dict[str, Any]
+    ) -> str:
+        """
+        Format a human-readable resource exhaustion message.
+        
+        Args:
+            exhausted_resources: List of exhausted resource types
+            resource_status: Detailed resource status
+        
+        Returns:
+            Formatted message string
+        """
+        messages = []
+        
+        for resource in exhausted_resources:
+            if resource == "tokens":
+                remaining = resource_status.get("tokens_remaining", 0)
+                percentage = resource_status.get("tokens_percentage", 0)
+                messages.append(f"Tokens: {remaining} remaining ({percentage:.1f}%)")
+            elif resource == "time":
+                remaining = resource_status.get("time_remaining", 0)
+                percentage = resource_status.get("time_percentage", 0)
+                minutes = remaining / 60
+                messages.append(f"Time: {minutes:.1f} minutes remaining ({percentage:.1f}%)")
+            elif resource == "compute":
+                usage = resource_status.get("compute_usage", 0)
+                messages.append(f"Compute: {usage:.1f}% used")
+        
+        base_msg = ". ".join(messages)
+        return base_msg + ". Consider backtracking to checkpoint or requesting additional resources."
+    
+    def _calculate_state_gap(
+        self,
+        current_state: Dict[str, Any],
+        goal_state: Dict[str, Any]
+    ) -> float:
+        """
+        Calculate the gap between current state and goal state.
+        
+        Gap is calculated as:
+        - For each key in goal_state, compare to current_state
+        - Normalize to 0-1 range (0 = at goal, 1 = far from goal)
+        
+        Args:
+            current_state: Current state dictionary
+            goal_state: Goal state dictionary
+        
+        Returns:
+            State gap between 0 and 1
+        """
+        if not goal_state:
+            return 0.0
+        
+        gaps = []
+        
+        for key, goal_value in goal_state.items():
+            current_value = current_state.get(key)
+            
+            if isinstance(goal_value, bool):
+                # Boolean: gap is 1 if not matched, 0 if matched
+                gap = 0.0 if current_value == goal_value else 1.0
+                gaps.append(gap)
+            
+            elif isinstance(goal_value, (int, float)):
+                # Numeric: normalize gap
+                if current_value is None:
+                    gap = 1.0
+                else:
+                    # Assume goal_value is target, current should be close
+                    # If both are zero, gap is 0
+                    if goal_value == 0 and current_value == 0:
+                        gap = 0.0
+                    elif goal_value == 0:
+                        gap = abs(current_value)
+                    else:
+                        gap = abs(goal_value - current_value) / max(abs(goal_value), 1.0)
+                gaps.append(min(gap, 1.0))
+            
+            elif isinstance(goal_value, (list, set, dict)):
+                # Collection: check if current is subset or matches
+                if isinstance(goal_value, set):
+                    if isinstance(current_value, set):
+                        missing = goal_value - current_value
+                        gap = len(missing) / len(goal_value) if goal_value else 0
+                    else:
+                        gap = 1.0
+                elif isinstance(goal_value, list):
+                    if isinstance(current_value, list):
+                        gap = len(set(goal_value) - set(current_value)) / len(goal_value) if goal_value else 0
+                    else:
+                        gap = 1.0
+                else:  # dict
+                    if isinstance(current_value, dict):
+                        gap = 1.0 - (len(current_value) / len(goal_value) if goal_value else 0)
+                    else:
+                        gap = 1.0
+                gaps.append(gap)
+            
+            else:
+                # String or other: exact match required
+                gap = 0.0 if current_value == goal_value else 1.0
+                gaps.append(gap)
+        
+        # Average gap across all keys
+        return sum(gaps) / len(gaps) if gaps else 0.0
+    
     def _calculate_similarity(self, str1: str, str2: str) -> float:
         """
         Calculate similarity between two strings.

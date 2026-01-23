@@ -977,6 +977,691 @@ class TestLoopDetection:
         assert detection_5.confidence > detection_3.confidence
 
 
+class TestDeadEndDetection:
+    """Tests for dead end detection algorithms (Task 4.3)."""
+    
+    @pytest.fixture
+    def detector(self):
+        """Create detector for tests."""
+        return TrapDetector()
+    
+    # ========== No Progress Detection ==========
+    
+    def test_dead_end_no_progress_detected(self, detector):
+        """Test detection of no progress for extended period."""
+        progress_history = [
+            {"progress": 0.0},
+            {"progress": 0.01},
+            {"progress": 0.02},
+            {"progress": 0.01},
+            {"progress": 0.03}  # 5th operation, all <5% progress
+        ]
+        
+        detection = detector.detect_dead_end_no_progress(progress_history)
+        
+        assert detection is not None
+        assert detection.trap_type == TrapType.DEAD_END
+        assert detection.evidence["dead_end_type"] == "no_progress"
+        assert detection.evidence["no_progress_count"] == 5
+    
+    def test_dead_end_no_progress_critical_severity(self, detector):
+        """Test critical severity for 10+ operations with no progress."""
+        progress_history = [
+            {"progress": 0.0} for _ in range(10)
+        ]
+        
+        detection = detector.detect_dead_end_no_progress(progress_history)
+        
+        assert detection is not None
+        assert detection.severity == TrapSeverity.BLOCKING
+        assert detection.evidence["no_progress_count"] >= 10
+    
+    def test_dead_end_no_progress_below_threshold(self, detector):
+        """Test no detection when progress below threshold."""
+        progress_history = [
+            {"progress": 0.0},
+            {"progress": 0.0},
+            {"progress": 0.0},
+            {"progress": 0.0}  # Only 4 operations
+        ]
+        
+        detection = detector.detect_dead_end_no_progress(progress_history)
+        
+        assert detection is None
+    
+    def test_dead_end_no_progress_with_meaningful_progress(self, detector):
+        """Test no detection when meaningful progress is made."""
+        progress_history = [
+            {"progress": 0.0},
+            {"progress": 0.0},
+            {"progress": 0.15},  # Meaningful progress
+            {"progress": 0.0},
+            {"progress": 0.0}
+        ]
+        
+        detection = detector.detect_dead_end_no_progress(progress_history)
+        
+        assert detection is None
+    
+    def test_dead_end_no_progress_custom_threshold(self, detector):
+        """Test detection with custom threshold."""
+        progress_history = [
+            {"progress": 0.0} for _ in range(3)
+        ]
+        
+        detection = detector.detect_dead_end_no_progress(progress_history, threshold=3)
+        
+        assert detection is not None
+        assert detection.evidence["no_progress_count"] == 3
+    
+    def test_dead_end_no_progress_empty_history(self, detector):
+        """Test no detection with empty progress history."""
+        detection = detector.detect_dead_end_no_progress([])
+        
+        assert detection is None
+    
+    # ========== Exhausted Options Detection ==========
+    
+    def test_dead_end_exhausted_options_all_attempted(self, detector):
+        """Test detection when all actions have been attempted."""
+        action_history = [
+            {"action": "approach A", "success": False},
+            {"action": "approach B", "success": False},
+            {"action": "approach C", "success": False}
+        ]
+        available_actions = ["approach A", "approach B", "approach C"]
+        
+        detection = detector.detect_dead_end_exhausted_options(
+            action_history,
+            available_actions
+        )
+        
+        assert detection is not None
+        assert detection.trap_type == TrapType.DEAD_END
+        assert detection.evidence["dead_end_type"] == "exhausted_options"
+        assert detection.evidence["all_attempted"] is True
+    
+    def test_dead_end_exhausted_options_near_exhaustion(self, detector):
+        """Test detection when approaching action space exhaustion."""
+        # Create 20 actions with 95% failure rate
+        action_history = [
+            {"action": f"approach {i}", "success": i == 0}  # Only 1 success
+            for i in range(20)
+        ]
+        available_actions = [f"approach {i}" for i in range(22)]
+        
+        detection = detector.detect_dead_end_exhausted_options(
+            action_history,
+            available_actions
+        )
+        
+        assert detection is not None
+        assert detection.evidence["near_exhaustion"] is True
+        assert detection.evidence["attempted_ratio"] >= 0.9
+    
+    def test_dead_end_exhausted_options_not_exhausted(self, detector):
+        """Test no detection when actions still available."""
+        action_history = [
+            {"action": "approach A", "success": False},
+            {"action": "approach B", "success": True}
+        ]
+        available_actions = ["approach A", "approach B", "approach C", "approach D"]
+        
+        detection = detector.detect_dead_end_exhausted_options(
+            action_history,
+            available_actions
+        )
+        
+        assert detection is None
+    
+    def test_dead_end_exhausted_options_no_failure_rate(self, detector):
+        """Test no detection when failure rate is low."""
+        action_history = [
+            {"action": "approach A", "success": True},
+            {"action": "approach B", "success": True},
+            {"action": "approach C", "success": True}
+        ]
+        available_actions = ["approach A", "approach B", "approach C"]
+        
+        detection = detector.detect_dead_end_exhausted_options(
+            action_history,
+            available_actions
+        )
+        
+        assert detection is None
+    
+    def test_dead_end_exhausted_options_empty_history(self, detector):
+        """Test no detection with empty action history."""
+        detection = detector.detect_dead_end_exhausted_options([], ["action A"])
+        
+        assert detection is None
+    
+    def test_dead_end_exhausted_options_custom_window(self, detector):
+        """Test detection with custom window."""
+        action_history = [
+            {"action": "approach A", "success": False} for _ in range(25)
+        ]
+        available_actions = ["approach A"]
+        
+        detection = detector.detect_dead_end_exhausted_options(
+            action_history,
+            available_actions,
+            window=15
+        )
+        
+        assert detection is not None
+        assert detection.evidence["attempts_analyzed"] == 15
+    
+    # ========== Resource Exhaustion Detection ==========
+    
+    def test_dead_end_resource_exhaustion_tokens(self, detector):
+        """Test detection of token exhaustion."""
+        resource_metrics = {
+            "tokens_used": 95000,
+            "tokens_budget": 100000
+        }
+        
+        detection = detector.detect_dead_end_resource_exhaustion(resource_metrics)
+        
+        assert detection is not None
+        assert detection.trap_type == TrapType.DEAD_END
+        assert detection.evidence["dead_end_type"] == "resource_exhaustion"
+        assert "tokens" in detection.evidence["exhausted_resources"]
+        assert detection.evidence["resource_status"]["tokens_percentage"] <= 5
+    
+    def test_dead_end_resource_exhaustion_time(self, detector):
+        """Test detection of time exhaustion."""
+        resource_metrics = {
+            "time_elapsed": 28500,  # 475 minutes
+            "time_budget": 30000     # 500 minutes
+        }
+        
+        detection = detector.detect_dead_end_resource_exhaustion(resource_metrics)
+        
+        assert detection is not None
+        assert "time" in detection.evidence["exhausted_resources"]
+        assert detection.evidence["resource_status"]["time_percentage"] <= 5
+    
+    def test_dead_end_resource_exhaustion_compute(self, detector):
+        """Test detection of compute exhaustion."""
+        resource_metrics = {
+            "compute_usage": 92
+        }
+        
+        detection = detector.detect_dead_end_resource_exhaustion(resource_metrics)
+        
+        assert detection is not None
+        assert "compute" in detection.evidence["exhausted_resources"]
+        assert detection.evidence["resource_status"]["compute_usage"] >= 90
+    
+    def test_dead_end_resource_exhaustion_multiple(self, detector):
+        """Test detection of multiple resource exhaustion."""
+        resource_metrics = {
+            "tokens_used": 98000,
+            "tokens_budget": 100000,
+            "time_elapsed": 29000,
+            "time_budget": 30000
+        }
+        
+        detection = detector.detect_dead_end_resource_exhaustion(resource_metrics)
+        
+        assert detection is not None
+        assert "tokens" in detection.evidence["exhausted_resources"]
+        assert "time" in detection.evidence["exhausted_resources"]
+        assert len(detection.evidence["exhausted_resources"]) == 2
+    
+    def test_dead_end_resource_exhaustion_no_exhaustion(self, detector):
+        """Test no detection when resources are adequate."""
+        resource_metrics = {
+            "tokens_used": 50000,
+            "tokens_budget": 100000,
+            "time_elapsed": 15000,
+            "time_budget": 30000,
+            "compute_usage": 45
+        }
+        
+        detection = detector.detect_dead_end_resource_exhaustion(resource_metrics)
+        
+        assert detection is None
+    
+    def test_dead_end_resource_exhaustion_custom_thresholds(self, detector):
+        """Test detection with custom thresholds."""
+        resource_metrics = {
+            "tokens_used": 95000,
+            "tokens_budget": 100000
+        }
+        
+        detection = detector.detect_dead_end_resource_exhaustion(
+            resource_metrics,
+            token_threshold=2000,
+            time_threshold=600
+        )
+        
+        assert detection is not None
+    
+    def test_dead_end_resource_exhaustion_empty_metrics(self, detector):
+        """Test no detection with empty resource metrics."""
+        detection = detector.detect_dead_end_resource_exhaustion({})
+        
+        assert detection is None
+    
+    # ========== Goal Unreachable Detection ==========
+    
+    def test_dead_end_goal_unreachable_large_gap(self, detector):
+        """Test detection when state gap is large with no progress."""
+        action_history = [
+            {
+                "action": "implement feature",
+                "state_after": {"completed": 0.1}
+            },
+            {
+                "action": "implement feature",
+                "state_after": {"completed": 0.12}
+            },
+            {
+                "action": "implement feature",
+                "state_after": {"completed": 0.11}
+            }
+        ]
+        goal_state = {"completed": 1.0}
+        current_state = {"completed": 0.11}
+        
+        detection = detector.detect_dead_end_goal_unreachable(
+            action_history,
+            goal_state,
+            current_state
+        )
+        
+        assert detection is not None
+        assert detection.trap_type == TrapType.DEAD_END
+        assert detection.evidence["dead_end_type"] == "goal_unreachable"
+        assert detection.evidence["state_gap"] > 0.5
+    
+    def test_dead_end_goal_unreachable_no_progress_rate(self, detector):
+        """Test detection when progress rate is zero or negative."""
+        action_history = [
+            {
+                "action": "implement feature",
+                "state_after": {"completed": 0.2}
+            },
+            {
+                "action": "implement feature",
+                "state_after": {"completed": 0.2}
+            },
+            {
+                "action": "implement feature",
+                "state_after": {"completed": 0.19}
+            },
+            {
+                "action": "implement feature",
+                "state_after": {"completed": 0.18}
+            },
+            {
+                "action": "implement feature",
+                "state_after": {"completed": 0.18}
+            }
+        ]
+        goal_state = {"completed": 1.0}
+        current_state = {"completed": 0.18}
+        
+        detection = detector.detect_dead_end_goal_unreachable(
+            action_history,
+            goal_state,
+            current_state
+        )
+        
+        assert detection is not None
+        # Recent progress rates should all be <= 0
+        assert all(rate <= 0 for rate in detection.evidence["recent_progress_rates"][-5:])
+    
+    def test_dead_end_goal_unreachable_reachable(self, detector):
+        """Test no detection when goal is reachable."""
+        action_history = [
+            {
+                "action": "implement feature",
+                "state_after": {"completed": 0.5}
+            },
+            {
+                "action": "implement feature",
+                "state_after": {"completed": 0.7}
+            },
+            {
+                "action": "implement feature",
+                "state_after": {"completed": 0.85}
+            }
+        ]
+        goal_state = {"completed": 1.0}
+        current_state = {"completed": 0.85}
+        
+        detection = detector.detect_dead_end_goal_unreachable(
+            action_history,
+            goal_state,
+            current_state
+        )
+        
+        assert detection is None
+    
+    def test_dead_end_goal_unreachable_empty_history(self, detector):
+        """Test no detection with empty action history."""
+        detection = detector.detect_dead_end_goal_unreachable(
+            [],
+            {"completed": 1.0},
+            {"completed": 0.5}
+        )
+        
+        assert detection is None
+    
+    def test_dead_end_goal_unreachable_no_goal_state(self, detector):
+        """Test no detection when goal state is None."""
+        detection = detector.detect_dead_end_goal_unreachable(
+            [{"action": "test"}],
+            None,
+            {"completed": 0.5}
+        )
+        
+        assert detection is None
+    
+    def test_dead_end_goal_unreachable_no_current_state(self, detector):
+        """Test no detection when current state is None."""
+        detection = detector.detect_dead_end_goal_unreachable(
+            [{"action": "test"}],
+            {"completed": 1.0},
+            None
+        )
+        
+        assert detection is None
+    
+    def test_dead_end_goal_unreachable_custom_window(self, detector):
+        """Test detection with custom window."""
+        action_history = [
+            {
+                "action": "implement feature",
+                "state_after": {"completed": 0.1}
+            } for _ in range(20)
+        ]
+        goal_state = {"completed": 1.0}
+        current_state = {"completed": 0.1}
+        
+        detection = detector.detect_dead_end_goal_unreachable(
+            action_history,
+            goal_state,
+            current_state,
+            window=10
+        )
+        
+        # Should analyze only last 10 actions
+        assert detection is not None
+        assert detection.evidence["actions_analyzed"] == 10
+    
+    # ========== Detect All Dead Ends ==========
+    
+    def test_detect_all_dead_ends(self, detector):
+        """Test running all dead end detection algorithms."""
+        progress_history = [
+            {"progress": 0.0} for _ in range(5)
+        ]
+        action_history = [
+            {"action": "approach A", "success": False},
+            {"action": "approach B", "success": False},
+            {"action": "approach C", "success": False}
+        ]
+        available_actions = ["approach A", "approach B", "approach C"]
+        resource_metrics = {
+            "tokens_used": 95000,
+            "tokens_budget": 100000
+        }
+        
+        detections = detector.detect_all_dead_ends(
+            progress_history=progress_history,
+            action_history=action_history,
+            available_actions=available_actions,
+            resource_metrics=resource_metrics
+        )
+        
+        assert len(detections) > 0
+        dead_end_types = [d.evidence["dead_end_type"] for d in detections]
+        assert "no_progress" in dead_end_types
+        assert "exhausted_options" in dead_end_types
+        assert "resource_exhaustion" in dead_end_types
+    
+    def test_detect_all_dead_ends_partial_input(self, detector):
+        """Test running dead end detection with partial input."""
+        progress_history = [
+            {"progress": 0.0} for _ in range(5)
+        ]
+        
+        detections = detector.detect_all_dead_ends(progress_history=progress_history)
+        
+        assert len(detections) > 0
+        assert all(d.trap_type == TrapType.DEAD_END for d in detections)
+    
+    def test_detect_all_dead_ends_no_dead_ends(self, detector):
+        """Test running all dead end detection with no issues."""
+        progress_history = [
+            {"progress": 0.2},
+            {"progress": 0.4},
+            {"progress": 0.6}
+        ]
+        action_history = [
+            {"action": "approach A", "success": True},
+            {"action": "approach B", "success": True}
+        ]
+        available_actions = ["approach A", "approach B", "approach C"]
+        resource_metrics = {
+            "tokens_used": 20000,
+            "tokens_budget": 100000,
+            "time_elapsed": 5000,
+            "time_budget": 30000,
+            "compute_usage": 40
+        }
+        
+        detections = detector.detect_all_dead_ends(
+            progress_history=progress_history,
+            action_history=action_history,
+            available_actions=available_actions,
+            resource_metrics=resource_metrics
+        )
+        
+        assert len(detections) == 0
+    
+    # ========== State Gap Calculation ==========
+    
+    def test_calculate_state_gap_boolean(self, detector):
+        """Test state gap calculation for boolean values."""
+        current = {"feature_complete": False}
+        goal = {"feature_complete": True}
+        
+        gap = detector._calculate_state_gap(current, goal)
+        
+        assert gap == 1.0
+    
+    def test_calculate_state_gap_boolean_match(self, detector):
+        """Test state gap calculation for matching boolean values."""
+        current = {"feature_complete": True}
+        goal = {"feature_complete": True}
+        
+        gap = detector._calculate_state_gap(current, goal)
+        
+        assert gap == 0.0
+    
+    def test_calculate_state_gap_numeric(self, detector):
+        """Test state gap calculation for numeric values."""
+        current = {"progress": 0.5}
+        goal = {"progress": 1.0}
+        
+        gap = detector._calculate_state_gap(current, goal)
+        
+        assert gap == 0.5
+    
+    def test_calculate_state_gap_numeric_zero(self, detector):
+        """Test state gap calculation for zero values."""
+        current = {"count": 0}
+        goal = {"count": 0}
+        
+        gap = detector._calculate_state_gap(current, goal)
+        
+        assert gap == 0.0
+    
+    def test_calculate_state_gap_set(self, detector):
+        """Test state gap calculation for set values."""
+        current = {"features": {"feature1", "feature2"}}
+        goal = {"features": {"feature1", "feature2", "feature3"}}
+        
+        gap = detector._calculate_state_gap(current, goal)
+        
+        assert gap == 1.0 / 3.0  # 1 missing out of 3
+    
+    def test_calculate_state_gap_list(self, detector):
+        """Test state gap calculation for list values."""
+        current = {"files": ["file1.py", "file2.py"]}
+        goal = {"files": ["file1.py", "file2.py", "file3.py"]}
+        
+        gap = detector._calculate_state_gap(current, goal)
+        
+        assert gap == 1.0 / 3.0  # 1 missing out of 3
+    
+    def test_calculate_state_gap_dict(self, detector):
+        """Test state gap calculation for dict values."""
+        current = {"config": {"key1": "value1"}}
+        goal = {"config": {"key1": "value1", "key2": "value2"}}
+        
+        gap = detector._calculate_state_gap(current, goal)
+        
+        # Gap is 1 - (1/2) = 0.5
+        assert 0.4 < gap < 0.6
+    
+    def test_calculate_state_gap_string(self, detector):
+        """Test state gap calculation for string values."""
+        current = {"status": "in_progress"}
+        goal = {"status": "complete"}
+        
+        gap = detector._calculate_state_gap(current, goal)
+        
+        assert gap == 1.0
+    
+    def test_calculate_state_gap_string_match(self, detector):
+        """Test state gap calculation for matching string values."""
+        current = {"status": "complete"}
+        goal = {"status": "complete"}
+        
+        gap = detector._calculate_state_gap(current, goal)
+        
+        assert gap == 0.0
+    
+    def test_calculate_state_gap_multiple_keys(self, detector):
+        """Test state gap calculation for multiple keys."""
+        current = {
+            "feature_complete": False,
+            "progress": 0.5,
+            "tests_passing": 8
+        }
+        goal = {
+            "feature_complete": True,
+            "progress": 1.0,
+            "tests_passing": 10
+        }
+        
+        gap = detector._calculate_state_gap(current, goal)
+        
+        # Average of: 1.0 (bool), 0.5 (numeric), 0.2 (numeric)
+        assert 0.5 < gap < 0.7
+    
+    def test_calculate_state_gap_empty_goal(self, detector):
+        """Test state gap calculation with empty goal."""
+        gap = detector._calculate_state_gap(
+            {"key": "value"},
+            {}
+        )
+        
+        assert gap == 0.0
+    
+    # ========== Resource Exhaustion Message Formatting ==========
+    
+    def test_format_resource_exhaustion_message_tokens(self, detector):
+        """Test formatting token exhaustion message."""
+        exhausted = ["tokens"]
+        status = {
+            "tokens_remaining": 500,
+            "tokens_percentage": 0.5
+        }
+        
+        message = detector._format_resource_exhaustion_message(exhausted, status)
+        
+        assert "Tokens" in message
+        assert "500" in message
+        assert "0.5%" in message
+    
+    def test_format_resource_exhaustion_message_time(self, detector):
+        """Test formatting time exhaustion message."""
+        exhausted = ["time"]
+        status = {
+            "time_remaining": 300,
+            "time_percentage": 1.0
+        }
+        
+        message = detector._format_resource_exhaustion_message(exhausted, status)
+        
+        assert "Time" in message
+        assert "5.0 minutes" in message
+        assert "1.0%" in message
+    
+    def test_format_resource_exhaustion_message_compute(self, detector):
+        """Test formatting compute exhaustion message."""
+        exhausted = ["compute"]
+        status = {
+            "compute_usage": 95
+        }
+        
+        message = detector._format_resource_exhaustion_message(exhausted, status)
+        
+        assert "Compute" in message
+        assert "95.0%" in message
+    
+    def test_format_resource_exhaustion_message_multiple(self, detector):
+        """Test formatting multiple resource exhaustion message."""
+        exhausted = ["tokens", "time"]
+        status = {
+            "tokens_remaining": 500,
+            "tokens_percentage": 0.5,
+            "time_remaining": 300,
+            "time_percentage": 1.0
+        }
+        
+        message = detector._format_resource_exhaustion_message(exhausted, status)
+        
+        assert "Tokens" in message
+        assert "Time" in message
+        assert "backtracking" in message.lower()
+    
+    # ========== Edge Cases ==========
+    
+    def test_dead_end_no_progress_all_zero(self, detector):
+        """Test no progress detection when all progress is zero."""
+        progress_history = [
+            {"progress": 0.0} for _ in range(6)
+        ]
+        
+        detection = detector.detect_dead_end_no_progress(progress_history)
+        
+        assert detection is not None
+        assert detection.evidence["latest_progress"] == 0.0
+        assert detection.evidence["avg_progress"] == 0.0
+    
+    def test_dead_end_exhausted_options_no_available(self, detector):
+        """Test exhausted options with no available actions."""
+        action_history = [
+            {"action": "approach A", "success": False} for _ in range(20)
+        ]
+        available_actions = []
+        
+        detection = detector.detect_dead_end_exhausted_options(
+            action_history,
+            available_actions
+        )
+        
+        assert detection is None
+
+
 class TestIntegration:
     """Integration tests for trap detector."""
     
