@@ -500,6 +500,483 @@ class TestTrapDetectionDataclass:
         assert "0.90" in repr_str
 
 
+class TestLoopDetection:
+    """Tests for loop detection algorithms (Task 4.2)."""
+    
+    @pytest.fixture
+    def detector(self):
+        """Create detector for tests."""
+        return TrapDetector()
+    
+    # ========== Exact Action Loop Detection ==========
+    
+    def test_exact_action_loop_detected(self, detector):
+        """Test detection of exact action repetition."""
+        action_history = [
+            {"action": "fix bug in login"},
+            {"action": "fix bug in login"},
+            {"action": "fix bug in login"}  # 3rd repetition
+        ]
+        
+        detection = detector.detect_exact_action_loop(action_history)
+        
+        assert detection is not None
+        assert detection.trap_type == TrapType.INFINITE_LOOP
+        assert detection.severity == TrapSeverity.WARNING
+        assert detection.evidence["loop_type"] == "exact_action_loop"
+        assert detection.evidence["repetition_count"] == 3
+    
+    def test_exact_action_loop_below_threshold(self, detector):
+        """Test no detection when repetition below threshold."""
+        action_history = [
+            {"action": "fix bug in login"},
+            {"action": "fix bug in login"}  # Only 2 repetitions
+        ]
+        
+        detection = detector.detect_exact_action_loop(action_history)
+        
+        assert detection is None
+    
+    def test_exact_action_loop_critical_severity(self, detector):
+        """Test critical severity for 5+ repetitions."""
+        action_history = [
+            {"action": "fix bug in login"} for _ in range(5)
+        ]
+        
+        detection = detector.detect_exact_action_loop(action_history)
+        
+        assert detection is not None
+        assert detection.severity == TrapSeverity.CRITICAL
+        assert detection.evidence["repetition_count"] == 5
+    
+    def test_exact_action_loop_with_window(self, detector):
+        """Test detection with custom window."""
+        action_history = [
+            {"action": "fix bug"} for _ in range(15)
+        ]
+        
+        detection = detector.detect_exact_action_loop(action_history, window=5)
+        
+        assert detection is not None
+        assert detection.evidence["window"] == 5
+    
+    def test_exact_action_loop_multiple_actions(self, detector):
+        """Test detection when only one action repeats."""
+        action_history = [
+            {"action": "write test"},
+            {"action": "write test"},
+            {"action": "write test"},
+            {"action": "implement feature"},
+            {"action": "write code"}
+        ]
+        
+        detection = detector.detect_exact_action_loop(action_history)
+        
+        assert detection is not None
+        assert detection.evidence["action"] == "write test"
+    
+    # ========== Similar Action Pattern Detection ==========
+    
+    def test_similar_action_pattern_detected(self, detector):
+        """Test detection of similar action patterns."""
+        action_history = [
+            {"action": "fix login bug"},
+            {"action": "fix login bug"},
+            {"action": "fix login bug"},
+            {"action": "fix login bug"},
+            {"action": "fix login bug"}  # 5th identical action
+        ]
+        
+        detection = detector.detect_similar_action_pattern(action_history, similarity_threshold=0.9)
+        
+        assert detection is not None
+        assert detection.trap_type == TrapType.INFINITE_LOOP
+        assert detection.evidence["loop_type"] == "similar_action_pattern"
+        assert detection.evidence["pattern_count"] >= 5
+    
+    def test_similar_action_pattern_below_threshold(self, detector):
+        """Test no detection when similar actions below threshold."""
+        action_history = [
+            {"action": "fix login bug"},
+            {"action": "fix authentication bug"},
+            {"action": "implement feature"}
+        ]
+        
+        detection = detector.detect_similar_action_pattern(action_history)
+        
+        assert detection is None
+    
+    def test_similar_action_pattern_custom_threshold(self, detector):
+        """Test detection with custom similarity threshold."""
+        action_history = [
+            {"action": "fix bug"} for _ in range(5)
+        ]
+        
+        detection = detector.detect_similar_action_pattern(
+            action_history,
+            similarity_threshold=0.9
+        )
+        
+        assert detection is not None
+        assert detection.evidence["avg_similarity"] >= 0.9
+    
+    def test_similar_action_pattern_dissimilar_actions(self, detector):
+        """Test no detection for dissimilar actions."""
+        action_history = [
+            {"action": "write test"},
+            {"action": "implement feature"},
+            {"action": "refactor code"},
+            {"action": "fix bug"},
+            {"action": "write documentation"}
+        ]
+        
+        detection = detector.detect_similar_action_pattern(action_history)
+        
+        assert detection is None
+    
+    # ========== Error Loop Detection ==========
+    
+    def test_error_loop_detected(self, detector):
+        """Test detection of repeated error from same action."""
+        action_history = [
+            {"action": "connect to database", "error": "Connection timeout"},
+            {"action": "connect to database", "error": "Connection timeout"},
+            {"action": "connect to database", "error": "Connection timeout"}
+        ]
+        
+        detection = detector.detect_error_loop(action_history)
+        
+        assert detection is not None
+        assert detection.trap_type == TrapType.INFINITE_LOOP
+        assert detection.evidence["loop_type"] == "error_loop"
+        assert detection.evidence["error_count"] == 3
+        assert "Connection timeout" in detection.suggestion
+    
+    def test_error_loop_different_errors(self, detector):
+        """Test no detection for different errors."""
+        action_history = [
+            {"action": "connect to database", "error": "Connection timeout"},
+            {"action": "connect to database", "error": "Authentication failed"}
+        ]
+        
+        detection = detector.detect_error_loop(action_history)
+        
+        assert detection is None
+    
+    def test_error_loop_no_errors(self, detector):
+        """Test no detection when no errors present."""
+        action_history = [
+            {"action": "connect to database"},
+            {"action": "connect to database"},
+            {"action": "connect to database"}
+        ]
+        
+        detection = detector.detect_error_loop(action_history)
+        
+        assert detection is None
+    
+    def test_error_loop_critical_severity(self, detector):
+        """Test critical severity for 5+ error repetitions."""
+        action_history = [
+            {"action": "connect to database", "error": "Connection timeout"}
+            for _ in range(5)
+        ]
+        
+        detection = detector.detect_error_loop(action_history)
+        
+        assert detection is not None
+        assert detection.severity == TrapSeverity.CRITICAL
+        assert detection.evidence["error_count"] == 5
+    
+    # ========== Reasoning Loop Detection ==========
+    
+    def test_reasoning_loop_detected(self, detector):
+        """Test detection of repeated reasoning patterns."""
+        decision_history = [
+            {"reasoning": {"factor1": "high_cost", "factor2": "low_risk"}},
+            {"reasoning": {"factor1": "high_cost", "factor2": "low_risk"}},
+            {"reasoning": {"factor1": "high_cost", "factor2": "low_risk"}}
+        ]
+        
+        detection = detector.detect_reasoning_loop(decision_history)
+        
+        assert detection is not None
+        assert detection.trap_type == TrapType.CIRCULAR_REASONING
+        assert detection.evidence["loop_type"] == "reasoning_loop"
+        assert detection.evidence["repetition_count"] == 3
+    
+    def test_reasoning_loop_with_factors_field(self, detector):
+        """Test detection using factors field instead of reasoning."""
+        decision_history = [
+            {"factors": {"cost": "high", "risk": "low"}},
+            {"factors": {"cost": "high", "risk": "low"}},
+            {"factors": {"cost": "high", "risk": "low"}}
+        ]
+        
+        detection = detector.detect_reasoning_loop(decision_history)
+        
+        assert detection is not None
+        assert detection.evidence["repetition_count"] == 3
+    
+    def test_reasoning_loop_empty_reasoning(self, detector):
+        """Test no detection for empty reasoning."""
+        decision_history = [
+            {"reasoning": {}},
+            {"reasoning": {}},
+            {"reasoning": {}}
+        ]
+        
+        detection = detector.detect_reasoning_loop(decision_history)
+        
+        assert detection is None
+    
+    def test_reasoning_loop_different_reasoning(self, detector):
+        """Test no detection for different reasoning patterns."""
+        decision_history = [
+            {"reasoning": {"factor1": "high_cost"}},
+            {"reasoning": {"factor2": "low_risk"}},
+            {"reasoning": {"factor3": "high_value"}}
+        ]
+        
+        detection = detector.detect_reasoning_loop(decision_history)
+        
+        assert detection is None
+    
+    # ========== Infinite Recursion Detection ==========
+    
+    def test_infinite_recursion_cycle_detected(self, detector):
+        """Test detection of circular dependency in decisions."""
+        decision_history = [
+            {"decision_id": 1, "parent_id": 3},
+            {"decision_id": 2, "parent_id": 1},
+            {"decision_id": 3, "parent_id": 2}  # Creates cycle: 1→3→2→1
+        ]
+        
+        detection = detector.detect_infinite_recursion(decision_history)
+        
+        assert detection is not None
+        assert detection.trap_type == TrapType.CIRCULAR_REASONING
+        assert detection.evidence["loop_type"] == "infinite_recursion"
+        assert detection.evidence["cycle_detected"] is True
+    
+    def test_infinite_recursion_excessive_depth(self, detector):
+        """Test detection of excessive decision depth."""
+        # Create a chain deeper than max_depth
+        decision_history = []
+        for i in range(15):  # Deeper than default max_depth=10
+            decision_history.append({
+                "decision_id": i,
+                "parent_id": i - 1 if i > 0 else None
+            })
+        
+        detection = detector.detect_infinite_recursion(decision_history, max_depth=10)
+        
+        assert detection is not None
+        assert detection.evidence["loop_type"] == "excessive_depth"
+        # Depth is 14 (0-14 chain length, depth of node 14 is 14)
+        assert detection.evidence["depth"] >= 10
+    
+    def test_infinite_recursion_no_issues(self, detector):
+        """Test no detection for normal decision hierarchy."""
+        decision_history = [
+            {"decision_id": 1, "parent_id": None},
+            {"decision_id": 2, "parent_id": 1},
+            {"decision_id": 3, "parent_id": 2}
+        ]
+        
+        detection = detector.detect_infinite_recursion(decision_history)
+        
+        assert detection is None
+    
+    # ========== Detect All Loops ==========
+    
+    def test_detect_all_loops_action_history(self, detector):
+        """Test running all loop detection on action history."""
+        action_history = [
+            {"action": "fix bug"} for _ in range(5)
+        ]
+        
+        detections = detector.detect_all_loops(action_history=action_history)
+        
+        assert len(detections) > 0
+        # Should detect exact loop and similar pattern
+        loop_types = [d.evidence["loop_type"] for d in detections]
+        assert "exact_action_loop" in loop_types
+    
+    def test_detect_all_loops_decision_history(self, detector):
+        """Test running all loop detection on decision history."""
+        decision_history = [
+            {"reasoning": {"factor": "value"}} for _ in range(5)
+        ]
+        
+        detections = detector.detect_all_loops(decision_history=decision_history)
+        
+        assert len(detections) > 0
+        assert all(d.trap_type in [TrapType.INFINITE_LOOP, TrapType.CIRCULAR_REASONING] 
+                  for d in detections)
+    
+    def test_detect_all_loops_both_histories(self, detector):
+        """Test running all loop detection on both histories."""
+        action_history = [
+            {"action": "fix bug"} for _ in range(3)
+        ]
+        decision_history = [
+            {"reasoning": {"factor": "value"}} for _ in range(3)
+        ]
+        
+        detections = detector.detect_all_loops(
+            action_history=action_history,
+            decision_history=decision_history
+        )
+        
+        assert len(detections) > 0
+    
+    def test_detect_all_loops_no_loops(self, detector):
+        """Test running all loop detection with no loops."""
+        action_history = [
+            {"action": f"action {i}"} for i in range(10)
+        ]
+        decision_history = [
+            {"reasoning": {f"factor{i}": f"value{i}"} } for i in range(10)
+        ]
+        
+        detections = detector.detect_all_loops(
+            action_history=action_history,
+            decision_history=decision_history
+        )
+        
+        assert len(detections) == 0
+    
+    # ========== Similarity Calculation ==========
+    
+    def test_similarity_identical_strings(self, detector):
+        """Test similarity calculation for identical strings."""
+        similarity = detector._calculate_similarity("test string", "test string")
+        
+        assert similarity == 1.0
+    
+    def test_similarity_completely_different(self, detector):
+        """Test similarity calculation for completely different strings."""
+        similarity = detector._calculate_similarity("apple", "zebra")
+        
+        assert similarity < 0.3
+    
+    def test_similarity_similar_strings(self, detector):
+        """Test similarity calculation for similar strings."""
+        similarity = detector._calculate_similarity(
+            "fix login bug",
+            "fix login issue"
+        )
+
+        # These strings share 2 out of 4 unique words ("fix", "login")
+        # Jaccard: 0.5, plus n-gram similarity for partial overlap
+        # Combined weighted average should be moderate
+        assert 0.4 < similarity < 0.7
+    
+    def test_similarity_empty_strings(self, detector):
+        """Test similarity calculation for empty strings."""
+        similarity = detector._calculate_similarity("", "")
+        
+        assert similarity == 1.0
+    
+    def test_similarity_one_empty_string(self, detector):
+        """Test similarity calculation with one empty string."""
+        similarity = detector._calculate_similarity("test", "")
+        
+        assert similarity == 0.0
+    
+    # ========== Reasoning Normalization ==========
+    
+    def test_normalize_reasoning_dict(self, detector):
+        """Test normalization of reasoning dictionary."""
+        reasoning = {"factor2": "value2", "factor1": "value1"}
+        normalized = detector._normalize_reasoning(reasoning)
+        
+        assert "{" in normalized
+        assert "factor1:value1" in normalized
+        assert "factor2:value2" in normalized
+        # Keys should be sorted
+        assert normalized.index("factor1") < normalized.index("factor2")
+    
+    def test_normalize_reasoning_list(self, detector):
+        """Test normalization of reasoning list."""
+        reasoning = ["value3", "value1", "value2"]
+        normalized = detector._normalize_reasoning(reasoning)
+        
+        assert "[" in normalized
+        assert "value1" in normalized
+        assert "value2" in normalized
+        assert "value3" in normalized
+        # Items should be sorted
+        assert normalized.index("value1") < normalized.index("value2")
+    
+    def test_normalize_reasoning_string(self, detector):
+        """Test normalization of reasoning string."""
+        reasoning = "  Test String  "
+        normalized = detector._normalize_reasoning(reasoning)
+        
+        assert normalized == "test string"
+    
+    def test_normalize_reasoning_nested_dict(self, detector):
+        """Test normalization of nested reasoning dictionary."""
+        reasoning = {"factor": {"nested": "value"}}
+        normalized = detector._normalize_reasoning(reasoning)
+        
+        assert "factor:" in normalized
+        assert normalized.startswith("{")
+        assert normalized.endswith("}")
+    
+    # ========== Edge Cases ==========
+    
+    def test_empty_action_history(self, detector):
+        """Test detection with empty action history."""
+        detection = detector.detect_exact_action_loop([])
+        
+        assert detection is None
+    
+    def test_empty_decision_history(self, detector):
+        """Test detection with empty decision history."""
+        detection = detector.detect_reasoning_loop([])
+        
+        assert detection is None
+    
+    def test_action_without_action_field(self, detector):
+        """Test action history without action field."""
+        action_history = [
+            {"operation": "fix bug"} for _ in range(5)
+        ]
+        
+        detection = detector.detect_exact_action_loop(action_history)
+        
+        # Should still work, using string representation
+        assert detection is not None
+    
+    def test_custom_window_larger_than_history(self, detector):
+        """Test with custom window larger than available history."""
+        action_history = [
+            {"action": "fix bug"} for _ in range(3)
+        ]
+        
+        detection = detector.detect_exact_action_loop(action_history, window=100)
+        
+        assert detection is not None
+        # Should use all available history
+        assert detection.evidence["repetition_count"] == 3
+    
+    def test_confidence_calculation(self, detector):
+        """Test confidence calculation increases with repetitions."""
+        detection_3 = detector.detect_exact_action_loop([
+            {"action": "test"} for _ in range(3)
+        ])
+        detection_5 = detector.detect_exact_action_loop([
+            {"action": "test"} for _ in range(5)
+        ])
+        
+        assert detection_3 is not None
+        assert detection_5 is not None
+        assert detection_5.confidence > detection_3.confidence
+
+
 class TestIntegration:
     """Integration tests for trap detector."""
     
