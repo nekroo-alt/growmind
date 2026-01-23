@@ -638,3 +638,503 @@ def compare_with_historical(metrics: ProgressMetrics,
     comparison['project_ratio'] = current_project_completion / avg_project_completion if avg_project_completion > 0 else 1.0
     
     return comparison
+
+
+class ProgressTracker:
+    """
+    Progress tracker for continuous monitoring
+    
+    Tracks progress metrics in real-time, compares against expected rates,
+    detects stagnation and regression, generates alerts, and produces reports.
+    """
+    
+    def __init__(self, task_id: Optional[str] = None):
+        """
+        Initialize progress tracker
+        
+        Args:
+            task_id: Optional task identifier for tracking
+        """
+        self.task_id = task_id
+        self.metrics = ProgressMetrics()
+        self.baseline_metrics = None
+        self.historical_metrics: List[ProgressMetrics] = []
+        self.ops_without_progress = 0
+        self.last_progress = 0.0
+        self.is_tracking = False
+        self.start_time = None
+        self.alerts: List[Dict[str, Any]] = []
+        
+    def start_tracking(self, task_id: Optional[str] = None):
+        """
+        Start tracking progress for a task
+        
+        Args:
+            task_id: Optional task identifier (overrides constructor)
+        """
+        if task_id:
+            self.task_id = task_id
+        
+        self.is_tracking = True
+        self.start_time = datetime.now()
+        self.metrics = ProgressMetrics()
+        self.baseline_metrics = None
+        self.ops_without_progress = 0
+        self.last_progress = 0.0
+        self.alerts = []
+        
+    def stop_tracking(self):
+        """Stop tracking progress"""
+        self.is_tracking = False
+        
+    def update_progress(self, task_id: Optional[str] = None,
+                       code_metrics: Optional[CodeProgressMetrics] = None,
+                       task_metrics: Optional[TaskProgressMetrics] = None,
+                       session_metrics: Optional[SessionProgressMetrics] = None,
+                       project_metrics: Optional[ProjectProgressMetrics] = None,
+                       custom_metrics: Optional[List[CustomMetric]] = None):
+        """
+        Update progress metrics
+        
+        Args:
+            task_id: Optional task identifier
+            code_metrics: Updated code metrics
+            task_metrics: Updated task metrics
+            session_metrics: Updated session metrics
+            project_metrics: Updated project metrics
+            custom_metrics: Updated custom metrics
+        """
+        if not self.is_tracking:
+            return
+            
+        if task_id:
+            self.task_id = task_id
+            
+        # Update baseline on first call
+        if self.baseline_metrics is None:
+            self.baseline_metrics = self.metrics
+            
+        # Save historical snapshot before update
+        self.historical_metrics.append(self.metrics)
+        
+        # Update metrics
+        if code_metrics:
+            self.metrics.code_metrics = code_metrics
+        if task_metrics:
+            self.metrics.task_metrics = task_metrics
+        if session_metrics:
+            self.metrics.session_metrics = session_metrics
+        if project_metrics:
+            self.metrics.project_metrics = project_metrics
+        if custom_metrics:
+            self.metrics.custom_metrics = custom_metrics
+            
+        self.metrics.timestamp = datetime.now()
+        
+    def check_progress(self, task_id: Optional[str] = None,
+                      metric_type: Optional[ProgressMetricType] = None) -> Dict[str, Any]:
+        """
+        Check if progress is adequate
+        
+        Args:
+            task_id: Optional task identifier
+            metric_type: Optional specific metric type to check (checks all if None)
+        
+        Returns:
+            Dictionary with validation results and status
+        """
+        if not self.is_tracking:
+            return {
+                'status': 'not_tracking',
+                'is_adequate': False,
+                'details': {}
+            }
+            
+        # If no baseline yet, use current metrics as baseline
+        if self.baseline_metrics is None:
+            self.baseline_metrics = self.metrics
+            
+        result = {
+            'task_id': task_id or self.task_id,
+            'timestamp': datetime.now().isoformat(),
+            'is_adequate': True,
+            'status': 'adequate',
+            'details': {}
+        }
+        
+        # Check stagnation
+        stagnation_status = self.metrics.check_stagnation(self.ops_without_progress)
+        if stagnation_status != 'none':
+            result['stagnation'] = stagnation_status
+            result['status'] = stagnation_status
+            if stagnation_status == 'critical':
+                result['is_adequate'] = False
+                
+        # Check regression
+        current_progress = self._calculate_overall_progress()
+        if self.metrics.check_regression(current_progress, self.last_progress):
+            result['regression'] = True
+            result['status'] = 'regression'
+            result['is_adequate'] = False
+            self._generate_alert('regression', 
+                               f"Regression detected: {current_progress:.2f}% -> {self.last_progress:.2f}%")
+            
+        self.last_progress = current_progress
+        
+        # Check each metric type
+        metric_types = [metric_type] if metric_type else [
+            ProgressMetricType.CODE,
+            ProgressMetricType.TASK,
+            ProgressMetricType.SESSION,
+            ProgressMetricType.PROJECT
+        ]
+        
+        for mtype in metric_types:
+            progress = self._calculate_progress_for_type(mtype)
+            validation = self.metrics.validate_progress(mtype, progress)
+            
+            result['details'][mtype.value] = {
+                'progress': progress,
+                'validation': validation
+            }
+            
+            # Check if meets minimal threshold
+            if not validation['minimal']:
+                result['is_adequate'] = False
+                if result['status'] == 'adequate':
+                    result['status'] = 'below_minimal'
+                self._generate_alert(mtype.value,
+                                   f"Progress {progress:.2f}% below minimal threshold for {mtype.value}")
+                
+        return result
+        
+    def _calculate_overall_progress(self) -> float:
+        """Calculate overall progress across all metric types"""
+        if self.baseline_metrics is None:
+            return 0.0
+            
+        total = 0.0
+        count = 0
+        
+        for mtype in [ProgressMetricType.CODE, ProgressMetricType.TASK, 
+                     ProgressMetricType.SESSION, ProgressMetricType.PROJECT]:
+            progress = self._calculate_progress_for_type(mtype)
+            total += progress
+            count += 1
+            
+        return total / count if count > 0 else 0.0
+        
+    def _calculate_progress_for_type(self, metric_type: ProgressMetricType) -> float:
+        """Calculate progress for specific metric type"""
+        if self.baseline_metrics is None:
+            return 0.0
+            
+        current = self.metrics.get_metric(metric_type)
+        baseline = self.baseline_metrics.get_metric(metric_type)
+        
+        if metric_type == ProgressMetricType.CODE:
+            return calculate_code_progress_percentage(
+                self.metrics.code_metrics, self.baseline_metrics.code_metrics
+            )
+        elif metric_type == ProgressMetricType.TASK:
+            return calculate_task_progress_percentage(
+                self.metrics.task_metrics, self.baseline_metrics.task_metrics
+            )
+        elif metric_type == ProgressMetricType.SESSION:
+            # Session progress: tasks completed / tasks attempted
+            total = current.total_tasks()
+            if total == 0:
+                return 0.0
+            return (current.tasks_completed / total) * 100.0
+        elif metric_type == ProgressMetricType.PROJECT:
+            return current.feature_completion_percentage()
+        else:
+            return 0.0
+            
+    def detect_stagnation(self, threshold: Optional[int] = None) -> Dict[str, Any]:
+        """
+        Detect if progress has stagnated
+        
+        Args:
+            threshold: Optional custom stagnation threshold (uses default if None)
+        
+        Returns:
+            Dictionary with stagnation status and details
+        """
+        stagnation_threshold = threshold or self.metrics.thresholds.stagnation_warning
+        
+        result = {
+            'ops_without_progress': self.ops_without_progress,
+            'status': 'none',
+            'severity': 'none'
+        }
+        
+        if self.ops_without_progress >= self.metrics.thresholds.stagnation_critical:
+            result['status'] = 'critical'
+            result['severity'] = 'critical'
+            result['message'] = f"Critical stagnation: {self.ops_without_progress} operations without progress"
+            self._generate_alert('stagnation_critical', result['message'])
+            
+        elif self.ops_without_progress >= stagnation_threshold:
+            result['status'] = 'warning'
+            result['severity'] = 'warning'
+            result['message'] = f"Stagnation warning: {self.ops_without_progress} operations without progress"
+            self._generate_alert('stagnation_warning', result['message'])
+            
+        return result
+        
+    def detect_regression(self, metric_type: Optional[ProgressMetricType] = None) -> Dict[str, Any]:
+        """
+        Detect if progress has regressed
+        
+        Args:
+            metric_type: Optional specific metric type to check (checks all if None)
+        
+        Returns:
+            Dictionary with regression status and details
+        """
+        result = {
+            'has_regression': False,
+            'regressions': []
+        }
+        
+        # Need at least 2 historical metrics to detect regression
+        if len(self.historical_metrics) < 2 or self.baseline_metrics is None:
+            return result
+        
+        metric_types = [metric_type] if metric_type else [
+            ProgressMetricType.CODE,
+            ProgressMetricType.TASK,
+            ProgressMetricType.SESSION,
+            ProgressMetricType.PROJECT
+        ]
+        
+        # Get previous metrics (second to last in history)
+        previous_metrics = self.historical_metrics[-2]
+        
+        for mtype in metric_types:
+            # Calculate progress for current state
+            current_progress = self._calculate_progress_for_type(mtype)
+            
+            # Calculate progress for previous state using temporary tracker
+            temp_tracker = ProgressTracker()
+            temp_tracker.baseline_metrics = self.baseline_metrics
+            temp_tracker.metrics = previous_metrics
+            previous_progress = temp_tracker._calculate_progress_for_type(mtype)
+            
+            # Check if regression occurred
+            if current_progress < previous_progress - self.metrics.thresholds.regression_tolerance:
+                regression_details = {
+                    'metric_type': mtype.value,
+                    'previous': previous_progress,
+                    'current': current_progress,
+                    'change': current_progress - previous_progress
+                }
+                result['regressions'].append(regression_details)
+                result['has_regression'] = True
+                
+                self._generate_alert(
+                    f'regression_{mtype.value}',
+                    f"Regression in {mtype.value}: {previous_progress:.2f}% -> {current_progress:.2f}%"
+                )
+                        
+        return result
+        
+    def _generate_alert(self, alert_type: str, message: str, severity: str = 'warning'):
+        """
+        Generate and store an alert
+        
+        Args:
+            alert_type: Type of alert
+            message: Alert message
+            severity: Alert severity (info, warning, error, critical)
+        """
+        alert = {
+            'timestamp': datetime.now().isoformat(),
+            'task_id': self.task_id,
+            'type': alert_type,
+            'severity': severity,
+            'message': message
+        }
+        self.alerts.append(alert)
+        
+    def get_alerts(self, severity: Optional[str] = None, 
+                   alert_type: Optional[str] = None) -> List[Dict[str, Any]]:
+        """
+        Get alerts with optional filtering
+        
+        Args:
+            severity: Optional severity filter
+            alert_type: Optional alert type filter
+        
+        Returns:
+            List of alerts matching filters
+        """
+        filtered = self.alerts
+        
+        if severity:
+            filtered = [a for a in filtered if a['severity'] == severity]
+            
+        if alert_type:
+            filtered = [a for a in filtered if a['type'] == alert_type]
+            
+        return filtered
+        
+    def clear_alerts(self):
+        """Clear all alerts"""
+        self.alerts = []
+        
+    def get_report(self, task_id: Optional[str] = None,
+                   include_historical: bool = True,
+                   include_alerts: bool = True) -> Dict[str, Any]:
+        """
+        Generate progress report
+        
+        Args:
+            task_id: Optional task identifier
+            include_historical: Include historical metrics
+            include_alerts: Include alerts
+        
+        Returns:
+            Comprehensive progress report
+        """
+        report = {
+            'task_id': task_id or self.task_id,
+            'is_tracking': self.is_tracking,
+            'start_time': self.start_time.isoformat() if self.start_time else None,
+            'current_time': datetime.now().isoformat(),
+            'duration_seconds': (
+                (datetime.now() - self.start_time).total_seconds() 
+                if self.start_time else 0
+            ),
+            'metrics': self.metrics.to_dict(),
+            'progress_summary': {}
+        }
+        
+        # Calculate progress for each metric type
+        for mtype in [ProgressMetricType.CODE, ProgressMetricType.TASK,
+                     ProgressMetricType.SESSION, ProgressMetricType.PROJECT]:
+            progress = self._calculate_progress_for_type(mtype)
+            validation = self.metrics.validate_progress(mtype, progress)
+            
+            report['progress_summary'][mtype.value] = {
+                'progress': progress,
+                'validation': validation
+            }
+            
+        # Add stagnation detection
+        stagnation = self.detect_stagnation()
+        report['stagnation'] = stagnation
+        
+        # Add regression detection
+        regression = self.detect_regression()
+        report['regression'] = regression
+        
+        # Add historical metrics if requested
+        if include_historical:
+            report['historical_metrics'] = [
+                m.to_dict() for m in self.historical_metrics[-10:]  # Last 10 entries
+            ]
+            
+        # Add alerts if requested
+        if include_alerts:
+            report['alerts'] = self.alerts
+            
+        # Add historical comparison
+        if self.historical_metrics:
+            report['historical_comparison'] = compare_with_historical(
+                self.metrics, self.historical_metrics
+            )
+            
+        return report
+        
+    def get_summary(self) -> Dict[str, Any]:
+        """
+        Get brief summary of current progress
+        
+        Returns:
+            Brief summary dictionary
+        """
+        overall_progress = self._calculate_overall_progress()
+        
+        summary = {
+            'task_id': self.task_id,
+            'is_tracking': self.is_tracking,
+            'overall_progress': overall_progress,
+            'ops_without_progress': self.ops_without_progress,
+            'total_alerts': len(self.alerts),
+            'critical_alerts': len([a for a in self.alerts if a['severity'] == 'critical']),
+            'status': 'adequate'
+        }
+        
+        # Determine overall status
+        stagnation = self.detect_stagnation()
+        if stagnation['status'] != 'none':
+            summary['status'] = stagnation['status']
+            
+        regression = self.detect_regression()
+        if regression['has_regression']:
+            summary['status'] = 'regression'
+            
+        if overall_progress < 10:
+            summary['status'] = 'below_minimal'
+            
+        return summary
+        
+    def increment_ops_without_progress(self):
+        """Increment counter for operations without progress"""
+        self.ops_without_progress += 1
+        
+    def reset_ops_without_progress(self):
+        """Reset counter for operations without progress"""
+        self.ops_without_progress = 0
+        
+    def export_to_json(self, filepath: str):
+        """
+        Export progress data to JSON file
+        
+        Args:
+            filepath: Path to JSON file
+        """
+        report = self.get_report()
+        
+        with open(filepath, 'w') as f:
+            json.dump(report, f, indent=2)
+            
+    def load_from_json(self, filepath: str):
+        """
+        Load progress data from JSON file
+        
+        Args:
+            filepath: Path to JSON file
+        """
+        with open(filepath, 'r') as f:
+            data = json.load(f)
+            
+        self.task_id = data.get('task_id')
+        self.is_tracking = data.get('is_tracking', False)
+        
+        if data.get('start_time'):
+            self.start_time = datetime.fromisoformat(data['start_time'])
+            
+        self.metrics = ProgressMetrics.from_dict(data['metrics'])
+        
+        # Load historical metrics
+        if 'historical_metrics' in data:
+            self.historical_metrics = [
+                ProgressMetrics.from_dict(m) for m in data['historical_metrics']
+            ]
+            
+        # Load alerts
+        if 'alerts' in data:
+            self.alerts = data['alerts']
+            
+        # Set baseline if historical metrics exist
+        if self.historical_metrics:
+            self.baseline_metrics = self.historical_metrics[0]
+            
+        # Recalculate progress counters
+        if 'stagnation' in data:
+            self.ops_without_progress = data['stagnation'].get('ops_without_progress', 0)
+            
+        self.last_progress = self._calculate_overall_progress()
