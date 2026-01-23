@@ -1556,11 +1556,11 @@ class SessionManager:
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                SELECT COUNT(*) as count 
+                SELECT COUNT(*) 
                 FROM session_checkpoints 
                 WHERE session_id = ?
             """, (session_id,))
-            return cursor.fetchone()["count"]
+            return cursor.fetchone()[0]
     
     def _get_session_checkpoints(self, session_id: str) -> List[str]:
         """Get all checkpoint IDs for a session."""
@@ -1572,7 +1572,7 @@ class SessionManager:
                 WHERE session_id = ?
                 ORDER BY created_at ASC
             """, (session_id,))
-            return [row["checkpoint_id"] for row in cursor.fetchall()]
+            return [row[0] for row in cursor.fetchall()]
 
 
 # Singleton instance for easy access
