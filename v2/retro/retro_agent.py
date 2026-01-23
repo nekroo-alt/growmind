@@ -5,7 +5,10 @@ from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 from v1.data.db_manager import log_activity, fcid_mapping
 from v1.llm_base.provider import LLMProvider
+from v2.core.logging_config import get_module_logger
 import json
+
+logger = get_module_logger(__name__)
 
 
 class RetroHandler(FileSystemEventHandler):
@@ -15,6 +18,7 @@ class RetroHandler(FileSystemEventHandler):
 
     def __init__(self, agent):
         self.agent = agent
+        logger.debug("RetroHandler initialized")
 
     def on_modified(self, event):
         if event.is_directory or not event.src_path.endswith(".py"):
@@ -53,6 +57,7 @@ class RetroAgent:
     STYLE_FILE = os.path.join(PATTERNS_DIR, "coding_style.md")
 
     def __init__(self, llm_provider=None):
+        logger.info("Initializing RetroAgent")
         if not os.path.exists(self.PATTERNS_DIR):
             os.makedirs(self.PATTERNS_DIR)
         if not os.path.exists(self.STYLE_FILE):
@@ -62,12 +67,15 @@ class RetroAgent:
                 )
         self.observer = None
         self.llm = llm_provider or LLMProvider()
+        logger.info("RetroAgent initialized successfully")
 
     def start_watcher(self, path="."):
         """
-        Starts the watchdog observer in a background thread.
+        Starts watchdog observer in a background thread.
         """
+        logger.info(f"Starting file watcher on '{os.path.abspath(path)}'")
         if self.observer and self.observer.is_alive():
+            logger.debug("File watcher already running")
             return
 
         event_handler = RetroHandler(self)
@@ -75,21 +83,25 @@ class RetroAgent:
         self.observer.schedule(event_handler, path, recursive=True)
         self.observer.start()
         print(f"RetroAgent: File watcher started on '{os.path.abspath(path)}'")
+        logger.info("File watcher started successfully")
 
     def stop_watcher(self):
         """
         Stops the file watcher.
         """
+        logger.info("Stopping file watcher")
         if self.observer:
             self.observer.stop()
             self.observer.join()
             print("RetroAgent: File watcher stopped.")
+            logger.info("File watcher stopped successfully")
 
     @fcid_mapping("RETRO-001")
     def analyze_human_override(self, simulated_diff=None):
         """
         Analyzes changes made by humans that differ from AI-generated code.
         """
+        logger.debug("Analyzing human override")
         # If triggered by watcher, we try to detect the actual diff using git
         if simulated_diff and "file" in simulated_diff and "diff" not in simulated_diff:
             diff_info = self._detect_human_changes(simulated_diff["file"])

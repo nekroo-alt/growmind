@@ -608,3 +608,24 @@ def critical(message: str, **kwargs: Any) -> None:
     """Log a critical message."""
     logger = get_logger(__name__)
     logger.critical(message, extra=kwargs)
+
+
+def get_module_logger(module_name: str) -> logging.Logger:
+    """
+    Get a logger for a specific module with consistent configuration.
+    
+    This is a convenience function for getting loggers in modules.
+    The logger will be configured with all handlers and context support.
+    
+    Args:
+        module_name: Name of the module (typically __name__)
+        
+    Returns:
+        Configured logger instance
+        
+    Example:
+        >>> from v2.core.logging_config import get_module_logger
+        >>> logger = get_module_logger(__name__)
+        >>> logger.info("Task started", task_id=42)
+    """
+    return get_logger(module_name)

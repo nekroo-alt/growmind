@@ -6,11 +6,16 @@ from v2.data.db_manager import (
 )
 from v2.core.telemetry import telemetry
 from v2.data.telemetry_manager import get_telemetry_manager
+from v2.core.logging_config import get_module_logger
+
+logger = get_module_logger(__name__)
 
 
 class Dispatcher:
     def __init__(self):
+        logger.info("Initializing Dispatcher")
         self.telemetry_manager = get_telemetry_manager()
+        logger.info("Dispatcher initialized successfully")
     
     @fcid_mapping("DISP-100")
     def dispatch(self, preferred_id=None):
@@ -26,9 +31,11 @@ class Dispatcher:
             operation_type="dispatch",
             title=f"Dispatch task selection (preferred_id={preferred_id})"
         ) as op:
+            logger.debug(f"Dispatching task (preferred_id={preferred_id})")
             task = get_pending_task(preferred_id)
 
             if task:
+                logger.info(f"Task selected: {task['title']} (ID: {task['id']})")
                 log_activity(
                     summary=f"Task Selected: {task['title']}",
                     action="dispatch",
@@ -51,9 +58,11 @@ class Dispatcher:
                 telemetry.info(f"Task selected: {task['title']} (ID: {task['id']})")
                 return "IMPLEMENT", task
             else:
+                logger.debug("No pending tasks found, checking for blocked tasks")
                 # Check for blocked tasks
                 blocked_task = get_blocked_task()
                 if blocked_task:
+                    logger.warning(f"Blocked task found: {blocked_task['title']} (ID: {blocked_task['id']})")
                     log_activity(
                         summary=f"Blocked Task Found: {blocked_task['title']}",
                         action="dispatch",
@@ -76,6 +85,7 @@ class Dispatcher:
                     return "PLAN", blocked_task
 
                 # If no task exists: Trigger Planner.
+                logger.info("No tasks available, triggering planner")
                 log_activity(
                     summary="No tasks found",
                     action="dispatch",

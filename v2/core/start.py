@@ -20,10 +20,23 @@ from v2.core.telemetry import telemetry
 from v2.retro.retro_agent import RetroAgent
 from v2.core.session_manager import get_session_manager, SessionStatus
 from v2.data.checkpoint_manager import CheckpointManager
+from v2.core.logging_config import (
+    get_module_logger,
+    log_operation_started,
+    log_operation_completed,
+    log_operation_failed,
+    log_task_started,
+    log_task_completed,
+    log_task_failed,
+    log_error_with_context
+)
+
+logger = get_module_logger(__name__)
 
 
 class Orchestrator:
     def __init__(self):
+        logger.info("Initializing Orchestrator")
         self.git_guard = GitGuard()
         self.dispatcher = Dispatcher()  # Now has __init__ with telemetry_manager
         self.planner = Planner()
@@ -36,15 +49,18 @@ class Orchestrator:
         self.session_manager = get_session_manager()
         self.checkpoint_manager = CheckpointManager()
         self.current_session = None
+        logger.info("Orchestrator initialized successfully")
 
     @fcid_mapping("CORE-100")
     def cold_start_check(self):
         """
         Ensures databases and required files exist.
         """
+        logger.info("Cold start check started")
         self.telemetry.info("Performing cold start check...")
         # 1. Database Initialization
         init_db()
+        logger.info("Database initialized")
 
         # 2. Required Files Check
         required_files = ["product.md", "technical.md"]
@@ -52,6 +68,7 @@ class Orchestrator:
 
         if missing_files:
             error_msg = f"Missing required files: {', '.join(missing_files)}"
+            logger.error(error_msg, missing_files=missing_files)
             log_activity(
                 summary="Cold Start Check",
                 action="initialization",
@@ -68,6 +85,7 @@ class Orchestrator:
             cot_blob="All required static documents found.",
         )
         self.telemetry.info("Cold start check passed.")
+        logger.info("Cold start check completed successfully")
         return True
 
     def _update_telemetry_stats(self, current_task=None):
@@ -151,6 +169,7 @@ class Orchestrator:
         """
         Main orchestration loop.
         """
+        logger.info("Orchestrator main loop started")
         self.telemetry.start_dashboard()
         self.telemetry.info("Starting L4 Auto-Pilot Orchestrator...")
 
@@ -160,9 +179,9 @@ class Orchestrator:
         try:
             # 1. Cold Start Check
             if not self.cold_start_check():
-                self.telemetry.error(
-                    "Cold start check failed. Ensure product.md and technical.md are present."
-                )
+                error_msg = "Cold start check failed. Ensure product.md and technical.md are present."
+                logger.error(error_msg)
+                self.telemetry.error(error_msg)
                 self._save_session_on_shutdown()
                 return
 
@@ -182,6 +201,7 @@ class Orchestrator:
                     self.telemetry.warning(
                         "Last session ended in terminal state (no more tasks)."
                     )
+                    logger.warning("Last session ended in terminal state")
                 elif last_state.startswith("implementing:"):
                     parts = last_state.split(":")
                     if len(parts) >= 2:
@@ -190,10 +210,12 @@ class Orchestrator:
                             self.telemetry.info(
                                 f"Attempting to resume task ID: {preferred_id}"
                             )
+                            logger.info(f"Attempting to resume task ID: {preferred_id}")
                         except ValueError:
                             self.telemetry.warning(
                                 "Could not parse task ID from state."
                             )
+                            logger.warning("Could not parse task ID from state")
 
                 log_activity(
                     summary="Orchestrator Resumed",
@@ -204,9 +226,9 @@ class Orchestrator:
 
             # 3. Git Guard Pre-flight
             if not self.git_guard.is_clean():
-                self.telemetry.error(
-                    "Git workspace is dirty. Please commit or stash your changes."
-                )
+                error_msg = "Git workspace is dirty. Please commit or stash your changes."
+                self.telemetry.error(error_msg)
+                logger.error(error_msg)
                 self._save_session_on_shutdown()
                 return
 
@@ -253,6 +275,7 @@ class Orchestrator:
                         f"Implementing: {task_title}"
                     ) as outcome:
                         self._update_telemetry_stats()
+                        logger.info(f"Starting TDD cycle for task {task_id}: {task_title}")
 
                         try:
                             success, error_reason = self.implementor.execute_tdd_cycle(
@@ -260,6 +283,7 @@ class Orchestrator:
                             )
 
                             if success:
+                                logger.info(f"Task '{task_title}' implementation completed successfully")
                                 self.telemetry.info(
                                     f"Task '{task_title}' implementation finished. Running verification..."
                                 )
@@ -271,6 +295,7 @@ class Orchestrator:
                                 if not self.verifier.run_tests():
                                     reason = f"Final verification tests failed after implementation of '{task_title}'."
                                     self.telemetry.error(f"{reason} Marking as blocked.")
+                                    logger.error(f"Verification failed for task {task_id}: {reason}")
                                     update_task_status(task_id, "blocked", reason=reason)
                                     outcome["success"] = False
                             else:
@@ -278,16 +303,19 @@ class Orchestrator:
                                     self.telemetry.warning(
                                         f"LLM Quota/Billing issue detected: {error_reason}. Not marking task as blocked."
                                     )
+                                    logger.warning(f"LLM quota error for task {task_id}: {error_reason}")
                                 else:
                                     self.telemetry.error(
                                         f"TDD cycle failed for '{task_title}': {error_reason}. Marking as blocked."
                                     )
+                                    logger.error(f"TDD cycle failed for task {task_id}: {error_reason}")
                                     update_task_status(
                                         task_id, "blocked", reason=error_reason
                                     )
                                 outcome["success"] = False
                         except Exception as e:
                             reason = f"Unexpected error during implementation: {str(e)}"
+                            log_error_with_context(logger, e, task_id=task_id, task_title=task_title)
                             if LLMProvider.is_quota_error(reason):
                                 self.telemetry.warning(
                                     f"LLM Quota/Billing issue detected: {reason}. Not marking task as blocked."
@@ -303,14 +331,17 @@ class Orchestrator:
                     self.telemetry.warning(
                         "Unknown action received from dispatcher or no more tasks."
                     )
+                    logger.warning("Unknown action from dispatcher, exiting loop")
                     break
 
                 self._update_telemetry_stats()
 
         finally:
+            logger.info("Orchestrator shutting down")
             self.retro_agent.stop_watcher()
             self._save_session_on_shutdown()
             self.telemetry.stop_dashboard()
+            logger.info("Orchestrator main loop ended")
 
 
 if __name__ == "__main__":

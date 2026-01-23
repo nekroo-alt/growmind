@@ -3,6 +3,9 @@ import subprocess
 import ast
 from v1.data.db_manager import log_activity, fcid_mapping
 from v1.data.semantic_mapper import SemanticMapper
+from v2.core.logging_config import get_module_logger
+
+logger = get_module_logger(__name__)
 
 
 class OperatorSwapper(ast.NodeTransformer):
@@ -52,6 +55,7 @@ class Verifier:
         FCID: VER-100
         Functionality: Execute unit and integration tests.
         """
+        logger.debug(f"Running tests for {test_file}")
         try:
             if not os.path.exists(test_file):
                 log_activity(
@@ -67,6 +71,7 @@ class Verifier:
             )
 
             if result.returncode == 0:
+                logger.info(f"Tests passed for {test_file}")
                 log_activity(
                     summary=f"Running tests for {test_file}",
                     action="Run Tests",
@@ -75,6 +80,7 @@ class Verifier:
                 )
                 return True
             else:
+                logger.error(f"Tests failed for {test_file}")
                 log_activity(
                     summary=f"Running tests for {test_file}",
                     action="Run Tests",

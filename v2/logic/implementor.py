@@ -13,16 +13,21 @@ from v2.llm_base.provider import LLMProvider
 from v2.logic.verifier import Verifier
 from v2.core.telemetry import telemetry
 from v2.data.telemetry_manager import get_telemetry_manager
+from v2.core.logging_config import get_module_logger
+
+logger = get_module_logger(__name__)
 
 
 class Implementor:
     def __init__(self, workspace_root="."):
+        logger.info("Initializing Implementor")
         self.workspace_root = workspace_root
         self.git = GitGuard()
         self.context_engine = ContextEngine(workspace_root)
         self.llm = LLMProvider()
         self.verifier = Verifier()
         self.telemetry_manager = get_telemetry_manager()  # V3 telemetry
+        logger.info("Implementor initialized successfully")
 
     def _get_error_reason(self, result):
         raw_content = result.get("raw_content", "").strip()
@@ -122,6 +127,8 @@ class Implementor:
         acceptance_criteria = task.get("acceptance_criteria", "")
         
         # V3: Track TDD cycle operation
+        logger.info(f"Starting TDD cycle for task {task_id}: {task_title}")
+        
         with self.telemetry_manager.track_operation(
             operation_type="tdd_cycle",
             title=f"TDD Cycle: {task_title}",
@@ -180,18 +187,23 @@ class Implementor:
                 )
 
             # Red Phase: Write a failing test
+            logger.debug("Starting Red Phase: Writing failing test")
             telemetry.track_step("Red Phase: Writing failing test")
             success, error = self._run_red_phase(task, context)
             if not success:
+                logger.error(f"Red Phase failed for task {task_id}: {error}")
                 return False, error
 
             # Green Phase: Write minimal code to pass
+            logger.debug("Starting Green Phase: Implementing code")
             telemetry.track_step("Green Phase: Implementing code")
             success, error = self._run_green_phase(task, context)
             if not success:
+                logger.error(f"Green Phase failed for task {task_id}: {error}")
                 return False, error
 
             # Refactor Phase: Cleanup
+            logger.debug("Starting Refactor Phase: Cleaning up")
             telemetry.track_step("Refactor Phase: Cleaning up")
             self._run_refactor_phase(task_title)
 

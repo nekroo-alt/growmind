@@ -10,16 +10,21 @@ from v1.data.semantic_mapper import SemanticMapper
 from v1.llm_base.provider import LLMProvider
 from v2.data.telemetry_manager import get_telemetry_manager
 from v2.core.telemetry import telemetry
+from v2.core.logging_config import get_module_logger, log_error_with_context
+
+logger = get_module_logger(__name__)
 
 
 class Planner:
     def __init__(self, workspace_root="."):
+        logger.info("Initializing Planner")
         self.workspace_root = workspace_root
         self.context_engine = ContextEngine(workspace_root)
         self.task_impact_analyzer = TaskImpactAnalyzer(workspace_root)
         self.llm = LLMProvider()
         self.semantic_mappers = {}  # Cache of semantic mappers
         self.telemetry_manager = get_telemetry_manager()  # V3 telemetry
+        logger.info("Planner initialized successfully")
 
     @fcid_mapping("PLAN-0100")
     def breakdown_requirements(
@@ -41,22 +46,27 @@ class Planner:
         # V3: Track planning operation
         task_title = task_to_break["title"] if task_to_break else "Initial requirement analysis and task breakdown"
         
+        logger.info(f"Starting task breakdown: {task_title}")
+        
         with self.telemetry_manager.track_operation(
             operation_type="planning",
             title=f"Task breakdown: {task_title}"
         ) as op:
             # Step 1: Analyze task impact using AST analysis
             acceptance_criteria = task_to_break["acceptance_criteria"] if task_to_break else ""
+            logger.debug(f"Analyzing task impact for: {task_title}")
             
             impact_analysis = self.task_impact_analyzer.analyze_task_impact(
                 task_title, acceptance_criteria
             )
             
             # Step 2: Build semantic mappers for affected files
+            logger.debug(f"Building semantic mappers for {len(impact_analysis['affected_files'])} files")
             self._build_semantic_mappers(impact_analysis["affected_files"])
             
             # Step 3: Get relevant project files using impact-based selection
             relevant_files = self._get_relevant_files(impact_analysis)
+            logger.debug(f"Selected {len(relevant_files)} relevant files")
             
             query = task_title
             pruned_context = self.context_engine.get_pruned_context(query, relevant_files)
@@ -104,6 +114,7 @@ class Planner:
                 ]
             except Exception as e:
                 # Improved error handling: No more hardcoded platform tasks
+                log_error_with_context(logger, e, task_title=task_title, operation="planning")
                 log_activity(
                     summary="Task Breakdown Failed",
                     action="PLANNING",
@@ -134,6 +145,7 @@ class Planner:
                         module=mod or module,
                     )
                     new_tasks_added += 1
+                    logger.debug(f"Added new task: {title}")
 
             # Calculate context size metrics
             context_size_chars = len(pruned_context)
@@ -186,6 +198,7 @@ class Planner:
                 estimated_cost=result["cost"],
             )
             
+            logger.info(f"Task breakdown completed: {len(subtasks)} tasks, {new_tasks_added} new tasks added")
             telemetry.info(f"Task breakdown completed: {len(subtasks)} tasks, {new_tasks_added} new tasks added")
             return new_tasks_added
     
@@ -196,6 +209,7 @@ class Planner:
         Args:
             affected_files: List of files with impact scores from TaskImpactAnalyzer
         """
+        logger.debug(f"Building semantic mappers for {min(len(affected_files), 15)} files")
         for file_info in affected_files[:15]:  # Limit to top 15 files
             file_path = os.path.join(self.workspace_root, file_info["file_path"])
             try:
@@ -206,8 +220,10 @@ class Planner:
                 # Also create complexity estimator for each mapper
                 mapper.complexity_estimator = ComplexityEstimator(mapper)
                 self.semantic_mappers[file_path] = mapper
-            except Exception:
+                logger.debug(f"Created semantic mapper for {file_path}")
+            except Exception as e:
                 # Skip files that cannot be parsed
+                logger.warning(f"Failed to create semantic mapper for {file_path}: {e}")
                 continue
     
     def _get_relevant_files(self, impact_analysis: Dict) -> List[str]:
