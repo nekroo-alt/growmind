@@ -1241,3 +1241,648 @@ def display_status(
         resource_usage=resource_usage,
         verbose=verbose,
     )
+
+
+# ============================================================================
+# Progress Visualization (V4)
+# ============================================================================
+
+
+class ProgressVisualizer:
+    """
+    Progress visualization for user feedback.
+
+    Displays progress for tasks, sessions, and projects with charts,
+    predictions, and alerts for stagnation or regression.
+    """
+
+    def __init__(self, use_rich: Optional[bool] = None):
+        """
+        Initialize progress visualizer.
+
+        Args:
+            use_rich: Force use of rich library (None = auto-detect)
+        """
+        self.use_rich = (
+            RICH_AVAILABLE if use_rich is None else use_rich and RICH_AVAILABLE
+        )
+        self.console = Console() if self.use_rich else None
+
+    def display_task_progress(
+        self,
+        task_id: str,
+        progress: float,
+        metrics: Optional[Dict[str, Any]] = None,
+        predicted_completion: Optional[float] = None,
+        stagnation: Optional[str] = None,
+        regression: bool = False,
+    ) -> None:
+        """
+        Display progress for current task.
+
+        Args:
+            task_id: Task identifier
+            progress: Progress percentage (0-100)
+            metrics: Optional task metrics (lines, tests, etc.)
+            predicted_completion: Optional predicted completion time in seconds
+            stagnation: Optional stagnation status (none, warning, critical)
+            regression: Whether regression detected
+        """
+        if self.use_rich and self.console:
+            self._display_rich_task_progress(
+                task_id, progress, metrics, predicted_completion, stagnation, regression
+            )
+        else:
+            self._display_plain_task_progress(
+                task_id, progress, metrics, predicted_completion, stagnation, regression
+            )
+
+    def _display_rich_task_progress(
+        self,
+        task_id: str,
+        progress: float,
+        metrics: Optional[Dict[str, Any]],
+        predicted_completion: Optional[float],
+        stagnation: Optional[str],
+        regression: bool,
+    ) -> None:
+        """Display task progress with rich formatting."""
+        # Color code based on status
+        status_color = "green"
+        if stagnation == "warning":
+            status_color = "yellow"
+        elif stagnation == "critical" or regression:
+            status_color = "red"
+
+        # Create progress text
+        progress_text = Text()
+        progress_text.append(f"Task: {task_id}\n", style="cyan bold")
+        progress_text.append(f"Progress: {progress:.1f}%\n", style=f"{status_color} bold")
+
+        # Add metrics if available
+        if metrics:
+            progress_text.append("\nMetrics:\n", style="white")
+            if "lines_added" in metrics:
+                progress_text.append(
+                    f"  Lines Added: {metrics['lines_added']}\n", style="cyan"
+                )
+            if "tests_passing" in metrics:
+                progress_text.append(
+                    f"  Tests Passing: {metrics['tests_passing']}", style="cyan"
+                )
+                if "tests_total" in metrics:
+                    progress_text.append(
+                        f"/{metrics['tests_total']}", style="dim"
+                    )
+                progress_text.append("\n")
+
+        # Add prediction if available
+        if predicted_completion:
+            from datetime import timedelta
+
+            eta_seconds = predicted_completion
+            hours = int(eta_seconds // 3600)
+            minutes = int((eta_seconds % 3600) // 60)
+            progress_text.append(
+                f"\nEstimated Time: {hours}h {minutes}m remaining\n", style="blue"
+            )
+
+        # Add alerts
+        if stagnation == "warning":
+            progress_text.append(
+                f"\n⚠️  Stagnation Warning: No progress for multiple operations\n",
+                style="yellow",
+            )
+        elif stagnation == "critical":
+            progress_text.append(
+                f"\n🔴 Critical Stagnation: No progress for extended period\n",
+                style="bold red",
+            )
+
+        if regression:
+            progress_text.append(
+                f"\n🔴 Regression Detected: Progress has decreased\n",
+                style="bold red",
+            )
+
+        # Create panel
+        panel = Panel(
+            progress_text,
+            title="📊 Task Progress",
+            border_style=status_color,
+            padding=(1, 2),
+        )
+
+        self.console.print(panel)
+
+    def _display_plain_task_progress(
+        self,
+        task_id: str,
+        progress: float,
+        metrics: Optional[Dict[str, Any]],
+        predicted_completion: Optional[float],
+        stagnation: Optional[str],
+        regression: bool,
+    ) -> None:
+        """Display task progress with plain text formatting."""
+        print("\n" + "=" * 60)
+        print("TASK PROGRESS")
+        print("=" * 60)
+        print(f"Task: {task_id}")
+        print(f"Progress: {progress:.1f}%")
+
+        # Add metrics if available
+        if metrics:
+            print("\nMetrics:")
+            if "lines_added" in metrics:
+                print(f"  Lines Added: {metrics['lines_added']}")
+            if "tests_passing" in metrics:
+                test_str = f"  Tests Passing: {metrics['tests_passing']}"
+                if "tests_total" in metrics:
+                    test_str += f"/{metrics['tests_total']}"
+                print(test_str)
+
+        # Add prediction if available
+        if predicted_completion:
+            hours = int(predicted_completion // 3600)
+            minutes = int((predicted_completion % 3600) // 60)
+            print(f"\nEstimated Time: {hours}h {minutes}m remaining")
+
+        # Add alerts
+        if stagnation == "warning":
+            print("\n⚠️  Stagnation Warning: No progress for multiple operations")
+        elif stagnation == "critical":
+            print("\n🔴 Critical Stagnation: No progress for extended period")
+
+        if regression:
+            print("\n🔴 Regression Detected: Progress has decreased")
+
+        print("=" * 60 + "\n")
+
+    def display_session_progress(
+        self,
+        session_metrics: Dict[str, Any],
+        historical: Optional[List[Dict[str, Any]]] = None,
+        predicted_completion: Optional[float] = None,
+    ) -> None:
+        """
+        Display progress for session.
+
+        Args:
+            session_metrics: Session progress metrics
+            historical: Optional historical progress data for trends
+            predicted_completion: Optional predicted completion time in seconds
+        """
+        if self.use_rich and self.console:
+            self._display_rich_session_progress(
+                session_metrics, historical, predicted_completion
+            )
+        else:
+            self._display_plain_session_progress(
+                session_metrics, historical, predicted_completion
+            )
+
+    def _display_rich_session_progress(
+        self,
+        session_metrics: Dict[str, Any],
+        historical: Optional[List[Dict[str, Any]]],
+        predicted_completion: Optional[float],
+    ) -> None:
+        """Display session progress with rich formatting."""
+        session_text = Text()
+
+        # Task metrics
+        tasks_completed = session_metrics.get("tasks_completed", 0)
+        tasks_failed = session_metrics.get("tasks_failed", 0)
+        total_tasks = tasks_completed + tasks_failed
+        success_rate = (
+            (tasks_completed / total_tasks * 100) if total_tasks > 0 else 100.0
+        )
+
+        session_text.append("Tasks: ", style="white")
+        session_text.append(f"{tasks_completed} completed", style="green")
+        session_text.append(
+            f" | {tasks_failed} failed\n", style="red"
+        )
+        session_text.append(f"Success Rate: {success_rate:.1f}%\n", style="cyan")
+
+        # Error metrics
+        errors_encountered = session_metrics.get("errors_encountered", 0)
+        errors_resolved = session_metrics.get("errors_resolved", 0)
+        session_text.append(
+            f"Errors: {errors_resolved}/{errors_encountered} resolved\n", style="cyan"
+        )
+
+        # Efficiency metrics
+        operations_per_hour = session_metrics.get("operations_per_hour", 0.0)
+        session_text.append(f"Operations/Hour: {operations_per_hour:.1f}\n", style="cyan")
+
+        # Code metrics
+        lines_written = session_metrics.get("total_lines_written", 0)
+        tests_added = session_metrics.get("total_tests_added", 0)
+        session_text.append(f"Lines Written: {lines_written}\n", style="cyan")
+        session_text.append(f"Tests Added: {tests_added}\n", style="cyan")
+
+        # Add prediction if available
+        if predicted_completion:
+            hours = int(predicted_completion // 3600)
+            minutes = int((predicted_completion % 3600) // 60)
+            session_text.append(
+                f"\nEstimated Completion: {hours}h {minutes}m\n", style="blue"
+            )
+
+        # Create panel
+        panel = Panel(
+            session_text,
+            title="📊 Session Progress",
+            border_style="blue",
+            padding=(1, 2),
+        )
+
+        self.console.print(panel)
+
+        # Display historical trends if available
+        if historical and len(historical) > 1:
+            self._display_rich_historical_trends(historical)
+
+    def _display_plain_session_progress(
+        self,
+        session_metrics: Dict[str, Any],
+        historical: Optional[List[Dict[str, Any]]],
+        predicted_completion: Optional[float],
+    ) -> None:
+        """Display session progress with plain text formatting."""
+        print("\n" + "=" * 60)
+        print("SESSION PROGRESS")
+        print("=" * 60)
+
+        # Task metrics
+        tasks_completed = session_metrics.get("tasks_completed", 0)
+        tasks_failed = session_metrics.get("tasks_failed", 0)
+        total_tasks = tasks_completed + tasks_failed
+        success_rate = (
+            (tasks_completed / total_tasks * 100) if total_tasks > 0 else 100.0
+        )
+
+        print(f"Tasks: {tasks_completed} completed | {tasks_failed} failed")
+        print(f"Success Rate: {success_rate:.1f}%")
+
+        # Error metrics
+        errors_encountered = session_metrics.get("errors_encountered", 0)
+        errors_resolved = session_metrics.get("errors_resolved", 0)
+        print(f"Errors: {errors_resolved}/{errors_encountered} resolved")
+
+        # Efficiency metrics
+        operations_per_hour = session_metrics.get("operations_per_hour", 0.0)
+        print(f"Operations/Hour: {operations_per_hour:.1f}")
+
+        # Code metrics
+        lines_written = session_metrics.get("total_lines_written", 0)
+        tests_added = session_metrics.get("total_tests_added", 0)
+        print(f"Lines Written: {lines_written}")
+        print(f"Tests Added: {tests_added}")
+
+        # Add prediction if available
+        if predicted_completion:
+            hours = int(predicted_completion // 3600)
+            minutes = int((predicted_completion % 3600) // 60)
+            print(f"\nEstimated Completion: {hours}h {minutes}m")
+
+        print("=" * 60 + "\n")
+
+        # Display historical trends if available
+        if historical and len(historical) > 1:
+            self._display_plain_historical_trends(historical)
+
+    def display_project_progress(
+        self,
+        project_metrics: Dict[str, Any],
+        historical: Optional[List[Dict[str, Any]]] = None,
+    ) -> None:
+        """
+        Display progress for project.
+
+        Args:
+            project_metrics: Project progress metrics
+            historical: Optional historical progress data for trends
+        """
+        if self.use_rich and self.console:
+            self._display_rich_project_progress(project_metrics, historical)
+        else:
+            self._display_plain_project_progress(project_metrics, historical)
+
+    def _display_rich_project_progress(
+        self,
+        project_metrics: Dict[str, Any],
+        historical: Optional[List[Dict[str, Any]]],
+    ) -> None:
+        """Display project progress with rich formatting."""
+        project_text = Text()
+
+        # Feature metrics
+        features_total = project_metrics.get("features_total", 0)
+        features_completed = project_metrics.get("features_completed", 0)
+        feature_pct = (
+            (features_completed / features_total * 100)
+            if features_total > 0
+            else 100.0
+        )
+
+        project_text.append("Features: ", style="white")
+        project_text.append(f"{features_completed}/{features_total}", style="cyan")
+        project_text.append(f" ({feature_pct:.1f}%)\n", style="green")
+
+        # Issue metrics
+        issues_total = project_metrics.get("issues_total", 0)
+        issues_resolved = project_metrics.get("issues_resolved", 0)
+        issue_pct = (
+            (issues_resolved / issues_total * 100) if issues_total > 0 else 100.0
+        )
+        project_text.append(f"Issues: {issues_resolved}/{issues_total} ({issue_pct:.1f}%)\n", style="cyan")
+
+        # Milestone metrics
+        milestones_total = project_metrics.get("milestones_total", 0)
+        milestones_completed = project_metrics.get("milestones_completed", 0)
+        milestone_pct = (
+            (milestones_completed / milestones_total * 100)
+            if milestones_total > 0
+            else 100.0
+        )
+        project_text.append(f"Milestones: {milestones_completed}/{milestones_total} ({milestone_pct:.1f}%)\n", style="cyan")
+
+        # Quality metrics
+        code_coverage = project_metrics.get("overall_code_coverage", 0.0)
+        bug_rate = project_metrics.get("bug_rate", 0.0)
+        health_score = project_metrics.get("health_score", 0.0)
+
+        project_text.append(f"\nCode Coverage: {code_coverage:.1f}%\n", style="cyan")
+        project_text.append(f"Bug Rate: {bug_rate:.1f}%\n", style="cyan")
+        project_text.append(f"Health Score: {health_score:.1f}/100\n", style="cyan")
+
+        # Color code health score
+        health_color = "green" if health_score >= 80 else "yellow" if health_score >= 60 else "red"
+        project_text.append(f"Status: ", style="white")
+        project_text.append(
+            f"{'Excellent' if health_score >= 80 else 'Good' if health_score >= 60 else 'Needs Improvement'}\n",
+            style=f"bold {health_color}",
+        )
+
+        # Create panel
+        panel = Panel(
+            project_text,
+            title="📊 Project Progress",
+            border_style="cyan",
+            padding=(1, 2),
+        )
+
+        self.console.print(panel)
+
+        # Display historical trends if available
+        if historical and len(historical) > 1:
+            self._display_rich_historical_trends(historical)
+
+    def _display_plain_project_progress(
+        self,
+        project_metrics: Dict[str, Any],
+        historical: Optional[List[Dict[str, Any]]],
+    ) -> None:
+        """Display project progress with plain text formatting."""
+        print("\n" + "=" * 60)
+        print("PROJECT PROGRESS")
+        print("=" * 60)
+
+        # Feature metrics
+        features_total = project_metrics.get("features_total", 0)
+        features_completed = project_metrics.get("features_completed", 0)
+        feature_pct = (
+            (features_completed / features_total * 100)
+            if features_total > 0
+            else 100.0
+        )
+        print(f"Features: {features_completed}/{features_total} ({feature_pct:.1f}%)")
+
+        # Issue metrics
+        issues_total = project_metrics.get("issues_total", 0)
+        issues_resolved = project_metrics.get("issues_resolved", 0)
+        issue_pct = (
+            (issues_resolved / issues_total * 100) if issues_total > 0 else 100.0
+        )
+        print(f"Issues: {issues_resolved}/{issues_total} ({issue_pct:.1f}%)")
+
+        # Milestone metrics
+        milestones_total = project_metrics.get("milestones_total", 0)
+        milestones_completed = project_metrics.get("milestones_completed", 0)
+        milestone_pct = (
+            (milestones_completed / milestones_total * 100)
+            if milestones_total > 0
+            else 100.0
+        )
+        print(f"Milestones: {milestones_completed}/{milestones_total} ({milestone_pct:.1f}%)")
+
+        # Quality metrics
+        code_coverage = project_metrics.get("overall_code_coverage", 0.0)
+        bug_rate = project_metrics.get("bug_rate", 0.0)
+        health_score = project_metrics.get("health_score", 0.0)
+
+        print(f"\nCode Coverage: {code_coverage:.1f}%")
+        print(f"Bug Rate: {bug_rate:.1f}%")
+        print(f"Health Score: {health_score:.1f}/100")
+
+        # Color code health status
+        health_status = (
+            "Excellent" if health_score >= 80 else "Good" if health_score >= 60 else "Needs Improvement"
+        )
+        print(f"Status: {health_status}")
+
+        print("=" * 60 + "\n")
+
+        # Display historical trends if available
+        if historical and len(historical) > 1:
+            self._display_plain_historical_trends(historical)
+
+    def _display_rich_historical_trends(
+        self, historical: List[Dict[str, Any]]
+    ) -> None:
+        """Display historical progress trends with rich formatting."""
+        if not historical or len(historical) < 2:
+            return
+
+        table = Table(title="📈 Historical Trends", show_header=True, header_style="bold cyan")
+        table.add_column("Time", style="dim")
+        table.add_column("Progress", style="cyan")
+        table.add_column("Trend", justify="center")
+
+        for i, entry in enumerate(historical[-10:]):  # Show last 10 entries
+            timestamp = entry.get("timestamp", "")
+            if isinstance(timestamp, str):
+                from datetime import datetime
+
+                try:
+                    dt = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+                    timestamp = dt.strftime("%H:%M:%S")
+                except:
+                    timestamp = timestamp[:8] if len(timestamp) >= 8 else timestamp
+
+            progress = entry.get("progress", 0.0)
+            progress_str = f"{progress:.1f}%"
+
+            # Determine trend
+            if i == 0:
+                trend = "—"
+                trend_color = "dim"
+            else:
+                prev_progress = historical[-10:][i - 1].get("progress", 0.0)
+                if progress > prev_progress:
+                    trend = "↑"
+                    trend_color = "green"
+                elif progress < prev_progress:
+                    trend = "↓"
+                    trend_color = "red"
+                else:
+                    trend = "→"
+                    trend_color = "yellow"
+
+            table.add_row(str(timestamp), progress_str, f"[{trend_color}]{trend}[/{trend_color}]")
+
+        self.console.print(table)
+
+    def _display_plain_historical_trends(
+        self, historical: List[Dict[str, Any]]
+    ) -> None:
+        """Display historical progress trends with plain text formatting."""
+        if not historical or len(historical) < 2:
+            return
+
+        print("\n" + "-" * 60)
+        print("HISTORICAL TRENDS")
+        print("-" * 60)
+
+        for i, entry in enumerate(historical[-10:]):  # Show last 10 entries
+            timestamp = entry.get("timestamp", "")
+            if isinstance(timestamp, str):
+                try:
+                    from datetime import datetime
+
+                    dt = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+                    timestamp = dt.strftime("%H:%M:%S")
+                except:
+                    timestamp = timestamp[:8] if len(timestamp) >= 8 else timestamp
+
+            progress = entry.get("progress", 0.0)
+
+            # Determine trend
+            if i == 0:
+                trend = "—"
+            else:
+                prev_progress = historical[-10:][i - 1].get("progress", 0.0)
+                if progress > prev_progress:
+                    trend = "↑"
+                elif progress < prev_progress:
+                    trend = "↓"
+                else:
+                    trend = "→"
+
+            print(f"{timestamp}: {progress:.1f}% {trend}")
+
+        print("-" * 60 + "\n")
+
+    def display_alerts(
+        self, alerts: List[Dict[str, Any]], severity: Optional[str] = None
+    ) -> None:
+        """
+        Display progress alerts.
+
+        Args:
+            alerts: List of alert dictionaries
+            severity: Optional severity filter (info, warning, error, critical)
+        """
+        if not alerts:
+            return
+
+        filtered_alerts = alerts
+        if severity:
+            filtered_alerts = [a for a in alerts if a.get("severity") == severity]
+
+        if not filtered_alerts:
+            return
+
+        if self.use_rich and self.console:
+            self._display_rich_alerts(filtered_alerts)
+        else:
+            self._display_plain_alerts(filtered_alerts)
+
+    def _display_rich_alerts(self, alerts: List[Dict[str, Any]]) -> None:
+        """Display alerts with rich formatting."""
+        table = Table(title="⚠️  Alerts", show_header=True, header_style="bold cyan")
+        table.add_column("Time", style="dim")
+        table.add_column("Severity")
+        table.add_column("Type")
+        table.add_column("Message")
+
+        for alert in alerts[-10:]:  # Show last 10 alerts
+            timestamp = alert.get("timestamp", "")
+            if isinstance(timestamp, str):
+                from datetime import datetime
+
+                try:
+                    dt = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+                    timestamp = dt.strftime("%H:%M:%S")
+                except:
+                    timestamp = timestamp[:8] if len(timestamp) >= 8 else timestamp
+
+            severity = alert.get("severity", "info")
+            alert_type = alert.get("type", "")
+            message = alert.get("message", "")
+
+            # Color code severity
+            severity_color = {
+                "info": "blue",
+                "warning": "yellow",
+                "error": "red",
+                "critical": "bold red",
+            }.get(severity, "white")
+
+            table.add_row(
+                str(timestamp), f"[{severity_color}]{severity}[/{severity_color}]", alert_type, message
+            )
+
+        self.console.print(table)
+
+    def _display_plain_alerts(self, alerts: List[Dict[str, Any]]) -> None:
+        """Display alerts with plain text formatting."""
+        print("\n" + "=" * 60)
+        print("ALERTS")
+        print("=" * 60)
+
+        for alert in alerts[-10:]:  # Show last 10 alerts
+            timestamp = alert.get("timestamp", "")
+            if isinstance(timestamp, str):
+                try:
+                    from datetime import datetime
+
+                    dt = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+                    timestamp = dt.strftime("%H:%M:%S")
+                except:
+                    timestamp = timestamp[:8] if len(timestamp) >= 8 else timestamp
+
+            severity = alert.get("severity", "info").upper()
+            alert_type = alert.get("type", "")
+            message = alert.get("message", "")
+
+            print(f"[{timestamp}] {severity}: {alert_type}")
+            print(f"  {message}")
+
+        print("=" * 60 + "\n")
+
+
+def create_progress_visualizer(use_rich: Optional[bool] = None) -> ProgressVisualizer:
+    """
+    Factory function to create a progress visualizer.
+
+    Args:
+        use_rich: Force use of rich library (None = auto-detect)
+
+    Returns:
+        ProgressVisualizer instance
+    """
+    return ProgressVisualizer(use_rich)

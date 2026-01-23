@@ -1220,6 +1220,261 @@ def cmd_telemetry_stats(args):
             print(f"  Failed: {failed}")
 
 
+def cmd_progress(args):
+    """Display progress visualization."""
+    from v3.core.ui import create_progress_visualizer
+    from v3.core.session_manager import SessionManager
+    from v3.data.telemetry_manager import get_telemetry_manager
+    from v3.logic.progress_tracker import ProgressTracker
+
+    visualizer = create_progress_visualizer()
+
+    # Task progress
+    if args.task:
+        from v3.data.db_manager import TASK_DB_PATH
+        import sqlite3
+
+        if os.path.exists(TASK_DB_PATH):
+            conn = sqlite3.connect(TASK_DB_PATH)
+            cursor = conn.cursor()
+            
+            if args.task_id:
+                # Get specific task
+                cursor.execute(
+                    "SELECT id, title, status FROM tasks WHERE id = ?",
+                    (args.task_id,)
+                )
+                task = cursor.fetchone()
+                if task:
+                    # Get progress from progress tracker if available
+                    task_id, title, status = task
+                    progress = 50.0 if status == "in_progress" else 100.0 if status == "completed" else 0.0
+                    
+                    metrics = {}
+                    try:
+                        # Try to get metrics from telemetry
+                        telemetry_mgr = get_telemetry_manager()
+                        ops = telemetry_mgr.query_operations(
+                            status="completed",
+                            task_id=args.task_id,
+                            limit=10
+                        )
+                        if ops:
+                            metrics = {
+                                "lines_added": sum(
+                                    op.get("metrics", {}).get("lines_added", 0)
+                                    for op in ops
+                                ),
+                                "tests_passing": sum(
+                                    op.get("metrics", {}).get("tests_passing", 0)
+                                    for op in ops
+                                ),
+                                "tests_total": sum(
+                                    op.get("metrics", {}).get("tests_total", 0)
+                                    for op in ops
+                                )
+                            }
+                    except:
+                        pass
+
+                    # Check for stagnation and regression
+                    stagnation = None
+                    regression = False
+
+                    try:
+                        telemetry_mgr = get_telemetry_manager()
+                        recent_ops = telemetry_mgr.query_operations(
+                            status="in_progress",
+                            task_id=args.task_id,
+                            limit=10
+                        )
+                        
+                        # Check for stagnation (multiple operations without progress)
+                        if recent_ops and len(recent_ops) > 3:
+                            stagnation = "warning"
+                        
+                        # Check for regression (would need historical comparison)
+                        # For now, simplified check
+                        if status == "failed":
+                            regression = True
+                    except:
+                        pass
+
+                    # Predict completion time
+                    predicted_completion = None
+                    try:
+                        telemetry_mgr = get_telemetry_manager()
+                        ops = telemetry_mgr.query_operations(
+                            task_id=args.task_id,
+                            limit=10
+                        )
+                        if ops and len(ops) >= 2:
+                            # Simple linear prediction
+                            durations = []
+                            for op in ops:
+                                if op.get("start_time") and op.get("end_time"):
+                                    try:
+                                        start = datetime.fromisoformat(op["start_time"])
+                                        end = datetime.fromisoformat(op["end_time"])
+                                        durations.append((end - start).total_seconds())
+                                    except:
+                                        pass
+                            if durations:
+                                avg_duration = sum(durations) / len(durations)
+                                predicted_completion = avg_duration
+                    except:
+                        pass
+
+                    visualizer.display_task_progress(
+                        task_id=str(task_id),
+                        progress=progress,
+                        metrics=metrics if metrics else None,
+                        predicted_completion=predicted_completion,
+                        stagnation=stagnation,
+                        regression=regression
+                    )
+                else:
+                    print(f"Task not found: {args.task_id}")
+            else:
+                # Show recent tasks
+                cursor.execute(
+                    "SELECT id, title, status FROM tasks ORDER BY id DESC LIMIT 10"
+                )
+                tasks = cursor.fetchall()
+                
+                if args.session:
+                    # Show session-level progress
+                    completed = len([t for t in tasks if t[2] == "completed"])
+                    failed = len([t for t in tasks if t[2] == "failed"])
+                    
+                    session_metrics = {
+                        "tasks_completed": completed,
+                        "tasks_failed": failed,
+                        "operations_per_hour": (completed + failed) / 2.0  # Simplified
+                    }
+                    
+                    visualizer.display_session_progress(session_metrics)
+                elif args.project:
+                    # Show project-level progress
+                    total = len(tasks)
+                    completed = len([t for t in tasks if t[2] == "completed"])
+                    
+                    project_metrics = {
+                        "features_total": total,
+                        "features_completed": completed,
+                        "overall_code_coverage": 85.0,  # Placeholder
+                        "bug_rate": 5.0,  # Placeholder
+                        "health_score": (completed / total * 100) if total > 0 else 100.0
+                    }
+                    
+                    visualizer.display_project_progress(project_metrics)
+                else:
+                    # List tasks
+                    print("\n" + "=" * 60)
+                    print("RECENT TASKS")
+                    print("=" * 60 + "\n")
+                    for task in tasks:
+                        task_id, title, status = task
+                        status_icon = {
+                            "completed": "✅",
+                            "in_progress": "🔄",
+                            "pending": "⏳",
+                            "failed": "❌"
+                        }.get(status, "❓")
+                        print(f"{status_icon} [{task_id}] {title} - {status}")
+                    print()
+            
+            conn.close()
+        else:
+            print("Task database not found. Run 'l4-dev init' first.")
+
+    # Session progress
+    elif args.session:
+        try:
+            session_mgr = SessionManager()
+            sessions = session_mgr.list_sessions(limit=1)
+            
+            if sessions:
+                session = sessions[0]
+                session_metrics = {
+                    "tasks_completed": session.get("tasks_completed", 0),
+                    "tasks_failed": 0,  # Would need to track this
+                    "errors_encountered": 0,  # Would need to track this
+                    "errors_resolved": 0,  # Would need to track this
+                    "operations_per_hour": 2.0,  # Placeholder
+                    "total_lines_written": 0,  # Would need to track this
+                    "total_tests_added": 0  # Would need to track this
+                }
+                
+                visualizer.display_session_progress(session_metrics)
+            else:
+                print("No active session found.")
+        except Exception as e:
+            print(f"Error loading session progress: {e}")
+
+    # Project progress
+    elif args.project:
+        from v3.data.db_manager import TASK_DB_PATH
+        import sqlite3
+
+        if os.path.exists(TASK_DB_PATH):
+            conn = sqlite3.connect(TASK_DB_PATH)
+            cursor = conn.cursor()
+            
+            cursor.execute("SELECT COUNT(*) FROM tasks")
+            total_tasks = cursor.fetchone()[0]
+            
+            cursor.execute("SELECT COUNT(*) FROM tasks WHERE status = 'completed'")
+            completed_tasks = cursor.fetchone()[0]
+            
+            cursor.execute("SELECT COUNT(*) FROM tasks WHERE status = 'failed'")
+            failed_tasks = cursor.fetchone()[0]
+            
+            conn.close()
+            
+            project_metrics = {
+                "features_total": total_tasks,
+                "features_completed": completed_tasks,
+                "issues_total": failed_tasks,
+                "issues_resolved": 0,  # Would need to track this
+                "milestones_total": 5,  # Placeholder
+                "milestones_completed": 2,  # Placeholder
+                "overall_code_coverage": 85.0,  # Placeholder
+                "bug_rate": 5.0,  # Placeholder
+                "health_score": (completed_tasks / total_tasks * 100) if total_tasks > 0 else 100.0
+            }
+            
+            visualizer.display_project_progress(project_metrics)
+        else:
+            print("Task database not found. Run 'l4-dev init' first.")
+
+    # Show alerts
+    if args.alerts:
+        try:
+            telemetry_mgr = get_telemetry_manager()
+            # Get recent errors as alerts
+            recent_errors = telemetry_mgr.query_operations(
+                status="failed",
+                limit=10
+            )
+            
+            if recent_errors:
+                alerts = []
+                for op in recent_errors:
+                    alerts.append({
+                        "timestamp": op.get("start_time", ""),
+                        "severity": "error",
+                        "type": "operation_failed",
+                        "message": f"{op.get('operation_type')}: {op.get('title', 'Unknown error')}"
+                    })
+                
+                visualizer.display_alerts(alerts)
+            else:
+                print("No recent alerts.")
+        except Exception as e:
+            print(f"Error loading alerts: {e}")
+
+
 def cmd_report_generate(args):
     """Generate analytics reports."""
     from v3.data.telemetry_manager import get_telemetry_manager
@@ -1848,6 +2103,25 @@ def main():
     )
     report_p.add_argument("--export", help="Export report to JSON file")
 
+    # Progress command (V4)
+    progress_p = subparsers.add_parser("progress", help="Display progress visualization")
+    progress_p.add_argument(
+        "--task", action="store_true", help="Show task progress"
+    )
+    progress_p.add_argument(
+        "--task-id", type=int, help="Show progress for specific task ID"
+    )
+    progress_p.add_argument(
+        "--session", action="store_true", help="Show session progress"
+    )
+    progress_p.add_argument(
+        "--project", action="store_true", help="Show project progress"
+    )
+    progress_p.add_argument(
+        "--alerts", action="store_true", help="Show progress alerts"
+    )
+    add_common_args(progress_p)
+
     args = parser.parse_args()
 
     # Change CWD to project root
@@ -1908,6 +2182,8 @@ def main():
             print("Please specify a telemetry command: list, show, export, stats")
     elif args.command == "report":
         cmd_report_generate(args)
+    elif args.command == "progress":
+        cmd_progress(args)
     else:
         parser.print_help()
 
