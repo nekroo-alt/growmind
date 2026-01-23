@@ -16,8 +16,13 @@ The platform follows a **Hub-and-Spoke Agentic Architecture**. The "Hub" is the 
     *   `activity.db`: Logs the summary of every action (prompts, diffs, and CoT).
     *   `task.db`: Stores the dynamic task backlog (Planned/Broken-down tasks, Acceptance Criteria, and Status).
     *   **V2 Enhancement**: `task.db` now includes `depends_on` column for task dependency tracking
+    *   **V3 Enhancement**: `telemetry.db` - Stores operation tracking and metrics for comprehensive monitoring
+    *   **V3 Enhancement**: `snapshots.db` - Stores system state snapshots for checkpointing and recovery
+    *   **V3 Enhancement**: `sessions.db` - Stores session state and configuration
 *   **Cache Storage (V2):**
     *   `.l4_cache/`: Directory for storing AST analysis results and cached context
+*   **Checkpoint Storage (V3):**
+    *   `checkpoints/`: Directory for storing checkpoint data (database backups, file snapshots)
 
 ---
 
@@ -26,7 +31,7 @@ The platform follows a **Hub-and-Spoke Agentic Architecture**. The "Hub" is the 
 | Module | Responsibility |
 | :--- | :--- |
 | **Core** | Entry point, CLI, and high-level Orchestration loop. |
-| **Data** | SQLite schema management, Markdown CRUD (Context Bank access), and Cache management (V2). |
+| **Data** | SQLite schema management, Markdown CRUD (Context Bank access), Cache management (V2), Telemetry (V3), Checkpointing (V3). |
 | **Logic** | Agent definitions: Git Guard, Task Dispatcher, Planner, Implementor, Verifier, and AST Analysis (V2). |
 | **Retro** | Separate flow logic for analyzing human corrections and updating `.patterns`. |
 | **LLM Base** | Provider wrapper (Gemini/OpenAI/Anthropic) to abstract prompt execution from functional logic. |
@@ -146,6 +151,113 @@ Refactored to use AST-based analysis instead of keyword matching.
 *   **Incremental Updates**: Re-analyzes only changed files after task completion
 *   **Key Methods**: `get_pruned_context()`, `get_relevant_files()`
 
+### Module 14: `data/telemetry_manager.py` (V3 - Telemetry Tracking)
+Tracks all operations, events, and metrics for comprehensive monitoring.
+
+*   **Operation Tracking**: Start, end, cancel operations with hierarchical support
+*   **Event Recording**: Record events with timestamps, severity, and context
+*   **Metrics Collection**: Capture tokens used, time elapsed, memory usage, cache hits
+*   **Resource Monitoring**: Monitor CPU, memory, disk, and network usage
+*   **Query Interface**: Query operations by type, status, time range
+*   **Export Capabilities**: Export telemetry to CSV/JSON for analysis
+*   **Thread Safety**: Thread-safe operations with RLock
+*   **Key Methods**: `start_operation()`, `end_operation()`, `record_event()`, `record_metric()`, `query_operations()`
+
+### Module 15: `data/checkpoint_manager.py` (V3 - State Checkpointing)
+Creates and restores system state snapshots for zero data loss.
+
+*   **Checkpoint Creation**: Create checkpoints of database, file system, context, and cache
+*   **Checkpoint Restoration**: Restore system state from any checkpoint
+*   **State Validation**: Validate checkpoint integrity before/after restore
+*   **Automatic Checkpoints**: Policy-based automatic checkpoint creation
+*   **Rollback Support**: Automatic rollback on errors
+*   **Incremental Snapshots**: Delta-based storage for efficiency
+*   **Garbage Collection**: Automatic cleanup of old checkpoints
+*   **Key Methods**: `create()`, `restore()`, `validate()`, `delete_old()`, `delete_excess()`
+
+### Module 16: `core/logging_config.py` (V3 - Structured Logging)
+Configures structured logging with multiple handlers.
+
+*   **Structured Format**: JSON format for machine parsing, colored text for humans
+*   **Multiple Handlers**: Console, file, and error log handlers
+*   **Log Rotation**: Automatic rotation based on size (max 10MB, keep 5 files)
+*   **Contextual Logging**: Automatic correlation with telemetry operations
+*   **Flexible Levels**: DEBUG, INFO, WARNING, ERROR, CRITICAL
+*   **Log Analysis**: Search logs by operation, task, error, or time range
+*   **Key Methods**: `setup_logging()`, `format_log_message()`, `get_logger_with_operation()`
+
+### Module 17: `core/error_handling.py` (V3 - Error Handling)
+Classifies errors and provides recovery strategies.
+
+*   **Error Classification**: Define error types (transient, permanent, retryable)
+*   **Retry Logic**: Automatic retry with exponential backoff for transient errors
+*   **Recovery Strategies**: Auto-recover from common errors (rate limits, locks)
+*   **Error Reporting**: Interactive error messages with recovery suggestions
+*   **Circuit Breaker**: Prevent cascading failures
+*   **Key Methods**: `classify_error()`, `retry_with_backoff()`, `get_recovery_strategy()`
+
+### Module 18: `core/graceful_shutdown.py` (V3 - Shutdown Handling)
+Handles SIGINT/SIGTERM gracefully.
+
+*   **Signal Handling**: Handle SIGINT (Ctrl+C) and SIGTERM gracefully
+*   **State Preservation**: Save state before shutdown
+*   **Operation Cancellation**: Cancel in-progress operations cleanly
+*   **Checkpoint Creation**: Create checkpoint if in critical operation
+*   **Resource Cleanup**: Close database connections and flush logs
+*   **Key Methods**: `handle_interrupt()`, `setup_signal_handlers()`
+
+### Module 19: `core/transactions.py` (V3 - Transaction Support)
+Provides transaction-like semantics for multi-step operations.
+
+*   **Transaction Context**: Wrap multi-step operations in transactions
+*   **All-or-Nothing**: Rollback all steps if any step fails
+*   **Nested Transactions**: Support nested transaction scopes
+*   **State Tracking**: Track transaction state (pending, committed, rolled back)
+*   **Key Methods**: `start_transaction()`, `commit()`, `rollback()`
+
+### Module 20: `core/health_check.py` (V3 - Health Checks)
+Performs system health checks.
+
+*   **Database Health**: Check database connectivity and integrity
+*   **Git Health**: Check git repository state
+*   **Cache Health**: Check cache validity and size
+*   **File System Health**: Check file permissions and disk space
+*   **LLM API Health**: Check LLM API connectivity
+*   **Health Reports**: Generate health report with recommendations
+*   **Key Methods**: `check_health()`, `generate_report()`
+
+### Module 21: `core/session_manager.py` (V3 - Session Management)
+Manages session lifecycle and persistence.
+
+*   **Session Creation**: Create new session with unique ID
+*   **Session Resumption**: Resume existing session from state
+*   **Session Persistence**: Save session state to disk
+*   **Interrupted Detection**: Detect and recover from interrupted sessions
+*   **Configuration Management**: Persist user preferences
+*   **Session Analytics**: Track tasks completed, time spent, errors
+*   **Key Methods**: `start_session()`, `resume_session()`, `complete_session()`, `list_sessions()`
+
+### Module 22: `core/ui.py` (V3 - User Interface)
+Provides enhanced user interface components.
+
+*   **Progress Indicators**: Real-time progress bars for long operations
+*   **Status Dashboard**: CLI dashboard showing system status
+*   **Interactive Error Messages**: Helpful error messages with recovery suggestions
+*   **Visual Feedback**: Color-coded output and emoji indicators
+*   **Rich Formatting**: Enhanced display with rich library
+*   **Key Methods**: `show_progress()`, `show_status()`, `show_error()`
+
+### Module 23: `core/log_analyzer.py` (V3 - Log Analysis)
+Provides log search and analysis utilities.
+
+*   **Log Search**: Search logs by operation, task, error, or time range
+*   **Log Filtering**: Filter logs by level, module, or custom fields
+*   **Log Statistics**: Generate log summaries and statistics
+*   **Error Pattern Identification**: Identify common error patterns
+*   **Operation Timelines**: Create operation timelines from logs
+*   **Export Capabilities**: Export logs for external analysis
+*   **Key Methods**: `search_logs()`, `generate_statistics()`, `create_timeline()`
+
 ---
 
 ## 4. Operational Flow Summary
@@ -183,6 +295,63 @@ The V2 operational flow adds AST-based context collection and validation:
 1. **Incremental Update**: Re-analyze only changed files
 2. **Cache Invalidation**: Clear cache for modified files
 3. **Statistics Logging**: Track cache hit rates and performance
+
+### V3 Operational Flow (Enhanced)
+
+The V3 operational flow adds telemetry, logging, checkpointing, and session management:
+
+**Phase 0: Initialization (V3)**
+1. **Setup Logging**: Configure structured logging with `setup_logging()`
+2. **Initialize Telemetry**: Create `TelemetryManager` instance
+3. **Initialize Checkpoint**: Create `CheckpointManager` instance
+4. **Initialize Session**: Create `SessionManager` instance
+5. **Setup Signal Handlers**: Configure graceful shutdown handlers
+
+**Phase 1: Session Detection (V3)**
+1. **Detect Interrupted Sessions**: Check for interrupted sessions on startup
+2. **Offer Resumption**: Prompt user to resume previous session
+3. **Resume or Start New**: Resume existing session or start new one
+
+**Phase 2: Health Check (V3)**
+1. **Run Health Checks**: Check database, git, cache, file system, LLM API
+2. **Validate System State**: Ensure system is in healthy state
+3. **Halt if Unhealthy**: Stop operation if health checks fail
+
+**Phase 3: Context Collection (V2)**
+1. **Task Impact Analysis**: Use `TaskImpactAnalyzer` to identify target code
+2. **Dependency Traversal**: Collect transitive dependencies using `DependencyTraverser`
+3. **Context Pruning**: Select minimal informative snippets using `ContextPruner`
+4. **Cache Lookup**: Check `CacheManager` for existing analysis results
+5. **Context Memoization**: Store context for future reuse
+
+**Phase 4: Execution with Telemetry (V3)**
+1. **Create Checkpoint**: Create checkpoint before critical operation
+2. **Start Operation Tracking**: Track operation in telemetry
+3. **Task Breakdown**: Use AST-informed analysis (if needed)
+4. **Implementation**: Receive minimal context and implement via TDD
+   - Record events in telemetry
+   - Record metrics (tokens, time, resources)
+   - Show progress indicators
+5. **Verification**: Validate context completeness and dependency contracts
+6. **Create Checkpoint**: Create checkpoint after successful completion
+7. **Complete Operation Tracking**: End operation tracking in telemetry
+
+**Phase 5: Error Handling (V3)**
+1. **Classify Error**: Classify error type (transient, permanent, retryable)
+2. **Apply Recovery Strategy**: Retry with backoff for transient errors
+3. **Rollback on Failure**: Rollback to checkpoint if unrecoverable
+4. **Log Error**: Record error in logs and telemetry
+5. **Show Error Message**: Display interactive error with recovery suggestions
+
+**Phase 6: Session Management (V3)**
+1. **Update Session State**: Track tasks completed, time spent
+2. **Persist Session**: Save session state to disk
+3. **Complete Session**: Mark session as complete or pause
+
+**Phase 7: Cleanup (V3)**
+1. **Garbage Collection**: Clean up old checkpoints
+2. **Archive Data**: Archive old telemetry data
+3. **Rotate Logs**: Rotate log files based on size
 
 ---
 
@@ -249,9 +418,98 @@ config = ContextEngineConfig(
 )
 ```
 
+## 7. V3 Configuration
+
+### Environment Variables
+
+```bash
+# V2 Variables (kept)
+L4_CACHE_DIR=.l4_cache                    # Cache directory
+L4_CACHE_ENABLED=true                     # Enable/disable caching
+L4_CACHE_SIZE_MB=100                      # Cache size limit
+L4_MAX_DEPTH=3                            # Maximum traversal depth
+L4_TOKEN_BUDGET=4000                      # Default token budget
+L4_INCLUDE_TYPE_HINTS=true                 # Include type hints
+L4_ADD_CONTEXT_COMMENTS=true               # Add context comments
+
+# V3 New Variables: Telemetry
+L4_TELEMETRY_ENABLED=true                 # Enable/disable telemetry
+L4_TELEMETRY_DB=telemetry.db             # Telemetry database path
+L4_RESOURCE_MONITORING=true                # Enable resource monitoring
+
+# V3 New Variables: Logging
+L4_LOG_LEVEL=INFO                        # Log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+L4_LOG_FILE=l4.log                       # Log file path
+L4_ERROR_LOG_FILE=l4_error.log            # Error log file path
+L4_LOG_FILE_MAX_SIZE_MB=10               # Max log file size before rotation
+L4_LOG_BACKUP_COUNT=5                    # Number of backup log files to keep
+L4_LOG_JSON_FORMAT=false                  # Use JSON format for logs
+
+# V3 New Variables: Checkpoint
+L4_CHECKPOINT_ENABLED=true                # Enable checkpointing
+L4_CHECKPOINT_DIR=checkpoints/             # Checkpoint directory
+L4_CHECKPOINT_MAX_COUNT=10                # Maximum number of checkpoints to keep
+L4_CHECKPOINT_MAX_AGE_HOURS=24           # Maximum age of checkpoints in hours
+
+# V3 New Variables: Session
+L4_SESSION_AUTO_RESUME=true              # Auto-resume interrupted sessions
+L4_SESSION_MAX_SESSIONS=10                # Maximum number of sessions to keep
+
+# V3 New Variables: LLM
+L4_LLM_PROVIDER=openai                   # LLM provider (openai, anthropic, gemini)
+L4_LLM_MODEL=gpt-4                      # LLM model
+L4_LLM_TEMPERATURE=0.7                   # LLM temperature
+L4_LLM_API_KEY=your_api_key              # LLM API key
+
+# V3 New Variables: Error Handling
+L4_RETRY_MAX_ATTEMPTS=3                   # Maximum retry attempts
+L4_RETRY_BASE_DELAY=1.0                   # Base delay for exponential backoff
+L4_RETRY_MAX_DELAY=60.0                   # Maximum delay for exponential backoff
+L4_RETRY_JITTER=true                      # Add jitter to retry delays
+```
+
+### Programmatic Configuration
+
+```python
+from v1.logic.context_engine import ContextEngineConfig
+from data.checkpoint_manager import CheckpointPolicy
+from core.error_handling import RetryConfig
+
+# V2 Configuration
+context_config = ContextEngineConfig(
+    max_traversal_depth=3,
+    token_budget=4000,
+    cache_size_mb=100,
+    include_type_hints=True,
+    add_context_comments=True,
+    cache_enabled=True
+)
+
+# V3 Checkpoint Policy
+checkpoint_policy = CheckpointPolicy(
+    before_task=True,
+    after_task=True,
+    before_refactor=True,
+    after_refactor=True,
+    on_error=True,
+    max_age_hours=24,
+    max_count=10,
+    keep_critical=True
+)
+
+# V3 Retry Configuration
+retry_config = RetryConfig(
+    max_attempts=3,
+    base_delay=1.0,
+    max_delay=60.0,
+    exponential_base=2.0,
+    jitter=True
+)
+```
+
 ---
 
-## 7. V2 Module Dependencies
+## 8. V2 Module Dependencies
 
 ```
 core/start.py
@@ -278,14 +536,58 @@ retro/retro_agent.py
     └── data/db_manager.py
 ```
 
+## 9. V3 Module Dependencies
+
+```
+core/start.py
+    ├── core/logging_config.py (V3)
+    ├── data/telemetry_manager.py (V3)
+    ├── data/checkpoint_manager.py (V3)
+    ├── core/session_manager.py (V3)
+    ├── core/graceful_shutdown.py (V3)
+    ├── core/health_check.py (V3)
+    └── logic/dispatcher.py
+            ├── logic/planner.py
+            │       ├── logic/task_impact_analyzer.py (V2)
+            │       │       ├── data/semantic_mapper.py (V2)
+            │       │       └── llm_base/provider.py
+            │       └── logic/complexity_estimator.py (V2)
+            │               └── data/semantic_mapper.py (V2)
+            └── logic/implementor.py
+                    ├── logic/context_engine.py (V2)
+                    │       ├── data/semantic_mapper.py (V2)
+                    │       ├── data/cache_manager.py (V2)
+                    │       ├── logic/task_impact_analyzer.py (V2)
+                    │       ├── logic/dependency_traverser.py (V2)
+                    │       └── logic/context_pruner.py (V2)
+                    └── logic/verifier.py
+                            ├── data/semantic_mapper.py (V2)
+                            └── logic/context_engine.py (V2)
+
+core/error_handling.py (V3)
+core/transactions.py (V3)
+core/ui.py (V3)
+core/log_analyzer.py (V3)
+
+retro/retro_agent.py
+    └── llm_base/provider.py
+    └── data/db_manager.py
+```
+
 ---
 
-## 8. Documentation Structure (V2)
+## 10. Documentation Structure (V3)
 
 ```
 docs/
 ├── V2_ARCHITECTURE.md          # Complete V2 architecture overview
 ├── MIGRATION_V1_TO_V2.md       # Step-by-step migration instructions
 ├── API_REFERENCE.md              # Complete API documentation
-└── PERFORMANCE.md               # Performance benchmarks and characteristics
+├── PERFORMANCE.md               # Performance benchmarks and characteristics
+├── TELEMETRY.md                # (V3) Telemetry system documentation
+├── LOGGING.md                  # (V3) Structured logging documentation
+├── RESUMABILITY.md             # (V3) Checkpoint and recovery documentation
+├── SESSION_MANAGEMENT.md        # (V3) Session management documentation
+├── MIGRATION_V2_TO_V3.md      # (V3) Step-by-step migration guide from V2 to V3
+└── TROUBLESHOOTING.md          # (V3) Common issues and solutions
 ```

@@ -25,6 +25,9 @@ To keep `product.md` and `technical.md` relatively static, a new database is use
 | `activity.db` | SQLite | Raw ledger of prompts, diffs, test results, and human overrides. |
 | `.patterns/` | Directory | (Evolutionary) Stores project-specific coding standards. |
 | **`.l4_cache/`** | **Directory** | **(V2) Caches AST analysis results for performance optimization.** |
+| **`telemetry.db`** | **SQLite** | **(V3) Tracks operations, events, metrics, and resources for comprehensive monitoring.** |
+| **`snapshots.db`** | **SQLite** | **(V3) Stores system state snapshots for checkpointing and recovery.** |
+| **`sessions.db`** | **SQLite** | **(V3) Stores session state, configuration, and analytics.** |
 
 ---
 
@@ -46,6 +49,11 @@ To keep `product.md` and `technical.md` relatively static, a new database is use
 * Validates subtasks don't exceed 30-line limit using complexity analysis
 * Includes context-aware acceptance criteria that verify dependency contracts
 
+**V3 Enhancement: Checkpoint Integration**
+* Creates checkpoint before planning operations to enable recovery
+* Captures state before task breakdown to allow rollback
+* Validates checkpoint integrity after planning completion
+
 ### B. The Implementer (TDD Agent)
 
 *   **Logic**: Follows the Red-Green-Refactor cycle.
@@ -53,6 +61,13 @@ To keep `product.md` and `technical.md` relatively static, a new database is use
     2.  **Green**: Writes the minimal code to pass the test.
     3.  **Refactor**: Cleans code while maintaining test integrity.
 *   **Constraint**: Must respect the **Open-Closed Principle**. It prefers adding new classes/functions over modifying existing stable ones.
+
+**V3 Enhancement: Telemetry Tracking and Progress Reporting**
+* Tracks implementation operations with comprehensive telemetry
+* Records metrics: tokens used, time elapsed, resources consumed
+* Provides real-time progress indicators via UI
+* Creates checkpoints before and after task implementation
+* Logs structured events for debugging and analysis
 
 ### C. The Acceptance Agent (The Critic)
 
@@ -64,6 +79,8 @@ To keep `product.md` and `technical.md` relatively static, a new database is use
     *   **V2 Enhancement**: Validates context completeness - ensures implementation uses provided context appropriately
     *   **V2 Enhancement**: Checks that new code doesn't violate dependency contracts
     *   **V2 Enhancement**: Verifies that all downstream consumers are tested
+    *   **V3 Enhancement**: Validates checkpoint integrity - ensures checkpoints are valid before commit
+    *   **V3 Enhancement**: Verifies telemetry data completeness for all operations
 
 ---
 
@@ -110,6 +127,34 @@ To prevent the "Open-Closed" principle from creating excessive "Add-only" spaghe
 
 *   The system must run as a CLI tool (e.g., `l4-dev start`).
 *   It should use a `.l4ignore` file (similar to `.gitignore`) to prevent the LLM from being overwhelmed by large binary files or logs.
+
+### 6.4 Checkpoint Before Refactoring (V3)
+
+*   **Guardrail**: Create checkpoint before refactoring sprint (every 10 commits)
+*   **Action**: System automatically saves state before allowing code modifications
+*   **Recovery**: If refactoring fails, automatically rollback to checkpoint
+*   **Validation**: Verify checkpoint integrity before and after refactoring
+
+### 6.5 Health Checks Before Critical Operations (V3)
+
+*   **Guardrail**: Run health checks before starting critical operations
+*   **Checks**:
+    *   Database connectivity and integrity
+    *   Git repository state
+    *   Cache validity and size
+    *   File system permissions and space
+    *   LLM API connectivity
+*   **Action**: Halt operation if health checks fail, provide recovery suggestions
+
+### 6.6 Transaction Support for Multi-Step Operations (V3)
+
+*   **Guardrail**: Wrap multi-step operations in transactions
+*   **Components**:
+    *   Database modifications
+    *   File writes
+    *   Test execution
+*   **Behavior**: All-or-nothing execution - rollback any step if any fails
+*   **Tracking**: Log transaction lifecycle in telemetry
 
 ---
 
@@ -186,11 +231,130 @@ To prevent the "Open-Closed" principle from creating excessive "Add-only" spaghe
 
 ---
 
-## 8. Documentation
+## 8. V3 Enhancements
+
+### 8.1 Telemetry and Monitoring
+
+**V3 introduces comprehensive telemetry system** for deep visibility into operations:
+
+* **Operation Tracking**: Track all operations (planning, implementation, verification)
+* **Event Recording**: Record events with timestamps, severity, and context
+* **Metrics Collection**: Capture tokens used, time elapsed, memory usage, cache hits
+* **Resource Monitoring**: Monitor CPU, memory, disk, and network usage
+* **File Operation Telemetry**: Track all file reads/writes with diffs
+* **LLM Call Telemetry**: Track LLM API calls with request/response details
+* **Query Interface**: Query operations by type, status, time range
+* **Export Capabilities**: Export telemetry to CSV/JSON for analysis
+
+**Key Benefits**:
+* Deep visibility into system behavior
+* Faster debugging with correlated logs and telemetry
+* Performance optimization through metrics analysis
+* Cost tracking via LLM usage monitoring
+
+### 8.2 Structured Logging
+
+**V3 introduces structured logging system** for consistent, searchable logs:
+
+* **Structured Format**: JSON format for machine parsing, colored text for humans
+* **Multiple Handlers**: Console, file, and error log handlers
+* **Log Rotation**: Automatic rotation based on size (max 10MB, keep 5 files)
+* **Contextual Logging**: Automatic correlation with telemetry operations
+* **Flexible Levels**: DEBUG, INFO, WARNING, ERROR, CRITICAL
+* **Log Analysis**: Search logs by operation, task, error, or time range
+* **Export Capabilities**: Export logs for external analysis
+
+**Key Benefits**:
+* Machine-parseable logs for analytics
+* Better debugging with structured context
+* Log aggregation support (ELK, Splunk)
+* Reduced debugging time by 50%
+
+### 8.3 State Checkpointing and Recovery
+
+**V3 introduces checkpoint and recovery system** for zero data loss:
+
+* **Complete State Capture**: Database, file system, context, and cache
+* **Fast Restoration**: Restore from checkpoint in <3 seconds
+* **Automatic Checkpoints**: Policy-based automatic checkpoint creation
+* **Rollback Support**: Automatic rollback on errors
+* **Validation**: State integrity checks before/after restore
+* **Incremental Snapshots**: Delta-based storage for efficiency
+* **Checkpoint Policy**: Configurable policy for automatic checkpoint creation
+* **Garbage Collection**: Automatic cleanup of old checkpoints
+
+**Key Benefits**:
+* Zero data loss from interruptions
+* Fast session resumption (<5 seconds)
+* Automatic rollback on errors
+* Easy recovery from unexpected shutdowns
+
+### 8.4 Error Handling and Resilience
+
+**V3 introduces robust error handling** for self-healing capabilities:
+
+* **Error Classification**: Define error types (transient, permanent, retryable)
+* **Retry Logic**: Automatic retry with exponential backoff for transient errors
+* **Recovery Strategies**: Auto-recover from common errors (rate limits, locks)
+* **Graceful Shutdown**: Handle SIGINT/SIGTERM gracefully, save state before exit
+* **Error Reporting**: Interactive error messages with recovery suggestions
+* **Health Checks**: System health monitoring with proactive issue detection
+
+**Key Benefits**:
+* Self-healing from 90% of transient errors
+* Clear recovery paths for user-action errors
+* Zero data loss from interruptions
+* Better user experience with helpful error messages
+
+### 8.5 Session Management
+
+**V3 introduces session management** for productivity tracking and continuity:
+
+* **Session Persistence**: Save and restore session state across runs
+* **Automatic Detection**: Detect interrupted sessions on startup
+* **Session Resumption**: Resume from any checkpoint
+* **Productivity Tracking**: Track tasks completed, time spent, errors
+* **Configuration Management**: Persist user preferences
+* **Analytics**: Generate session reports and insights
+* **Comparison**: Compare sessions over time
+
+**Key Benefits**:
+* Seamless continuation of work across multiple runs
+* Productivity tracking and analytics
+* Session recovery after interruption
+* Configuration persistence
+
+### 8.6 User Experience Improvements
+
+**V3 introduces enhanced user experience** features:
+
+* **Progress Indicators**: Real-time progress bars for long operations
+* **Status Dashboard**: CLI dashboard showing system status
+* **Interactive Error Messages**: Helpful error messages with recovery suggestions
+* **Resume and Recovery CLI**: Easy-to-use commands for session resumption
+* **Telemetry and Log Queries**: CLI for querying telemetry and logs
+* **Visual Feedback**: Color-coded output and emoji indicators
+
+**Key Benefits**:
+* Better visibility into system state
+* Faster error recovery
+* Improved productivity
+* Better user satisfaction
+
+## 9. Documentation
 
 **V2 includes comprehensive documentation**:
 
-* **Architecture**: [v1/docs/V2_ARCHITECTURE.md](../v1/docs/V2_ARCHITECTURE.md) - Complete V2 architecture overview
+* **Architecture**: [v2/docs/V2_ARCHITECTURE.md](../v1/docs/V2_ARCHITECTURE.md) - Complete V2 architecture overview
 * **Migration Guide**: [v1/docs/MIGRATION_V1_TO_V2.md](../v1/docs/MIGRATION_V1_TO_V2.md) - Step-by-step migration instructions
 * **API Reference**: [v1/docs/API_REFERENCE.md](../v1/docs/API_REFERENCE.md) - Complete API documentation
 * **Performance**: [v1/docs/PERFORMANCE.md](../v1/docs/PERFORMANCE.md) - Performance benchmarks and characteristics
+
+**V3 includes comprehensive documentation**:
+
+* **Telemetry**: [v2/docs/TELEMETRY.md](v2/docs/TELEMETRY.md) - Telemetry system documentation
+* **Logging**: [v2/docs/LOGGING.md](v2/docs/LOGGING.md) - Structured logging documentation
+* **Resumability**: [v2/docs/RESUMABILITY.md](v2/docs/RESUMABILITY.md) - Checkpoint and recovery documentation
+* **Session Management**: [v2/docs/SESSION_MANAGEMENT.md](v2/docs/SESSION_MANAGEMENT.md) - Session management documentation
+* **Migration Guide**: [v2/docs/MIGRATION_V2_TO_V3.md](v2/docs/MIGRATION_V2_TO_V3.md) - Step-by-step migration guide from V2 to V3
+* **Troubleshooting**: [v2/docs/TROUBLESHOOTING.md](v2/docs/TROUBLESHOOTING.md) - Common issues and solutions
