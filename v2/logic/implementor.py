@@ -14,6 +14,7 @@ from v2.logic.verifier import Verifier
 from v2.core.telemetry import telemetry
 from v2.data.telemetry_manager import get_telemetry_manager
 from v2.core.logging_config import get_module_logger
+from v2.data.checkpoint_manager import CheckpointManager
 
 logger = get_module_logger(__name__)
 
@@ -27,6 +28,7 @@ class Implementor:
         self.llm = LLMProvider()
         self.verifier = Verifier()
         self.telemetry_manager = get_telemetry_manager()  # V3 telemetry
+        self.checkpoint_manager = CheckpointManager()  # V3 checkpointing
         logger.info("Implementor initialized successfully")
 
     def _get_error_reason(self, result):
@@ -218,6 +220,14 @@ class Implementor:
                 message=f"TDD cycle completed successfully for task: {task_title}",
                 context={"task_id": task_id}
             )
+            
+            # V3: Create checkpoint after successful task completion
+            checkpoint_id = self.checkpoint_manager.create(
+                reason=f"after_task_{task_id}",
+                task_id=task_id,
+                task_title=task_title
+            )
+            logger.info(f"Created checkpoint {checkpoint_id} after task {task_id} completed")
             
             update_task_status(task_id, "completed")
             return True, None
@@ -429,8 +439,16 @@ Keep changes focused and under 100 lines per commit.
     def run_refactor_sprint(self):
         """
         Consolidate patterns after every 10 commits.
+        V3 Enhancement: Creates checkpoint before refactoring sprint.
         """
         telemetry.track_step("Refactor Sprint")
+        
+        # V3: Create checkpoint before refactor sprint
+        checkpoint_id = self.checkpoint_manager.create(
+            reason="before_refactor_sprint"
+        )
+        logger.info(f"Created checkpoint {checkpoint_id} before refactor sprint")
+        
         log_activity(
             summary="Initiating Refactor Sprint",
             action="Refactor Sprint",

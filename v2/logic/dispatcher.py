@@ -7,6 +7,7 @@ from v2.data.db_manager import (
 from v2.core.telemetry import telemetry
 from v2.data.telemetry_manager import get_telemetry_manager
 from v2.core.logging_config import get_module_logger
+from v2.data.checkpoint_manager import CheckpointManager
 
 logger = get_module_logger(__name__)
 
@@ -15,6 +16,7 @@ class Dispatcher:
     def __init__(self):
         logger.info("Initializing Dispatcher")
         self.telemetry_manager = get_telemetry_manager()
+        self.checkpoint_manager = CheckpointManager()
         logger.info("Dispatcher initialized successfully")
     
     @fcid_mapping("DISP-100")
@@ -43,6 +45,14 @@ class Dispatcher:
                     cot_blob=f"Found pending task with ID: {task['id']}",
                 )
                 
+                # V3: Create checkpoint before task implementation
+                checkpoint_id = self.checkpoint_manager.create(
+                    reason=f"before_task_{task['id']}",
+                    task_id=task['id'],
+                    task_title=task['title']
+                )
+                logger.info(f"Created checkpoint {checkpoint_id} before task {task['id']}")
+                
                 # V3: Record dispatch event
                 op.record_event(
                     event_type="task_selected",
@@ -51,7 +61,8 @@ class Dispatcher:
                     context={
                         "task_id": task['id'],
                         "task_title": task['title'],
-                        "preferred_id": preferred_id
+                        "preferred_id": preferred_id,
+                        "checkpoint_id": checkpoint_id
                     }
                 )
                 

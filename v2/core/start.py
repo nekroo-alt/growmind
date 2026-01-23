@@ -316,6 +316,16 @@ class Orchestrator:
                         except Exception as e:
                             reason = f"Unexpected error during implementation: {str(e)}"
                             log_error_with_context(logger, e, task_id=task_id, task_title=task_title)
+                            
+                            # V3: Create checkpoint on error
+                            checkpoint_id = self.checkpoint_manager.create(
+                                reason=f"error_during_task_{task_id}",
+                                task_id=task_id,
+                                task_title=task_title,
+                                error=reason
+                            )
+                            logger.info(f"Created checkpoint {checkpoint_id} after error in task {task_id}")
+                            
                             if LLMProvider.is_quota_error(reason):
                                 self.telemetry.warning(
                                     f"LLM Quota/Billing issue detected: {reason}. Not marking task as blocked."
