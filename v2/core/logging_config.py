@@ -139,9 +139,21 @@ def format_log_message(template: str, **kwargs) -> str:
     """
     try:
         return template.format(**kwargs)
-    except KeyError as e:
-        # If a placeholder is missing, return template with placeholders
-        return template.format(**{k: f"{{{k}}}" for k in kwargs})
+    except KeyError:
+        # If a placeholder is missing, return template with unfilled placeholders
+        # Extract all placeholder names from template
+        import re
+        placeholders = re.findall(r'\{([^}]+)\}', template)
+        
+        # Build a dict with provided values and placeholder strings for missing ones
+        format_dict = {}
+        for key in placeholders:
+            if key in kwargs:
+                format_dict[key] = kwargs[key]
+            else:
+                format_dict[key] = f"{{{key}}}"
+        
+        return template.format(**format_dict)
     except Exception as e:
         # Fallback to template if formatting fails
         return template
@@ -344,6 +356,7 @@ class LoggingConfig:
         )
         file_handler.setLevel(self.level)
         
+        # Always use plain formatter for file (never ColoredFormatter)
         if self.json_format:
             formatter = JSONFormatter()
         else:
@@ -366,6 +379,7 @@ class LoggingConfig:
         )
         error_handler.setLevel(logging.ERROR)
         
+        # Always use plain formatter for error file (never ColoredFormatter)
         if self.json_format:
             formatter = JSONFormatter()
         else:
@@ -450,11 +464,13 @@ class ColoredFormatter(logging.Formatter):
         log_color = self.COLORS.get(record.levelname, self.COLORS['RESET'])
         reset = self.COLORS['RESET']
         
-        # Format the message with color
-        record.levelname = f"{log_color}{record.levelname}{reset}"
-        record.name = f"{log_color}{record.name}{reset}"
+        # Format message with color - create a temporary record copy
+        # to avoid modifying the original record
+        record_copy = logging.makeLogRecord(record.__dict__)
+        record_copy.levelname = f"{log_color}{record.levelname}{reset}"
+        record_copy.name = f"{log_color}{record.name}{reset}"
         
-        return super().format(record)
+        return super().format(record_copy)
 
 
 class JSONFormatter(logging.Formatter):
