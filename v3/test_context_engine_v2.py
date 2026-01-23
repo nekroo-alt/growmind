@@ -13,7 +13,7 @@ import sys
 # Add parent directory to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from v1.logic.context_engine import ContextEngine
+from v3.logic.context_engine import ContextEngine
 
 
 def test_context_engine_with_smart_scoping():

@@ -49,10 +49,10 @@ except ImportError:
     RICH_AVAILABLE = False
 
 # Import L4D modules
-from v2.data import db_manager
-from v2.data import telemetry_manager
-from v2.data import cache_manager
-from v2.data import checkpoint_manager
+from v3.data import db_manager
+from v3.data import telemetry_manager
+from v3.data import cache_manager
+from v3.data import checkpoint_manager
 
 
 class HealthStatus(Enum):
@@ -756,7 +756,7 @@ class HealthCheckManager:
 
         # Try to connect to LLM API (simple test)
         try:
-            from v2.llm_base.provider import LLMProvider
+            from v3.llm_base.provider import LLMProvider
 
             # Try to initialize provider
             provider = LLMProvider()

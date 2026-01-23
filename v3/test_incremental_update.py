@@ -7,8 +7,8 @@ import os
 import tempfile
 import shutil
 import subprocess
-from v1.logic.context_engine import ContextEngine
-from v1.data.cache_manager import CacheManager
+from v3.logic.context_engine import ContextEngine
+from v3.data.cache_manager import CacheManager
 
 
 def test_incremental_update_with_modified_files():

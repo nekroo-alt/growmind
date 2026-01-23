@@ -14,7 +14,7 @@ from contextlib import contextmanager
 from typing import Optional, Dict, Any
 
 # Import V3 TelemetryManager
-from v2.data.telemetry_manager import get_telemetry_manager
+from v3.data.telemetry_manager import get_telemetry_manager
 
 
 class Telemetry:

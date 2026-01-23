@@ -1,13 +1,13 @@
-from v2.data.db_manager import (
+from v3.data.db_manager import (
     get_pending_task,
     get_blocked_task,
     log_activity,
     fcid_mapping,
 )
-from v2.core.telemetry import telemetry
-from v2.data.telemetry_manager import get_telemetry_manager
-from v2.core.logging_config import get_module_logger
-from v2.data.checkpoint_manager import CheckpointManager
+from v3.core.telemetry import telemetry
+from v3.data.telemetry_manager import get_telemetry_manager
+from v3.core.logging_config import get_module_logger
+from v3.data.checkpoint_manager import CheckpointManager
 
 logger = get_module_logger(__name__)
 

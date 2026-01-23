@@ -9,9 +9,9 @@ import sys
 # Add v1 to path
 sys.path.insert(0, os.path.dirname(__file__))
 
-from v1.logic.planner import Planner
-from v1.data.semantic_mapper import SemanticMapper
-from v1.logic.complexity_estimator import ComplexityEstimator
+from v3.logic.planner import Planner
+from v3.data.semantic_mapper import SemanticMapper
+from v3.logic.complexity_estimator import ComplexityEstimator
 
 
 def test_complexity_estimator_integration():

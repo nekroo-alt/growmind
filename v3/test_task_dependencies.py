@@ -6,7 +6,7 @@ Tests the dependency tracking and validation functionality.
 import os
 import sqlite3
 import json
-from v1.data.db_manager import (
+from v3.data.db_manager import (
     init_db,
     log_task,
     get_pending_task,

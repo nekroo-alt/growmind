@@ -3,7 +3,7 @@ Test suite for error classification and taxonomy (Task 4.1)
 """
 
 import pytest
-from v2.core.error_handling import (
+from v3.core.error_handling import (
     ErrorCategory,
     ErrorSource,
     ErrorSeverity,

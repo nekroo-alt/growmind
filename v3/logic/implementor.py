@@ -1,20 +1,20 @@
 import os
 import subprocess
 import glob
-from v2.data.db_manager import (
+from v3.data.db_manager import (
     log_activity,
     update_task_status,
     fcid_mapping,
     get_commit_count,
 )
-from v2.logic.git_guard import GitGuard
-from v2.logic.context_engine import ContextEngine
-from v2.llm_base.provider import LLMProvider
-from v2.logic.verifier import Verifier
-from v2.core.telemetry import telemetry
-from v2.data.telemetry_manager import get_telemetry_manager
-from v2.core.logging_config import get_module_logger
-from v2.data.checkpoint_manager import CheckpointManager
+from v3.logic.git_guard import GitGuard
+from v3.logic.context_engine import ContextEngine
+from v3.llm_base.provider import LLMProvider
+from v3.logic.verifier import Verifier
+from v3.core.telemetry import telemetry
+from v3.data.telemetry_manager import get_telemetry_manager
+from v3.core.logging_config import get_module_logger
+from v3.data.checkpoint_manager import CheckpointManager
 
 logger = get_module_logger(__name__)
 

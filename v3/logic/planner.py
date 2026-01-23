@@ -2,15 +2,15 @@ import os
 import glob
 import json
 from typing import Dict, List, Optional
-from v1.data.db_manager import log_task, log_activity, fcid_mapping, task_exists
-from v1.logic.context_engine import ContextEngine
-from v1.logic.task_impact_analyzer import TaskImpactAnalyzer
-from v1.logic.complexity_estimator import ComplexityEstimator
-from v1.data.semantic_mapper import SemanticMapper
-from v1.llm_base.provider import LLMProvider
-from v2.data.telemetry_manager import get_telemetry_manager
-from v2.core.telemetry import telemetry
-from v2.core.logging_config import get_module_logger, log_error_with_context
+from v3.data.db_manager import log_task, log_activity, fcid_mapping, task_exists
+from v3.logic.context_engine import ContextEngine
+from v3.logic.task_impact_analyzer import TaskImpactAnalyzer
+from v3.logic.complexity_estimator import ComplexityEstimator
+from v3.data.semantic_mapper import SemanticMapper
+from v3.llm_base.provider import LLMProvider
+from v3.data.telemetry_manager import get_telemetry_manager
+from v3.core.telemetry import telemetry
+from v3.core.logging_config import get_module_logger, log_error_with_context
 
 logger = get_module_logger(__name__)
 

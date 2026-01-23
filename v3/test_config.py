@@ -10,7 +10,7 @@ import json
 import tempfile
 import pytest
 from pathlib import Path
-from v2.core.config import (
+from v3.core.config import (
     AppConfig,
     LLMConfig,
     CacheConfig,

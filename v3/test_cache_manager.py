@@ -4,7 +4,7 @@ import time
 from pathlib import Path
 import pytest
 
-from v1.data.cache_manager import CacheManager, get_cache_manager
+from v3.data.cache_manager import CacheManager, get_cache_manager
 
 
 class TestCacheManager:

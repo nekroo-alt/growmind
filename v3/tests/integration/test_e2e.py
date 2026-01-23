@@ -21,14 +21,14 @@ import json
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from v2.data.telemetry_manager import TelemetryManager
-from v2.data.checkpoint_manager import CheckpointManager
-from v2.core.session_manager import SessionManager, SessionManager
-from v2.core.error_handling import ErrorType, recovery_strategies
-from v2.core.logging_config import setup_logging, get_logger
-from v2.data.db_manager import DatabaseManager
-from v2.core.graceful_shutdown import GracefulShutdown
-from v2.core.config import Config
+from v3.data.telemetry_manager import TelemetryManager
+from v3.data.checkpoint_manager import CheckpointManager
+from v3.core.session_manager import SessionManager, SessionManager
+from v3.core.error_handling import ErrorType, recovery_strategies
+from v3.core.logging_config import setup_logging, get_logger
+from v3.data.db_manager import DatabaseManager
+from v3.core.graceful_shutdown import GracefulShutdown
+from v3.core.config import Config
 
 
 @pytest.fixture

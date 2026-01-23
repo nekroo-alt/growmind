@@ -2,7 +2,7 @@
 Test script for call graph analysis in SemanticMapper.
 """
 
-from v1.data.semantic_mapper import SemanticMapper
+from v3.data.semantic_mapper import SemanticMapper
 
 # Test code with various function call patterns
 test_code = """

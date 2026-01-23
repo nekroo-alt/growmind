@@ -1,6 +1,6 @@
 import os
 import sys
-from v2.data.db_manager import (
+from v3.data.db_manager import (
     log_activity,
     fcid_mapping,
     init_db,
@@ -10,17 +10,17 @@ from v2.data.db_manager import (
     load_state,
     update_task_status,
 )
-from v2.llm_base.provider import LLMProvider
-from v2.logic.git_guard import GitGuard
-from v2.logic.dispatcher import Dispatcher
-from v2.logic.planner import Planner
-from v2.logic.implementor import Implementor
-from v2.logic.verifier import Verifier
-from v2.core.telemetry import telemetry
-from v2.retro.retro_agent import RetroAgent
-from v2.core.session_manager import get_session_manager, SessionStatus
-from v2.data.checkpoint_manager import CheckpointManager
-from v2.core.logging_config import (
+from v3.llm_base.provider import LLMProvider
+from v3.logic.git_guard import GitGuard
+from v3.logic.dispatcher import Dispatcher
+from v3.logic.planner import Planner
+from v3.logic.implementor import Implementor
+from v3.logic.verifier import Verifier
+from v3.core.telemetry import telemetry
+from v3.retro.retro_agent import RetroAgent
+from v3.core.session_manager import get_session_manager, SessionStatus
+from v3.data.checkpoint_manager import CheckpointManager
+from v3.core.logging_config import (
     get_module_logger,
     log_operation_started,
     log_operation_completed,

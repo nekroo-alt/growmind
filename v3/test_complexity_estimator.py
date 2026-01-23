@@ -2,8 +2,8 @@
 Test script for Complexity Estimator module.
 """
 
-from v1.data.semantic_mapper import SemanticMapper
-from v1.logic.complexity_estimator import ComplexityEstimator, analyze_file_complexity
+from v3.data.semantic_mapper import SemanticMapper
+from v3.logic.complexity_estimator import ComplexityEstimator, analyze_file_complexity
 
 # Test code with varying complexity levels
 test_code = """

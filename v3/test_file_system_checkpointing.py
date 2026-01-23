@@ -16,7 +16,7 @@ from pathlib import Path
 # Add parent directory to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from v2.data.checkpoint_manager import CheckpointManager
+from v3.data.checkpoint_manager import CheckpointManager
 
 
 def test_file_capture():

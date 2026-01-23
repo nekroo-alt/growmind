@@ -25,7 +25,7 @@ from unittest.mock import patch, MagicMock
 from datetime import datetime, timedelta
 
 # Import TelemetryManager
-from v2.data.telemetry_manager import TelemetryManager, get_telemetry_manager
+from v3.data.telemetry_manager import TelemetryManager, get_telemetry_manager
 
 
 @pytest.fixture
@@ -51,7 +51,7 @@ def telemetry_manager(temp_db):
 @pytest.fixture
 def reset_global_telemetry():
     """Reset the global telemetry manager singleton."""
-    from v2.data import telemetry_manager
+    from v3.data import telemetry_manager
 
     with telemetry_manager._telemetry_lock:
         telemetry_manager._telemetry_manager = None

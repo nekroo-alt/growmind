@@ -1,9 +1,9 @@
 import os
 import subprocess
 import ast
-from v1.data.db_manager import log_activity, fcid_mapping
-from v1.data.semantic_mapper import SemanticMapper
-from v2.core.logging_config import get_module_logger
+from v3.data.db_manager import log_activity, fcid_mapping
+from v3.data.semantic_mapper import SemanticMapper
+from v3.core.logging_config import get_module_logger
 
 logger = get_module_logger(__name__)
 

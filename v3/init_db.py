@@ -1,4 +1,4 @@
-from v1.data.db_manager import init_db
+from v3.data.db_manager import init_db
 
 if __name__ == "__main__":
     init_db()
