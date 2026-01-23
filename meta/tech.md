@@ -591,3 +591,596 @@ docs/
 ├── MIGRATION_V2_TO_V3.md      # (V3) Step-by-step migration guide from V2 to V3
 └── TROUBLESHOOTING.md          # (V3) Common issues and solutions
 ```
+
+---
+
+## 11. V4 Module Hierarchy
+
+### 11.1 New V4 Modules in `data/`
+
+| Module | Responsibility |
+| :--- | :--- |
+| **`data/context_hierarchy.py`** (V4) | Hierarchical context management (L0-L3 levels) |
+| **`data/decision_history.py`** (V4) | Decision history tracking with full context |
+
+### 11.2 New V4 Modules in `logic/`
+
+| Module | Responsibility |
+| :--- | :--- |
+| **`logic/context_expander.py`** (V4) | Dynamic context expansion based on task needs |
+| **`logic/context_scorer.py`** (V4) | Relevance scoring for context items |
+| **`logic/context_summarizer.py`** (V4) | Intelligent summarization for higher-level contexts |
+| **`logic/reasoning_engine.py`** (V4) | Adaptive reasoning engine architecture |
+| **`logic/context_analyzer.py`** (V4) | Context analysis for situation assessment |
+| **`logic/decision_maker.py`** (V4) | Decision maker for action selection |
+| **`logic/action_validator.py`** (V4) | Action validator for result verification |
+| **`logic/strategy_selector.py`** (V4) | Adaptive strategy selection based on situation |
+| **`logic/strategy_evaluator.py`** (V4) | Strategy performance tracking and comparison |
+| **`logic/strategy_switcher.py`** (V4) | Adaptive strategy switching |
+| **`logic/strategy_hybridizer.py`** (V4) | Strategy hybridization for complex situations |
+| **`logic/progress_tracker.py`** (V4) | Progress tracking for continuous monitoring |
+| **`logic/progress_predictor.py`** (V4) | Progress prediction for time and resource estimation |
+| **`logic/trap_detector.py`** (V4) | Trap detection (loops, dead ends, circular reasoning) |
+| **`logic/trap_recovery.py`** (V4) | Trap recovery engine for trap resolution |
+| **`logic/trap_prevention.py`** (V4) | Trap prevention mechanisms |
+| **`logic/pattern_recognizer.py`** (V4) | Pattern recognition for decision patterns |
+| **`logic/self_reflection.py`** (V4) | Self-reflection mechanism for continuous improvement |
+| **`logic/lesson_learner.py`** (V4) | Learning from mistakes systematically |
+| **`logic/adaptive_heuristics.py`** (V4) | Adaptive heuristics that improve over time |
+| **`logic/explanation_generator.py`** (V4) | Natural language explanations for decisions |
+| **`data/decision_tracer.py`** (V4) | Decision trace logging and query interface |
+
+---
+
+## 12. V4 Module Descriptions
+
+### Module 24: `data/context_hierarchy.py` (V4 - Hierarchical Context Management)
+Manages multi-level context hierarchy for adaptive reasoning.
+
+*   **Context Levels**: L0 (immediate), L1 (recent), L2 (session), L3 (project)
+*   **Context Queries**: Query any context level with filters and time ranges
+*   **Context Summarization**: Intelligent summarization for higher-level contexts
+*   **Context Caching**: LRU cache for L0/L1 contexts
+*   **Context Propagation**: Define how context propagates between levels
+*   **Key Methods**: `get_context()`, `get_current_action()`, `get_recent_actions()`, `get_session_context()`, `get_project_context()`
+
+### Module 25: `data/decision_history.py` (V4 - Decision History Tracking)
+Tracks all decisions with full context for meta-cognition.
+
+*   **Decision Recording**: Track every decision with context, reasoning, and outcome
+*   **Decision Dependencies**: Track decision dependencies and relationships
+*   **Decision Confidence**: Track confidence and actual success
+*   **Decision Graph**: Build decision graph for pattern analysis
+*   **Export Capabilities**: Export decision history for external analysis
+*   **Key Methods**: `record_decision()`, `get_decision()`, `search_decisions()`, `get_decision_graph()`
+
+### Module 26: `logic/context_expander.py` (V4 - Dynamic Context Expansion)
+Implements intelligent context expansion based on task needs.
+
+*   **Adaptive Expansion**: Start with L0, expand to L1/L2/L3 as needed
+*   **Sufficiency Check**: Validate if current context level is sufficient
+*   **Optimal Level Learning**: Learn optimal context level for different task types
+*   **Expansion Logging**: Log expansion decisions in telemetry
+*   **Key Methods**: `get_context()`, `is_sufficient()`, `expand_context()`
+
+### Module 27: `logic/context_scorer.py` (V4 - Context Relevance Scoring)
+Implements relevance scoring for context items.
+
+*   **Relevance Factors**: Recency, similarity, dependency, impact
+*   **Scoring Algorithm**: Weighted scoring formula: `score = w1*recency + w2*similarity + w3*dependency + w4*impact`
+*   **Dynamic Weighting**: Learn weights from historical success rates
+*   **Context Pruning**: Prune low-relevance items to reduce noise
+*   **Key Methods**: `score_context()`, `rank_context()`, `prune_context()`
+
+### Module 28: `logic/context_summarizer.py` (V4 - Context Summarization)
+Implements intelligent summarization for higher-level contexts.
+
+*   **LLM-Based Summarization**: Use LLM for intelligent summarization
+*   **Summary Templates**: Brief (50-100 words), Detailed (200-300 words), Full
+*   **Quality Tracking**: Track summary quality via downstream success rate
+*   **Cache Invalidation**: Invalidate cache when underlying context changes
+*   **Key Methods**: `summarize()`, `get_summary()`, `invalidate_cache()`
+
+### Module 29: `logic/reasoning_engine.py` (V4 - Adaptive Reasoning Engine)
+Provides adaptive reasoning engine architecture.
+
+*   **Reasoning Pipeline**: Analyze → Decide → Act → Validate
+*   **Reasoning Strategies**: Conservative, Balanced, Aggressive
+*   **Fallback Strategies**: Define fallback strategies for different failure modes
+*   **Reasoning Metrics**: Track confidence, success rate, efficiency
+*   **Key Methods**: `analyze()`, `decide()`, `act()`, `validate()`
+
+### Module 30: `logic/context_analyzer.py` (V4 - Context Analysis)
+Implements context analyzer for situation assessment.
+
+*   **Situation Classification**: Classify situations: normal, error, blocked, uncertain, complex
+*   **Feature Extraction**: Extract error types, patterns, constraints from context
+*   **Action Identification**: Identify potential actions and their risks
+*   **Confidence Estimation**: Estimate confidence for each potential action
+*   **Situation Report**: Generate situation report with recommendations
+*   **Key Methods**: `analyze_situation()`, `classify_situation()`, `estimate_confidence()`
+
+### Module 31: `logic/decision_maker.py` (V4 - Decision Making)
+Implements decision maker for action selection.
+
+*   **Decision Factors**: Success probability, cost, risk, time
+*   **Decision Strategies**: Greedy, Optimal, Safe
+*   **Alternative Evaluation**: Evaluate alternative actions before selecting
+*   **Weighted Scoring**: Use weighted scoring for decision making
+*   **Decision Explanation**: Provide reasoning for decision in natural language
+*   **Key Methods**: `select_action()`, `evaluate_alternatives()`, `explain_decision()`
+
+### Module 32: `logic/action_validator.py` (V4 - Action Validation)
+Implements action validator for result verification.
+
+*   **Validation Criteria**: Goal achievement, side effects, progress, efficiency
+*   **Validation Methods**: Test execution, code review, metrics comparison, user feedback
+*   **Progress Measurement**: Measure progress toward goal
+*   **Corrective Action**: Trigger corrective action if validation fails
+*   **Accuracy Tracking**: Track validation accuracy for continuous improvement
+*   **Key Methods**: `validate_action()`, `check_goal_achievement()`, `measure_progress()`
+
+### Module 33: `logic/strategy_selector.py` (V4 - Strategy Selection)
+Implements adaptive strategy selection based on situation.
+
+*   **Strategy Selection Matrix**: Select strategy based on situation type and task
+*   **Strategy Adaptation**: Adapt strategy based on recent performance
+*   **Strategy Switching**: Switch strategies when current strategy underperforms
+*   **Performance Tracking**: Track strategy performance metrics
+*   **Optimal Learning**: Learn optimal strategy for each task type
+*   **Key Methods**: `select_strategy()`, `should_switch()`, `get_strategy_performance()`
+
+### Module 34: `logic/strategy_evaluator.py` (V4 - Strategy Evaluation)
+Implements strategy performance tracking and comparison.
+
+*   **Performance Metrics**: Track success rate, efficiency, effectiveness per strategy
+*   **Strategy Comparison**: Compare strategies across multiple dimensions
+*   **Strategy Ranking**: Rank strategies for each task and situation type
+*   **Dynamic Updates**: Update rankings based on performance
+*   **Recommendations**: Provide strategy recommendations
+*   **Key Methods**: `track_performance()`, `compare_strategies()`, `rank_strategies()`
+
+### Module 35: `logic/strategy_switcher.py` (V4 - Strategy Switching)
+Implements dynamic strategy switching.
+
+*   **Switch Triggers**: Detect when current strategy underperforms
+*   **Switch Execution**: Switch to better-performing strategy with minimal disruption
+*   **Disruption Minimization**: Minimize disruption when switching strategies
+*   **Switch Validation**: Validate switch success
+*   **Switch Tracking**: Track switch frequency and success
+*   **Key Methods**: `should_switch()`, `switch_strategy()`, `validate_switch()`
+
+### Module 36: `logic/strategy_hybridizer.py` (V4 - Strategy Hybridization)
+Implements strategy hybridization for complex situations.
+
+*   **Hybrid Strategies**: Combine multiple strategies for complex tasks
+*   **Dynamic Adjustment**: Dynamically adjust strategy mix based on progress
+*   **Risk-Based Selection**: Use conservative for high-risk, aggressive for low-risk
+*   **Progress-Based Adjustment**: Conservative when stuck, aggressive when making progress
+*   **Performance Tracking**: Validate hybrid strategy performance
+*   **Key Methods**: `create_hybrid_strategy()`, `adjust_strategy_mix()`, `validate_hybrid()`
+
+### Module 37: `logic/progress_tracker.py` (V4 - Progress Tracking)
+Implements progress tracker for continuous monitoring.
+
+*   **Progress Metrics**: Track code, task, session, and project progress
+*   **Progress Comparison**: Compare progress against expected rates
+*   **Stagnation Detection**: Detect stagnation (no progress for N operations)
+*   **Regression Detection**: Detect regression (negative progress)
+*   **Progress Alerts**: Alert when progress falls below threshold
+*   **Progress Reports**: Generate progress reports
+*   **Key Methods**: `start_tracking()`, `update_progress()`, `check_progress()`, `get_report()`
+
+### Module 38: `logic/progress_predictor.py` (V4 - Progress Prediction)
+Implements progress prediction for time and resource estimation.
+
+*   **Prediction Methods**: Historical average, linear regression, ML model
+*   **Time Prediction**: Predict time to complete current task
+*   **Resource Prediction**: Predict resources needed (tokens, API calls, compute)
+*   **Success Prediction**: Predict probability of successful completion
+*   **Prediction Updates**: Update predictions as work progresses
+*   **Accuracy Tracking**: Track prediction accuracy (MAE, RMSE, MAPE)
+*   **Key Methods**: `predict_completion_time()`, `predict_resources()`, `predict_success()`
+
+### Module 39: `logic/trap_detector.py` (V4 - Trap Detection)
+Implements trap detection (loops, dead ends, circular reasoning).
+
+*   **Loop Detection**: Detect repeated actions (same action 3+ times)
+*   **Dead End Detection**: Detect no progress for extended period
+*   **Circular Reasoning Detection**: Detect reasoning that loops back to start
+*   **Detection Algorithms**: Exact match, similarity match, pattern match
+*   **Trap Alerts**: Alert on trap detection
+*   **Key Methods**: `detect_loop()`, `detect_dead_end()`, `detect_circular_reasoning()`
+
+### Module 40: `logic/trap_recovery.py` (V4 - Trap Recovery)
+Implements recovery engine for trap resolution.
+
+*   **Recovery Strategies**: Select appropriate recovery strategy based on trap type
+*   **Recovery Execution**: Execute recovery action with minimal disruption
+*   **Recovery Validation**: Validate recovery success
+*   **Context Update**: Update context after recovery
+*   **Recovery Learning**: Learn from trap occurrences to prevent future traps
+*   **Key Methods**: `select_recovery_strategy()`, `execute_recovery()`, `validate_recovery()`
+
+### Module 41: `logic/trap_prevention.py` (V4 - Trap Prevention)
+Implements prevention mechanisms to avoid traps.
+
+*   **Loop Prevention**: Track attempted actions to avoid repetition
+*   **Dead End Prevention**: Early progress validation to prevent dead ends
+*   **Circular Reasoning Prevention**: Maintain decision history to prevent cycles
+*   **Scope Creep Prevention**: Freeze task scope to prevent creep
+*   **Warning System**: Warn before high-risk actions
+*   **Learning**: Learn from past traps to prevent recurrence
+*   **Key Methods**: `track_attempted_actions()`, `validate_progress()`, `maintain_decision_history()`
+
+### Module 42: `logic/pattern_recognizer.py` (V4 - Pattern Recognition)
+Implements pattern recognition for decision patterns.
+
+*   **Pattern Types**: Decision patterns, context patterns, success patterns, failure patterns
+*   **Recognition Algorithms**: Sequence mining, association rules, classification
+*   **Pattern Prediction**: Predict optimal decision for given context
+*   **Continuous Updates**: Update patterns continuously from new data
+*   **ML Models**: Use ML models for prediction
+*   **Key Methods**: `recognize_patterns()`, `predict_decision()`, `update_patterns()`
+
+### Module 43: `logic/self_reflection.py` (V4 - Self-Reflection)
+Implements self-reflection mechanism for continuous improvement.
+
+*   **Reflection Triggers**: After task, after error, periodic, on request
+*   **Review Process**: Review recent decisions and identify patterns
+*   **Pattern Identification**: Identify areas for improvement
+*   **Reflection Reports**: Generate self-reflection reports
+*   **Heuristic Updates**: Update heuristics based on learnings
+*   **Key Methods**: `perform_reflection()`, `identify_patterns()`, `generate_report()`
+
+### Module 44: `logic/lesson_learner.py` (V4 - Learning from Mistakes)
+Implements systematic learning from failures.
+
+*   **Failure Recording**: Record every failure with full context
+*   **Root Cause Analysis**: Analyze root cause of each failure
+*   **Pattern Identification**: Identify patterns in failures
+*   **Lesson Extraction**: Generate lessons learned
+*   **Heuristic Updates**: Update decision heuristics to avoid repeated mistakes
+*   **Mistake Tracking**: Track mistake reduction over time
+*   **Key Methods**: `record_failure()`, `analyze_root_cause()`, `extract_lessons()`, `apply_lessons()`
+
+### Module 45: `logic/adaptive_heuristics.py` (V4 - Adaptive Heuristics)
+Implements adaptive heuristics that improve over time.
+
+*   **Baseline Heuristics**: Start with baseline heuristics
+*   **Heuristic Updates**: Update heuristics based on performance data
+*   **Weight Learning**: Learn optimal weights for decision factors
+*   **Threshold Learning**: Learn optimal thresholds for validation
+*   **Strategy Learning**: Learn optimal strategies per situation type
+*   **Learning Algorithms**: Bayesian optimization, reinforcement learning, gradient descent
+*   **Quality Tracking**: Track heuristic quality (success rate, efficiency)
+*   **Key Methods**: `update_heuristics()`, `learn_weights()`, `learn_thresholds()`, `get_heuristics()`
+
+### Module 46: `logic/explanation_generator.py` (V4 - Decision Explanation)
+Implements natural language explanations for decisions.
+
+*   **Explanation Templates**: Brief (1-2 sentences), Detailed (paragraph), Technical
+*   **Explanation Elements**: What action, why chosen, alternatives rejected, confidence, expected outcome
+*   **LLM Generation**: Use LLM for natural language generation
+*   **Audience Tailoring**: Tailor explanation to audience (developer, manager, user)
+*   **Clarity Validation**: Validate explanation clarity and accuracy
+*   **Key Methods**: `generate_explanation()`, `generate_brief()`, `generate_detailed()`
+
+### Module 47: `data/decision_tracer.py` (V4 - Decision Tracing)
+Implements decision trace logging and query interface.
+
+*   **Trace Logging**: Log every decision with full reasoning chain
+*   **Context Logging**: Log context at decision point
+*   **Alternatives Logging**: Log alternatives considered and rejected
+*   **Confidence Logging**: Log confidence and uncertainty
+*   **Query Interface**: Search decisions by task, operation, time range, context, outcome
+*   **Export Capabilities**: Export traces to JSON/CSV for external analysis
+*   **Key Methods**: `log_decision()`, `trace_decision()`, `search_decisions()`, `export_traces()`
+
+---
+
+## 13. V4 Operational Flow
+
+### V4 Operational Flow (Enhanced)
+
+The V4 operational flow adds adaptive reasoning, hierarchical context, trap detection, and meta-cognition:
+
+**Phase 0: Initialization (V3)**
+1. **Setup Logging**: Configure structured logging with `setup_logging()`
+2. **Initialize Telemetry**: Create `TelemetryManager` instance
+3. **Initialize Checkpoint**: Create `CheckpointManager` instance
+4. **Initialize Session**: Create `SessionManager` instance
+5. **Setup Signal Handlers**: Configure graceful shutdown handlers
+
+**Phase 1: Session Detection (V3)**
+1. **Detect Interrupted Sessions**: Check for interrupted sessions on startup
+2. **Offer Resumption**: Prompt user to resume previous session
+3. **Resume or Start New**: Resume existing session or start new one
+
+**Phase 2: Health Check (V3)**
+1. **Run Health Checks**: Check database, git, cache, file system, LLM API
+2. **Validate System State**: Ensure system is in healthy state
+3. **Halt if Unhealthy**: Stop operation if health checks fail
+
+**Phase 3: Hierarchical Context Access (V4)**
+1. **Start with L0**: Query L0 context (current action, current state, last error)
+2. **Assess Sufficiency**: Check if L0 context is sufficient for current task
+3. **Expand to L1**: If L0 insufficient, expand to L1 (last 10 actions, recent telemetry)
+4. **Expand to L2**: If L1 insufficient, expand to L2 (session history, task progress)
+5. **Expand to L3**: If L2 insufficient, expand to L3 (project state, architecture)
+6. **Score Relevance**: Score context items by relevance to current task
+7. **Summarize**: Summarize higher-level contexts (L2, L3) for efficiency
+
+**Phase 4: Adaptive Reasoning (V4)**
+1. **Analyze Context**: Analyze current context to identify situation type
+2. **Select Strategy**: Select reasoning strategy (conservative, balanced, aggressive) based on situation
+3. **Make Decision**: Use decision maker to select best action
+4. **Log Decision**: Log decision with full reasoning chain and alternatives considered
+5. **Generate Explanation**: Generate natural language explanation for decision
+
+**Phase 5: Execution with Telemetry (V3)**
+1. **Create Checkpoint**: Create checkpoint before critical operation
+2. **Start Operation Tracking**: Track operation in telemetry
+3. **Track Progress**: Track progress metrics continuously
+4. **Detect Traps**: Monitor for loops, dead ends, circular reasoning
+5. **Recover from Traps**: If trap detected, execute recovery strategy
+6. **Complete Operation Tracking**: End operation tracking in telemetry
+
+**Phase 6: Action Validation (V4)**
+1. **Validate Result**: Validate that action achieved intended result
+2. **Check Side Effects**: Check for unintended side effects
+3. **Measure Progress**: Measure progress toward goal
+4. **Validate Progress**: Compare progress against expected rates
+5. **Detect Stagnation**: Detect if no progress is being made
+6. **Detect Regression**: Detect if progress is going backwards
+7. **Update Context**: Update context with validation results
+
+**Phase 7: Meta-Cognition (V4)**
+1. **Record Decision**: Record decision with full context in decision history
+2. **Recognize Patterns**: Recognize recurring decision patterns
+3. **Learn from Success**: Update heuristics based on successful decisions
+4. **Learn from Failure**: Extract lessons from failures and update heuristics
+5. **Perform Self-Reflection**: Perform regular self-reflection to identify improvements
+6. **Update Strategies**: Update strategies based on performance data
+
+**Phase 8: Error Handling (V3)**
+1. **Classify Error**: Classify error type (transient, permanent, retryable)
+2. **Apply Recovery Strategy**: Retry with backoff for transient errors
+3. **Rollback on Failure**: Rollback to checkpoint if unrecoverable
+4. **Log Error**: Record error in logs and telemetry
+5. **Show Error Message**: Display interactive error with recovery suggestions
+
+**Phase 9: Session Management (V3)**
+1. **Update Session State**: Track tasks completed, time spent
+2. **Persist Session**: Save session state to disk
+3. **Complete Session**: Mark session as complete or pause
+
+**Phase 10: Cleanup (V3)**
+1. **Garbage Collection**: Clean up old checkpoints
+2. **Archive Data**: Archive old telemetry data
+3. **Rotate Logs**: Rotate log files based on size
+
+---
+
+## 14. V4 Configuration
+
+### Environment Variables
+
+```bash
+# V3 Variables (kept)
+L4_CACHE_DIR=.l4_cache
+L4_CACHE_ENABLED=true
+L4_CACHE_SIZE_MB=100
+L4_MAX_DEPTH=3
+L4_TOKEN_BUDGET=4000
+L4_INCLUDE_TYPE_HINTS=true
+L4_ADD_CONTEXT_COMMENTS=true
+L4_TELEMETRY_ENABLED=true
+L4_TELEMETRY_DB=telemetry.db
+L4_RESOURCE_MONITORING=true
+L4_LOG_LEVEL=INFO
+L4_LOG_FILE=l4.log
+L4_ERROR_LOG_FILE=l4_error.log
+L4_LOG_FILE_MAX_SIZE_MB=10
+L4_LOG_BACKUP_COUNT=5
+L4_LOG_JSON_FORMAT=false
+L4_CHECKPOINT_ENABLED=true
+L4_CHECKPOINT_DIR=checkpoints/
+L4_CHECKPOINT_MAX_COUNT=10
+L4_CHECKPOINT_MAX_AGE_HOURS=24
+L4_SESSION_AUTO_RESUME=true
+L4_SESSION_MAX_SESSIONS=10
+L4_LLM_PROVIDER=openai
+L4_LLM_MODEL=gpt-4
+L4_LLM_TEMPERATURE=0.7
+L4_LLM_API_KEY=your_api_key
+L4_RETRY_MAX_ATTEMPTS=3
+L4_RETRY_BASE_DELAY=1.0
+L4_RETRY_MAX_DELAY=60.0
+L4_RETRY_JITTER=true
+
+# V4 New Variables: Adaptive Reasoning
+L4_ADAPTIVE_REASONING_ENABLED=true         # Enable/disable adaptive reasoning
+L4_REASONING_STRATEGY=balanced             # Default reasoning strategy (conservative, balanced, aggressive)
+L4_REASONING_CONFIDENCE_THRESHOLD=0.7   # Minimum confidence for decision making
+
+# V4 New Variables: Context Hierarchy
+L4_CONTEXT_HIERARCHY_ENABLED=true        # Enable/disable context hierarchy
+L4_CONTEXT_LEVELS=4                      # Number of context levels (L0-L3)
+L4_CONTEXT_TTL_L0=300                     # TTL for L0 context in seconds (5 minutes)
+L4_CONTEXT_TTL_L1=3600                    # TTL for L1 context in seconds (1 hour)
+L4_CONTEXT_CACHE_SIZE_MB=50             # Context cache size limit
+
+# V4 New Variables: Progress Tracking
+L4_PROGRESS_TRACKING_ENABLED=true        # Enable/disable progress tracking
+L4_PROGRESS_CHECK_INTERVAL=5              # Progress check interval in operations
+L4_PROGRESS_MINIMAL_THRESHOLD=0.1        # Minimal progress threshold (10%)
+L4_PROGRESS_EXPECTED_THRESHOLD=0.3       # Expected progress threshold (30%)
+
+# V4 New Variables: Trap Detection
+L4_TRAP_DETECTION_ENABLED=true           # Enable/disable trap detection
+L4_LOOP_DETECTION_THRESHOLD=3             # Loop detection threshold (repetitions)
+L4_DEAD_END_THRESHOLD=5                   # Dead end threshold (no progress operations)
+L4_TRAP_PREVENTION_ENABLED=true         # Enable/disable trap prevention
+
+# V4 New Variables: Meta-Cognition
+L4_META_COGNITION_ENABLED=true           # Enable/disable meta-cognition
+L4_SELF_REFLECTION_INTERVAL=10            # Self-reflection interval (every N operations)
+L4_PATTERN_RECOGNITION_ENABLED=true      # Enable/disable pattern recognition
+L4_LEARNING_ENABLED=true                   # Enable/disable learning from mistakes
+
+# V4 New Variables: Decision Explainability
+L4_DECISION_EXPLAINABILITY_ENABLED=true  # Enable/disable decision explainability
+L4_DECISION_TRACE_ENABLED=true            # Enable/disable decision tracing
+L4_EXPLANATION_FORMAT=detailed            # Default explanation format (brief, detailed, technical)
+```
+
+### Programmatic Configuration
+
+```python
+from v1.logic.context_engine import ContextEngineConfig
+from data.checkpoint_manager import CheckpointPolicy
+from core.error_handling import RetryConfig
+from logic.reasoning_engine import ReasoningConfig
+from logic.trap_detector import TrapDetectionConfig
+from logic.progress_tracker import ProgressConfig
+
+# V2 Configuration
+context_config = ContextEngineConfig(
+    max_traversal_depth=3,
+    token_budget=4000,
+    cache_size_mb=100,
+    include_type_hints=True,
+    add_context_comments=True,
+    cache_enabled=True
+)
+
+# V3 Checkpoint Policy
+checkpoint_policy = CheckpointPolicy(
+    before_task=True,
+    after_task=True,
+    before_refactor=True,
+    after_refactor=True,
+    on_error=True,
+    max_age_hours=24,
+    max_count=10,
+    keep_critical=True
+)
+
+# V3 Retry Configuration
+retry_config = RetryConfig(
+    max_attempts=3,
+    base_delay=1.0,
+    max_delay=60.0,
+    exponential_base=2.0,
+    jitter=True
+)
+
+# V4 Reasoning Configuration
+reasoning_config = ReasoningConfig(
+    enabled=True,
+    default_strategy='balanced',
+    confidence_threshold=0.7,
+    strategies=['conservative', 'balanced', 'aggressive']
+)
+
+# V4 Trap Detection Configuration
+trap_detection_config = TrapDetectionConfig(
+    enabled=True,
+    loop_threshold=3,
+    dead_end_threshold=5,
+    prevention_enabled=True
+)
+
+# V4 Progress Configuration
+progress_config = ProgressConfig(
+    enabled=True,
+    check_interval=5,
+    minimal_threshold=0.1,
+    expected_threshold=0.3
+)
+```
+
+---
+
+## 15. V4 Module Dependencies
+
+```
+core/start.py
+    ├── core/logging_config.py (V3)
+    ├── data/telemetry_manager.py (V3)
+    ├── data/checkpoint_manager.py (V3)
+    ├── data/context_hierarchy.py (V4)
+    ├── data/decision_history.py (V4)
+    ├── core/session_manager.py (V3)
+    ├── core/graceful_shutdown.py (V3)
+    ├── core/health_check.py (V3)
+    └── logic/dispatcher.py (V4 Enhanced)
+            ├── logic/reasoning_engine.py (V4)
+            │       ├── logic/context_analyzer.py (V4)
+            │       │       ├── data/context_hierarchy.py (V4)
+            │       │       └── llm_base/provider.py
+            │       ├── logic/decision_maker.py (V4)
+            │       │       └── data/decision_history.py (V4)
+            │       └── logic/action_validator.py (V4)
+            ├── logic/planner.py (V4 Enhanced)
+            │       ├── logic/context_expander.py (V4)
+            │       │       ├── data/context_hierarchy.py (V4)
+            │       │       └── logic/context_scorer.py (V4)
+            │       ├── logic/context_summarizer.py (V4)
+            │       ├── logic/task_impact_analyzer.py (V2)
+            │       └── logic/complexity_estimator.py (V2)
+            └── logic/implementor.py (V4 Enhanced)
+                    ├── logic/context_engine.py (V2)
+                    ├── logic/progress_tracker.py (V4)
+                    ├── logic/trap_detector.py (V4)
+                    └── logic/trap_recovery.py (V4)
+
+logic/strategy_evaluator.py (V4)
+    ├── logic/strategy_selector.py (V4)
+    └── logic/strategy_switcher.py (V4)
+            └── logic/strategy_hybridizer.py (V4)
+
+logic/pattern_recognizer.py (V4)
+    ├── data/decision_history.py (V4)
+    └── logic/adaptive_heuristics.py (V4)
+
+logic/self_reflection.py (V4)
+    ├── logic/pattern_recognizer.py (V4)
+    ├── logic/lesson_learner.py (V4)
+    └── logic/adaptive_heuristics.py (V4)
+
+logic/explanation_generator.py (V4)
+    ├── data/decision_tracer.py (V4)
+    └── data/decision_history.py (V4)
+
+retro/retro_agent.py
+    └── llm_base/provider.py
+    └── data/db_manager.py
+```
+
+---
+
+## 16. V4 Documentation Structure
+
+```
+docs/
+├── V2_ARCHITECTURE.md
+├── MIGRATION_V1_TO_V2.md
+├── API_REFERENCE.md
+├── PERFORMANCE.md
+├── TELEMETRY.md
+├── LOGGING.md
+├── RESUMABILITY.md
+├── SESSION_MANAGEMENT.md
+├── MIGRATION_V2_TO_V3.md
+├── TROUBLESHOOTING.md
+├── V4_ARCHITECTURE.md                    # (V4) Complete V4 architecture overview
+├── MIGRATION_V3_TO_V4.md                # (V4) Step-by-step migration guide from V3 to V4
+├── ADAPTIVE_REASONING.md                 # (V4) Adaptive reasoning system documentation
+├── TRAP_DETECTION.md                    # (V4) Trap detection and recovery documentation
+├── META_COGNITION.md                    # (V4) Meta-cognition and learning documentation
+├── PROGRESS_TRACKING.md                 # (V4) Progress tracking and validation documentation
+├── DECISION_EXPLAINABILITY.md            # (V4) Decision explainability documentation
+└── STRATEGY_MANAGEMENT.md                # (V4) Strategy management documentation
+```
