@@ -1,7 +1,7 @@
 """
 Context Hierarchy Manager - V4 Adaptive Reasoning System
 
-This module implements hierarchical context management for the L4D V4 adaptive reasoning system.
+This module implements hierarchical context management for L4D V4 adaptive reasoning system.
 It provides multi-level context access (L0-L3) for granular information retrieval and management.
 
 Context Levels:
@@ -19,6 +19,7 @@ from typing import Optional, Dict, List, Any, Tuple
 from datetime import datetime, timedelta
 from pathlib import Path
 import threading
+from collections import OrderedDict
 
 from v3.core.logging_config import get_logger
 
@@ -33,6 +34,102 @@ class ContextLevel:
     L3 = "L3"  # Project context
 
 
+class LRUCache:
+    """
+    Thread-safe LRU cache with custom eviction policy.
+    
+    Features:
+    - LRU eviction when capacity is reached
+    - Thread-safe operations
+    - Cache statistics tracking
+    """
+    
+    def __init__(self, capacity: int):
+        """
+        Initialize LRU cache.
+        
+        Args:
+            capacity: Maximum number of items in cache
+        """
+        self.capacity = capacity
+        self.cache: OrderedDict = OrderedDict()
+        self.hits = 0
+        self.misses = 0
+        self._lock = threading.RLock()
+    
+    def get(self, key: Any) -> Optional[Any]:
+        """
+        Get item from cache.
+        
+        Args:
+            key: Cache key
+        
+        Returns:
+            Cached value or None if not found
+        """
+        with self._lock:
+            if key in self.cache:
+                # Move to end (most recently used)
+                value = self.cache.pop(key)
+                self.cache[key] = value
+                self.hits += 1
+                return value
+            self.misses += 1
+            return None
+    
+    def put(self, key: Any, value: Any):
+        """
+        Put item in cache.
+        
+        Args:
+            key: Cache key
+            value: Value to cache
+        """
+        with self._lock:
+            if key in self.cache:
+                # Update existing
+                self.cache.pop(key)
+            elif len(self.cache) >= self.capacity:
+                # Evict least recently used
+                self.cache.popitem(last=False)
+            
+            self.cache[key] = value
+    
+    def invalidate(self, key: Any):
+        """
+        Invalidate specific cache entry.
+        
+        Args:
+            key: Cache key to invalidate
+        """
+        with self._lock:
+            if key in self.cache:
+                del self.cache[key]
+    
+    def clear(self):
+        """Clear all cache entries."""
+        with self._lock:
+            self.cache.clear()
+    
+    def get_stats(self) -> Dict[str, Any]:
+        """
+        Get cache statistics.
+        
+        Returns:
+            Dictionary with hit rate, size, etc.
+        """
+        with self._lock:
+            total = self.hits + self.misses
+            hit_rate = self.hits / total if total > 0 else 0.0
+            return {
+                'capacity': self.capacity,
+                'size': len(self.cache),
+                'hits': self.hits,
+                'misses': self.misses,
+                'hit_rate': hit_rate
+            }
+
+
 class ContextHierarchyManager:
     """
     Manages hierarchical context storage and retrieval for adaptive reasoning.
@@ -43,6 +140,7 @@ class ContextHierarchyManager:
     - Context summarization support
     - Context propagation between levels
     - Thread-safe operations
+    - LRU caching for L0/L1 contexts
     """
     
     # Default retention policies (in seconds)
@@ -61,15 +159,35 @@ class ContextHierarchyManager:
         ContextLevel.L3: 1000,     # Project history
     }
     
-    def __init__(self, db_path: str = "context_hierarchy.db"):
+    # Default cache capacities
+    DEFAULT_CACHE_CAPACITIES = {
+        ContextLevel.L0: 50,       # Cache 50 L0 items
+        ContextLevel.L1: 200,      # Cache 200 L1 items
+        ContextLevel.L2: 0,        # No caching for L2
+        ContextLevel.L3: 0,        # No caching for L3
+    }
+    
+    def __init__(self, db_path: str = "context_hierarchy.db", cache_capacities: Optional[Dict[str, int]] = None):
         """
         Initialize ContextHierarchyManager.
         
         Args:
             db_path: Path to SQLite database file
+            cache_capacities: Optional cache capacities per level
         """
         self.db_path = db_path
         self._lock = threading.RLock()
+        
+        # Initialize LRU caches
+        capacities = cache_capacities or self.DEFAULT_CACHE_CAPACITIES
+        self._caches: Dict[str, Optional[LRUCache]] = {}
+        for level in [ContextLevel.L0, ContextLevel.L1, ContextLevel.L2, ContextLevel.L3]:
+            capacity = capacities.get(level, 0)
+            if capacity > 0:
+                self._caches[level] = LRUCache(capacity)
+            else:
+                self._caches[level] = None
+        
         self._init_database()
         logger.info(f"ContextHierarchyManager initialized with db_path={db_path}")
     
@@ -186,7 +304,7 @@ class ContextHierarchyManager:
         ttl: Optional[float] = None
     ) -> int:
         """
-        Add a context item to the specified level.
+        Add a context item to specified level.
         
         Args:
             level: Context level (L0, L1, L2, L3)
@@ -197,7 +315,7 @@ class ContextHierarchyManager:
             ttl: Optional time-to-live in seconds (overrides default)
         
         Returns:
-            ID of the inserted context item
+            ID of inserted context item
         """
         with self._lock:
             timestamp = time.time()
@@ -224,19 +342,45 @@ class ContextHierarchyManager:
                 item_id = cursor.lastrowid
                 conn.commit()
                 
+                # Invalidate related cache entries
+                self._invalidate_cache(level)
+                
                 # Clean up old items if limit exceeded
                 self._enforce_limit(conn, level)
                 
                 logger.debug(f"Added context item {item_id} at level {level}")
                 return item_id
     
+    def _invalidate_cache(self, level: str):
+        """
+        Invalidate cache entries for a given level.
+        
+        Args:
+            level: Context level to invalidate
+        """
+        cache = self._caches.get(level)
+        if cache:
+            cache.clear()
+            logger.debug(f"Invalidated cache for level {level}")
+    
     def get_current_action(self) -> Optional[Dict[str, Any]]:
         """
-        Get the current action from L0 context.
+        Get current action from L0 context.
         
         Returns:
             Current action context or None if not found
         """
+        # Check cache first
+        cache_key = ('current_action', ContextLevel.L0)
+        cache = self._caches.get(ContextLevel.L0)
+        
+        if cache:
+            cached = cache.get(cache_key)
+            if cached is not None:
+                logger.debug("Cache hit for current action")
+                return cached
+        
+        # Query from database
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
@@ -248,9 +392,15 @@ class ContextHierarchyManager:
             row = cursor.fetchone()
             if row:
                 if row['compressed']:
-                    return self._decompress_data(row['content'])
+                    content = self._decompress_data(row['content'])
                 else:
-                    return json.loads(row['content'])
+                    content = json.loads(row['content'])
+                
+                # Cache result
+                if cache:
+                    cache.put(cache_key, content)
+                
+                return content
             return None
     
     def get_recent_actions(self, count: int = 10) -> List[Dict[str, Any]]:
@@ -263,6 +413,17 @@ class ContextHierarchyManager:
         Returns:
             List of recent action contexts
         """
+        # Check cache first
+        cache_key = ('recent_actions', ContextLevel.L1, count)
+        cache = self._caches.get(ContextLevel.L1)
+        
+        if cache:
+            cached = cache.get(cache_key)
+            if cached is not None:
+                logger.debug(f"Cache hit for recent actions (count={count})")
+                return cached
+        
+        # Query from database
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
@@ -280,6 +441,10 @@ class ContextHierarchyManager:
                 content['timestamp'] = row['timestamp']
                 actions.append(content)
             
+            # Cache result
+            if cache:
+                cache.put(cache_key, actions)
+            
             return actions
     
     def get_session_context(self) -> Dict[str, Any]:
@@ -289,6 +454,17 @@ class ContextHierarchyManager:
         Returns:
             Session context dictionary with actions, errors, and patterns
         """
+        # Check cache first
+        cache_key = ('session_context', ContextLevel.L2)
+        cache = self._caches.get(ContextLevel.L2)
+        
+        if cache:
+            cached = cache.get(cache_key)
+            if cached is not None:
+                logger.debug("Cache hit for session context")
+                return cached
+        
+        # Query from database
         with self._get_connection() as conn:
             cursor = conn.cursor()
             
@@ -320,11 +496,17 @@ class ContextHierarchyManager:
                 else:
                     errors.append(json.loads(row['content']))
             
-            return {
+            context = {
                 'actions': actions,
                 'errors': errors,
                 'timestamp': time.time()
             }
+            
+            # Cache result
+            if cache:
+                cache.put(cache_key, context)
+            
+            return context
     
     def get_project_context(self) -> Dict[str, Any]:
         """
@@ -333,6 +515,17 @@ class ContextHierarchyManager:
         Returns:
             Project context dictionary with state, architecture, and patterns
         """
+        # Check cache first
+        cache_key = ('project_context', ContextLevel.L3)
+        cache = self._caches.get(ContextLevel.L3)
+        
+        if cache:
+            cached = cache.get(cache_key)
+            if cached is not None:
+                logger.debug("Cache hit for project context")
+                return cached
+        
+        # Query from database
         with self._get_connection() as conn:
             cursor = conn.cursor()
             
@@ -363,6 +556,10 @@ class ContextHierarchyManager:
                 elif row['item_type'] == 'pattern':
                     context['patterns'].append(content)
             
+            # Cache result
+            if cache:
+                cache.put(cache_key, context)
+            
             return context
     
     def get_context(
@@ -384,6 +581,17 @@ class ContextHierarchyManager:
         Returns:
             List of context items
         """
+        # Check cache first for L0 and L1
+        cache_key = ('context', level, count, item_type, time_range)
+        cache = self._caches.get(level)
+        
+        if cache and not time_range:  # Don't cache time-range queries
+            cached = cache.get(cache_key)
+            if cached is not None:
+                logger.debug(f"Cache hit for context query at level {level}")
+                return cached
+        
+        # Query from database
         with self._get_connection() as conn:
             cursor = conn.cursor()
             
@@ -431,6 +639,10 @@ class ContextHierarchyManager:
             # Update access patterns
             self._update_access_pattern(level, 'query')
             
+            # Cache result for L0 and L1 (no time-range queries)
+            if cache and not time_range:
+                cache.put(cache_key, items)
+            
             return items
     
     def store_summary(
@@ -452,7 +664,7 @@ class ContextHierarchyManager:
             ttl: Optional time-to-live in seconds
         
         Returns:
-            ID of the inserted summary
+            ID of inserted summary
         """
         with self._lock:
             timestamp = time.time()
@@ -479,6 +691,9 @@ class ContextHierarchyManager:
                 summary_id = cursor.lastrowid
                 conn.commit()
                 
+                # Invalidate cache for this level
+                self._invalidate_cache(level)
+                
                 logger.debug(f"Stored summary {summary_id} for level {level}")
                 return summary_id
     
@@ -488,7 +703,7 @@ class ContextHierarchyManager:
         summary_type: str = 'detailed'
     ) -> Optional[Dict[str, Any]]:
         """
-        Get the latest summary for a given level.
+        Get latest summary for a given level.
         
         Args:
             level: Context level
@@ -599,6 +814,10 @@ class ContextHierarchyManager:
             summaries_deleted = cursor.rowcount
             
             conn.commit()
+            
+            # Invalidate all caches
+            for level in [ContextLevel.L0, ContextLevel.L1, ContextLevel.L2, ContextLevel.L3]:
+                self._invalidate_cache(level)
             
             total_deleted = items_deleted + summaries_deleted
             if total_deleted > 0:
@@ -716,9 +935,37 @@ class ContextHierarchyManager:
                 for row in cursor.fetchall()
             ]
             
+            # Get cache statistics
+            cache_stats = {}
+            for level in [ContextLevel.L0, ContextLevel.L1, ContextLevel.L2, ContextLevel.L3]:
+                cache = self._caches.get(level)
+                if cache:
+                    cache_stats[level] = cache.get_stats()
+            
             return {
                 'item_counts': level_counts,
                 'summary_counts': summary_counts,
                 'access_patterns': access_patterns,
+                'cache_stats': cache_stats,
                 'timestamp': time.time()
             }
+    
+    def get_cache_stats(self, level: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Get cache statistics for a specific level or all levels.
+        
+        Args:
+            level: Optional context level to get stats for
+        
+        Returns:
+            Cache statistics dictionary
+        """
+        if level:
+            cache = self._caches.get(level)
+            if cache:
+                return cache.get_stats()
+            return {}
+        
+        # Return stats for all levels
+        return {level: cache.get_stats() if cache else {} 
+                for level, cache in self._caches.items()}
