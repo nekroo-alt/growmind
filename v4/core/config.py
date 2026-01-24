@@ -20,6 +20,13 @@ from enum import Enum
 import yaml
 import shutil
 
+# Import configuration validator
+from .config_validator import (
+    validate_config,
+    validate_and_migrate,
+    ValidationResult,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -346,6 +353,26 @@ class ConfigManager:
 
         # Apply environment variable overrides (highest priority)
         config_dict = self._apply_env_overrides(config_dict)
+
+        # Validate configuration using ConfigValidator
+        validation_result = validate_config(config_dict)
+        if not validation_result.is_valid:
+            logger.error("Configuration validation failed:")
+            for error in validation_result.errors:
+                logger.error(f"  [{error.section}.{error.key}] {error.message}")
+                if error.suggestion:
+                    logger.error(f"    Suggestion: {error.suggestion}")
+            logger.info("Resetting to defaults")
+            self._config = AppConfig()
+            return self._config
+
+        # Log warnings
+        for warning in validation_result.warnings:
+            logger.warning(
+                f"[{warning.section}.{warning.key}] {warning.message}"
+            )
+            if warning.suggestion:
+                logger.warning(f"  Suggestion: {warning.suggestion}")
 
         # Validate and create AppConfig object
         try:
