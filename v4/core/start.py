@@ -1,6 +1,6 @@
 import os
 import sys
-from v3.data.db_manager import (
+from data.db_manager import (
     log_activity,
     fcid_mapping,
     init_db,
@@ -10,17 +10,17 @@ from v3.data.db_manager import (
     load_state,
     update_task_status,
 )
-from v3.llm_base.provider import LLMProvider
-from v3.logic.git_guard import GitGuard
-from v3.logic.dispatcher import Dispatcher
-from v3.logic.planner import Planner
-from v3.logic.implementor import Implementor
-from v3.logic.verifier import Verifier
-from v3.core.telemetry import telemetry
-from v3.retro.retro_agent import RetroAgent
-from v3.core.session_manager import get_session_manager, SessionStatus
-from v3.data.checkpoint_manager import CheckpointManager
-from v3.core.logging_config import (
+from llm_base.provider import LLMProvider
+from logic.git_guard import GitGuard
+from logic.dispatcher import Dispatcher
+from logic.planner import Planner
+from logic.implementor import Implementor
+from logic.verifier import Verifier
+from core.telemetry import telemetry
+from retro.retro_agent import RetroAgent
+from core.session_manager import get_session_manager, SessionStatus
+from data.checkpoint_manager import CheckpointManager
+from core.logging_config import (
     get_module_logger,
     log_operation_started,
     log_operation_completed,
@@ -31,9 +31,9 @@ from v3.core.logging_config import (
     log_error_with_context,
 )
 # V4: Adaptive reasoning components
-from v3.data.context_hierarchy import get_context_hierarchy
-from v3.data.decision_history import get_decision_history
-from v3.logic.reasoning_engine import get_reasoning_engine
+from data.context_hierarchy import get_context_hierarchy
+from data.decision_history import get_decision_history
+from logic.reasoning_engine import get_reasoning_engine
 
 logger = get_module_logger(__name__)
 

@@ -6,7 +6,7 @@ Tests the natural language explanation generation for decisions.
 
 import pytest
 import time
-from v3.logic.explanation_generator import (
+from logic.explanation_generator import (
     ExplanationGenerator,
     ExplanationFormat,
     AudienceType,

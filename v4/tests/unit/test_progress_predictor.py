@@ -12,7 +12,7 @@ import os
 from datetime import datetime, timedelta
 from unittest.mock import Mock, patch, MagicMock
 
-from v3.logic.progress_tracker import (
+from logic.progress_tracker import (
     ProgressTracker,
     ProgressMetrics,
     TaskProgressMetrics,
@@ -20,7 +20,7 @@ from v3.logic.progress_tracker import (
     SessionProgressMetrics,
     ProgressMetricType
 )
-from v3.logic.progress_predictor import (
+from logic.progress_predictor import (
     ProgressPredictor,
     TaskPrediction,
     PredictionAccuracy,

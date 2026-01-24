@@ -7,7 +7,7 @@ Tests for trap prevention system which proactively prevents traps before they oc
 import pytest
 from datetime import datetime, timedelta
 
-from v3.logic.trap_prevention import (
+from logic.trap_prevention import (
     TrapPrevention,
     PreventionLevel,
     PreventionType,
@@ -15,7 +15,7 @@ from v3.logic.trap_prevention import (
     TrapPattern,
     create_trap_prevention
 )
-from v3.logic.trap_detector import TrapType
+from logic.trap_detector import TrapType
 
 
 class TestTrapPreventionInitialization:

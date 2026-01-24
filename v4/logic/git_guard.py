@@ -1,5 +1,5 @@
 import subprocess
-from v3.data.db_manager import log_activity, fcid_mapping
+from data.db_manager import log_activity, fcid_mapping
 
 
 class GitGuard:

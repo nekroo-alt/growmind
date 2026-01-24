@@ -21,16 +21,16 @@ from pathlib import Path
 import threading
 from collections import OrderedDict
 
-from v3.core.logging_config import get_logger
+from core.logging_config import get_logger
 
 logger = get_logger(__name__)
 
 # Global singleton instance
-_context_hierarchy_manager: Optional[ContextHierarchyManager] = None
+_context_hierarchy_manager: Optional['ContextHierarchyManager'] = None
 
 
 def get_context_hierarchy(db_path: str = "context_hierarchy.db", 
-                      cache_capacities: Optional[Dict[str, int]] = None) -> ContextHierarchyManager:
+                      cache_capacities: Optional[Dict[str, int]] = None) -> 'ContextHierarchyManager':
     """
     Get or create the global ContextHierarchyManager instance.
     

@@ -6,7 +6,7 @@ recovery strategies, prevention strategies, and reporting functionality.
 """
 
 import pytest
-from v3.logic.trap_detector import (
+from logic.trap_detector import (
     TrapType,
     AntiPatternType,
     TrapSeverity,

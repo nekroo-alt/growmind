@@ -15,7 +15,7 @@ import tempfile
 import os
 import json
 from datetime import datetime, timedelta
-from v3.data.decision_history import DecisionHistoryManager, get_decision_history_manager
+from data.decision_history import DecisionHistoryManager, get_decision_history_manager
 
 
 @pytest.fixture

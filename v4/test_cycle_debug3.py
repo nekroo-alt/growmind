@@ -7,7 +7,7 @@ import os
 # Add v3 to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from v3.logic.trap_prevention import TrapPrevention
+from logic.trap_prevention import TrapPrevention
 
 prevention = TrapPrevention()
 

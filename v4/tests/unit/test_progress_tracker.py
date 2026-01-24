@@ -16,7 +16,7 @@ import os
 import json
 from datetime import datetime, timedelta
 
-from v3.logic.progress_tracker import (
+from logic.progress_tracker import (
     ProgressTracker,
     ProgressMetrics,
     CodeProgressMetrics,

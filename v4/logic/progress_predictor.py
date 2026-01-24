@@ -16,7 +16,7 @@ import math
 from statistics import mean, median, stdev
 
 # Import progress tracker components
-from v3.logic.progress_tracker import (
+from logic.progress_tracker import (
     ProgressMetrics,
     ProgressTracker,
     CodeProgressMetrics,

@@ -1,25 +1,25 @@
 import os
 import subprocess
 import ast
-from v3.data.db_manager import log_activity, fcid_mapping
-from v3.data.semantic_mapper import SemanticMapper
-from v3.core.logging_config import get_module_logger
-from v3.data.telemetry_manager import get_telemetry_manager
+from data.db_manager import log_activity, fcid_mapping
+from data.semantic_mapper import SemanticMapper
+from core.logging_config import get_module_logger
+from data.telemetry_manager import get_telemetry_manager
 # V4: Adaptive reasoning components
-from v3.data.context_hierarchy import get_context_hierarchy
-from v3.data.decision_history import get_decision_history
-from v3.logic.reasoning_engine import get_reasoning_engine
-from v3.logic.action_validator import get_action_validator
-from v3.logic.progress_tracker import get_progress_tracker
-from v3.logic.context_expander import get_context_expander
-from v3.logic.progress_tracker import get_progress_tracker as get_progress_tracker_v4
-from v3.logic.trap_detector import get_trap_detector
-from v3.logic.trap_recovery import get_trap_recovery
+from data.context_hierarchy import get_context_hierarchy
+from data.decision_history import get_decision_history
+from logic.reasoning_engine import get_reasoning_engine
+from logic.action_validator import get_action_validator
+from logic.progress_tracker import get_progress_tracker
+from logic.context_expander import get_context_expander
+from logic.progress_tracker import get_progress_tracker as get_progress_tracker_v4
+from logic.trap_detector import get_trap_detector
+from logic.trap_recovery import get_trap_recovery
 # V4: Meta-cognition components
-from v3.logic.pattern_recognizer import get_pattern_recognizer
-from v3.logic.self_reflection import get_self_reflection
-from v3.logic.lesson_learner import get_lesson_learner
-from v3.logic.adaptive_heuristics import get_adaptive_heuristics
+from logic.pattern_recognizer import get_pattern_recognizer
+from logic.self_reflection import get_self_reflection
+from logic.lesson_learner import get_lesson_learner
+from logic.adaptive_heuristics import get_adaptive_heuristics
 
 logger = get_module_logger(__name__)
 

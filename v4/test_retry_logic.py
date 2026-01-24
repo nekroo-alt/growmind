@@ -12,7 +12,7 @@ Tests cover:
 
 import time
 import pytest
-from v3.core.error_handling import (
+from core.error_handling import (
     RetryConfig,
     CircuitBreaker,
     RetryMetrics,

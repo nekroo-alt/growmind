@@ -663,7 +663,7 @@ def get_module_logger(module_name: str) -> logging.Logger:
         Configured logger instance
 
     Example:
-        >>> from v3.core.logging_config import get_module_logger
+        >>> from core.logging_config import get_module_logger
         >>> logger = get_module_logger(__name__)
         >>> logger.info("Task started", task_id=42)
     """

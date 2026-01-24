@@ -10,7 +10,7 @@ Tests all circular reasoning detection methods:
 
 import unittest
 from datetime import datetime
-from v3.logic.trap_detector import (
+from logic.trap_detector import (
     TrapDetector,
     TrapType,
     TrapSeverity

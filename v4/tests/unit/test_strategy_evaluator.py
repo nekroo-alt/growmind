@@ -7,7 +7,7 @@ import os
 import sqlite3
 import json
 from pathlib import Path
-from v3.logic.strategy_evaluator import (
+from logic.strategy_evaluator import (
     StrategyEvaluator,
     StrategyType,
     SituationType,

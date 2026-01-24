@@ -23,7 +23,7 @@ import sys
 import io
 from datetime import datetime
 
-from v3.core.logging_config import (
+from core.logging_config import (
     LoggingConfig,
     LogMessageTemplates,
     format_log_message,

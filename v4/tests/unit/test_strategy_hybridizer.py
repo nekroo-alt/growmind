@@ -3,7 +3,7 @@ Unit tests for Strategy Hybridizer - V4 Adaptive Reasoning System
 """
 
 import pytest
-from v3.logic.strategy_hybridizer import (
+from logic.strategy_hybridizer import (
     StrategyHybridizer,
     StrategyMix,
     HybridStrategyType,

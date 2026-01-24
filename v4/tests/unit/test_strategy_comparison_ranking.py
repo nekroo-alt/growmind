@@ -16,7 +16,7 @@ import os
 import tempfile
 from typing import List, Dict
 
-from v3.logic.strategy_evaluator import (
+from logic.strategy_evaluator import (
     StrategyEvaluator,
     StrategyType,
     SituationType,

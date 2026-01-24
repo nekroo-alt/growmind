@@ -2,10 +2,10 @@ import os
 import hashlib
 import subprocess
 from typing import List, Dict, Optional, Tuple, Set
-from v3.data.semantic_mapper import SemanticMapper
-from v3.data.cache_manager import get_cache_manager
-from v3.logic.task_impact_analyzer import TaskImpactAnalyzer
-from v3.logic.dependency_traverser import DependencyTraverser
+from data.semantic_mapper import SemanticMapper
+from data.cache_manager import get_cache_manager
+from logic.task_impact_analyzer import TaskImpactAnalyzer
+from logic.dependency_traverser import DependencyTraverser
 
 
 class ContextEngine:

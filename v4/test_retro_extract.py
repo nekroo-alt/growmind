@@ -1,6 +1,6 @@
 import os
 import json
-from v3.retro.retro_agent import RetroAgent
+from retro.retro_agent import RetroAgent
 
 
 class MockLLM:

@@ -3,7 +3,7 @@ import os
 import subprocess
 from rich.console import Console
 from rich.table import Table
-from v3.data.db_manager import TASK_DB_PATH, ACTIVITY_DB_PATH
+from data.db_manager import TASK_DB_PATH, ACTIVITY_DB_PATH
 
 console = Console()
 

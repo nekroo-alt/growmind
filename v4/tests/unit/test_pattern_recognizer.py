@@ -8,7 +8,7 @@ import tempfile
 import shutil
 from datetime import datetime, timedelta
 
-from v3.logic.pattern_recognizer import (
+from logic.pattern_recognizer import (
     PatternRecognizer,
     DecisionPattern,
     PatternPrediction

@@ -19,25 +19,25 @@ import json
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
-from v3.data.context_hierarchy import ContextHierarchyManager, ContextLevel
-from v3.data.decision_history import DecisionHistory
-from v3.data.decision_tracer import DecisionTracer
-from v3.logic.context_expander import ContextExpander
-from v3.logic.reasoning_engine import ReasoningEngine, ReasoningStrategy
-from v3.logic.context_analyzer import ContextAnalyzer, SituationType
-from v3.logic.decision_maker import DecisionMaker, DecisionStrategy
-from v3.logic.action_validator import ActionValidator
-from v3.logic.strategy_selector import StrategySelector
-from v3.logic.strategy_evaluator import StrategyEvaluator
-from v3.logic.progress_tracker import ProgressTracker, ProgressThreshold
-from v3.logic.trap_detector import TrapDetector, TrapType, TrapSeverity
-from v3.logic.trap_recovery import TrapRecovery
-from v3.logic.trap_prevention import TrapPrevention
-from v3.logic.pattern_recognizer import PatternRecognizer
-from v3.logic.self_reflection import SelfReflection
-from v3.logic.lesson_learner import LessonLearner
-from v3.logic.adaptive_heuristics import AdaptiveHeuristics
-from v3.logic.explanation_generator import ExplanationGenerator, ExplanationFormat, AudienceType
+from data.context_hierarchy import ContextHierarchyManager, ContextLevel
+from data.decision_history import DecisionHistory
+from data.decision_tracer import DecisionTracer
+from logic.context_expander import ContextExpander
+from logic.reasoning_engine import ReasoningEngine, ReasoningStrategy
+from logic.context_analyzer import ContextAnalyzer, SituationType
+from logic.decision_maker import DecisionMaker, DecisionStrategy
+from logic.action_validator import ActionValidator
+from logic.strategy_selector import StrategySelector
+from logic.strategy_evaluator import StrategyEvaluator
+from logic.progress_tracker import ProgressTracker, ProgressThreshold
+from logic.trap_detector import TrapDetector, TrapType, TrapSeverity
+from logic.trap_recovery import TrapRecovery
+from logic.trap_prevention import TrapPrevention
+from logic.pattern_recognizer import PatternRecognizer
+from logic.self_reflection import SelfReflection
+from logic.lesson_learner import LessonLearner
+from logic.adaptive_heuristics import AdaptiveHeuristics
+from logic.explanation_generator import ExplanationGenerator, ExplanationFormat, AudienceType
 
 
 class TestAdaptiveReasoningIntegration(unittest.TestCase):

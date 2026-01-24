@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 import json
-from v3.data.semantic_mapper import SemanticMapper
+from data.semantic_mapper import SemanticMapper
 
 # Test code with various type hints
 TEST_CODE = """

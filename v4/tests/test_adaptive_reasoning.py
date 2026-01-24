@@ -20,30 +20,30 @@ import json
 from datetime import datetime, timedelta
 
 # Import V4 components
-from v3.data.context_hierarchy import ContextHierarchyManager
-from v3.logic.context_expander import ContextExpander
-from v3.logic.context_scorer import ContextScorer
-from v3.logic.context_summarizer import ContextSummarizer
-from v3.logic.reasoning_engine import ReasoningEngine
-from v3.logic.context_analyzer import ContextAnalyzer
-from v3.logic.decision_maker import DecisionMaker
-from v3.logic.action_validator import ActionValidator
-from v3.logic.strategy_selector import StrategySelector
-from v3.logic.strategy_evaluator import StrategyEvaluator
-from v3.logic.strategy_switcher import StrategySwitcher
-from v3.logic.strategy_hybridizer import StrategyHybridizer
-from v3.logic.progress_tracker import ProgressTracker
-from v3.logic.progress_predictor import ProgressPredictor
-from v3.logic.trap_detector import TrapDetector
-from v3.logic.trap_recovery import TrapRecovery
-from v3.logic.trap_prevention import TrapPrevention
-from v3.logic.pattern_recognizer import PatternRecognizer
-from v3.logic.self_reflection import SelfReflection
-from v3.logic.lesson_learner import LessonLearner
-from v3.logic.adaptive_heuristics import AdaptiveHeuristics
-from v3.logic.explanation_generator import ExplanationGenerator
-from v3.data.decision_history import DecisionHistory
-from v3.data.decision_tracer import DecisionTracer
+from data.context_hierarchy import ContextHierarchyManager
+from logic.context_expander import ContextExpander
+from logic.context_scorer import ContextScorer
+from logic.context_summarizer import ContextSummarizer
+from logic.reasoning_engine import ReasoningEngine
+from logic.context_analyzer import ContextAnalyzer
+from logic.decision_maker import DecisionMaker
+from logic.action_validator import ActionValidator
+from logic.strategy_selector import StrategySelector
+from logic.strategy_evaluator import StrategyEvaluator
+from logic.strategy_switcher import StrategySwitcher
+from logic.strategy_hybridizer import StrategyHybridizer
+from logic.progress_tracker import ProgressTracker
+from logic.progress_predictor import ProgressPredictor
+from logic.trap_detector import TrapDetector
+from logic.trap_recovery import TrapRecovery
+from logic.trap_prevention import TrapPrevention
+from logic.pattern_recognizer import PatternRecognizer
+from logic.self_reflection import SelfReflection
+from logic.lesson_learner import LessonLearner
+from logic.adaptive_heuristics import AdaptiveHeuristics
+from logic.explanation_generator import ExplanationGenerator
+from data.decision_history import DecisionHistory
+from data.decision_tracer import DecisionTracer
 
 
 class TestContextHierarchy:

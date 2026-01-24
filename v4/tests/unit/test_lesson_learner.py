@@ -17,7 +17,7 @@ import tempfile
 import os
 import sqlite3
 from datetime import datetime, timedelta
-from v3.logic.lesson_learner import (
+from logic.lesson_learner import (
     LessonLearner,
     FailureRecord,
     LessonLearned

@@ -1,6 +1,6 @@
 from typing import Dict, List, Set, Optional, Tuple
 from dataclasses import dataclass
-from ..data.semantic_mapper import SemanticMapper
+from data.semantic_mapper import SemanticMapper
 
 
 @dataclass

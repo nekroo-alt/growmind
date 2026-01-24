@@ -6,7 +6,7 @@ Tests context caching, reuse, fuzzy matching, and incremental updates.
 import os
 import tempfile
 import shutil
-from v3.logic.context_engine import ContextEngine
+from logic.context_engine import ContextEngine
 
 
 def test_context_caching():

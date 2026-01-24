@@ -16,8 +16,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 import threading
 
-from v3.data.context_hierarchy import ContextHierarchyManager, ContextLevel
-from v3.core.logging_config import get_logger
+from data.context_hierarchy import ContextHierarchyManager, ContextLevel
+from core.logging_config import get_logger
 
 logger = get_logger(__name__)
 

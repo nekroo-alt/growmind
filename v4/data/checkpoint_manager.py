@@ -16,13 +16,13 @@ from typing import Optional, Dict, List, Any, ContextManager
 from contextlib import contextmanager
 from pathlib import Path
 
-from v3.data.db_manager import (
+from data.db_manager import (
     SNAPSHOTS_DB_PATH,
     TASK_DB_PATH,
     ACTIVITY_DB_PATH,
     get_db_connection,
 )
-from v3.core.telemetry import telemetry
+from core.telemetry import telemetry
 
 
 class CheckpointManager:
@@ -48,7 +48,7 @@ class CheckpointManager:
 
     def _ensure_db_exists(self):
         """Ensure snapshots database and tables exist."""
-        from v3.data.db_manager import init_db
+        from data.db_manager import init_db
 
         init_db()  # This will create all necessary tables
 
@@ -799,7 +799,7 @@ class CheckpointManager:
 
         try:
             # Try to import and use CacheManager
-            from v3.data.cache_manager import get_cache_manager
+            from data.cache_manager import get_cache_manager
 
             cache_manager = get_cache_manager()
 
@@ -856,7 +856,7 @@ class CheckpointManager:
 
         try:
             # Try to import and use ContextEngine
-            from v3.logic.context_engine import ContextEngine
+            from logic.context_engine import ContextEngine
 
             # Note: We can't easily get a global ContextEngine instance
             # But we can document what state should be captured
@@ -1238,7 +1238,7 @@ class CheckpointManager:
             cache_data: Cache manager state dictionary from checkpoint
         """
         try:
-            from v3.data.cache_manager import get_cache_manager
+            from data.cache_manager import get_cache_manager
 
             cache_manager = get_cache_manager()
 
@@ -1315,7 +1315,7 @@ class CheckpointManager:
             True if cache is consistent
         """
         try:
-            from v3.data.cache_manager import get_cache_manager
+            from data.cache_manager import get_cache_manager
 
             cache_manager = get_cache_manager()
 
@@ -1369,7 +1369,7 @@ class CheckpointManager:
         Clears all cache and marks files for re-analysis.
         """
         try:
-            from v3.data.cache_manager import get_cache_manager
+            from data.cache_manager import get_cache_manager
 
             cache_manager = get_cache_manager()
 

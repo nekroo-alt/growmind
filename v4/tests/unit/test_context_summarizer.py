@@ -20,8 +20,8 @@ from unittest.mock import Mock, patch, MagicMock
 from datetime import datetime
 from pathlib import Path
 
-from v3.logic.context_summarizer import ContextSummarizer, Summary
-from v3.data.context_hierarchy import ContextHierarchyManager, ContextLevel
+from logic.context_summarizer import ContextSummarizer, Summary
+from data.context_hierarchy import ContextHierarchyManager, ContextLevel
 
 
 @pytest.fixture

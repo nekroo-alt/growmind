@@ -1,6 +1,6 @@
 import os
 import uuid
-from v3.data.db_manager import init_db
+from data.db_manager import init_db
 
 PRODUCT_MD_CONTENT = """# Product Design: [Project Name]
 

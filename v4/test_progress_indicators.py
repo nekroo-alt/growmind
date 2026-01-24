@@ -5,7 +5,7 @@ Unit tests for Progress Indicators (Task 6.1)
 import time
 import threading
 import pytest
-from v3.core.ui import (
+from core.ui import (
     ProgressIndicator,
     MultiStepProgress,
     create_progress,

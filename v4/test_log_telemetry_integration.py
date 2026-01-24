@@ -14,7 +14,7 @@ import os
 import json
 from datetime import datetime, timedelta
 
-from v3.data.telemetry_manager import TelemetryManager, get_telemetry_manager
+from data.telemetry_manager import TelemetryManager, get_telemetry_manager
 
 
 class TestLogTelemetryIntegration(unittest.TestCase):

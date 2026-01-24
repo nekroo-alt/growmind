@@ -13,8 +13,8 @@ from pathlib import Path
 # Add v2 to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from v3.data.checkpoint_manager import CheckpointManager, get_checkpoint_manager
-from v3.data.db_manager import init_db
+from data.checkpoint_manager import CheckpointManager, get_checkpoint_manager
+from data.db_manager import init_db
 
 
 def test_checkpoint_manager_basic():

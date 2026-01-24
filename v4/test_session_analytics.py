@@ -11,8 +11,8 @@ from pathlib import Path
 import tempfile
 import os
 
-from v3.core.session_manager import SessionManager, SessionStatus
-from v3.data.telemetry_manager import TelemetryManager
+from core.session_manager import SessionManager, SessionStatus
+from data.telemetry_manager import TelemetryManager
 
 
 @pytest.fixture

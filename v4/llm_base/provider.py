@@ -19,7 +19,7 @@ import json
 import re
 import time
 from typing import Optional, Dict, Any
-from v3.data.telemetry_manager import get_telemetry_manager
+from data.telemetry_manager import get_telemetry_manager
 
 
 class LLMProvider:

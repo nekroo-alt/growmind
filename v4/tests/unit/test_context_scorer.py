@@ -6,7 +6,7 @@ Tests context scoring, ranking, pruning, and learning capabilities.
 
 import pytest
 from datetime import datetime, timedelta
-from v3.logic.context_scorer import (
+from logic.context_scorer import (
     ContextScorer,
     ContextItem,
     ScoringWeights,

@@ -1,8 +1,8 @@
 import os
 import unittest
 from unittest.mock import MagicMock, patch
-from v3.logic.implementor import Implementor
-from v3.data.db_manager import init_db, ACTIVITY_DB_PATH, TASK_DB_PATH
+from logic.implementor import Implementor
+from data.db_manager import init_db, ACTIVITY_DB_PATH, TASK_DB_PATH
 
 
 class TestRefactorSprint(unittest.TestCase):

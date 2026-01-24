@@ -7,7 +7,7 @@ Computes cyclomatic complexity and estimates task effort based on code structure
 
 import ast
 from typing import Dict, List, Optional, Any
-from v3.data.semantic_mapper import SemanticMapper
+from data.semantic_mapper import SemanticMapper
 
 
 class ComplexityEstimator:
@@ -524,7 +524,7 @@ def analyze_file_complexity(file_path: str) -> Dict[str, Any]:
     Returns:
         dict: Comprehensive complexity analysis
     """
-    from v3.data.semantic_mapper import map_file
+    from data.semantic_mapper import map_file
 
     summary = map_file(file_path)
     if not summary:

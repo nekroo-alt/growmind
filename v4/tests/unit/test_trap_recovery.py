@@ -16,7 +16,7 @@ import pytest
 from unittest.mock import Mock, MagicMock, patch
 from datetime import datetime
 
-from v3.logic.trap_recovery import (
+from logic.trap_recovery import (
     RecoveryStrategy,
     RecoveryStatus,
     RecoveryAction,
@@ -24,7 +24,7 @@ from v3.logic.trap_recovery import (
     TrapRecoveryEngine,
     create_trap_recovery_engine
 )
-from v3.logic.trap_detector import (
+from logic.trap_detector import (
     TrapType,
     TrapSeverity,
     TrapDetection,

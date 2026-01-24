@@ -22,7 +22,7 @@ import math
 
 # Import decision history for pattern analysis
 try:
-    from v3.data.decision_history import DecisionHistory
+    from data.decision_history import DecisionHistory
 except ImportError:
     DecisionHistory = None
 

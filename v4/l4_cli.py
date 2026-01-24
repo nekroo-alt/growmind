@@ -13,10 +13,10 @@ L4_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if L4_ROOT not in sys.path:
     sys.path.insert(0, L4_ROOT)
 
-from v3.core.start import Orchestrator
-from v3.data.db_manager import TASK_DB_PATH, ACTIVITY_DB_PATH, init_db, get_cost_summary
-from v3.retro.retro_agent import RetroAgent
-from v3.core.log_analyzer import LogAnalyzer, LogQuery
+from core.start import Orchestrator
+from data.db_manager import TASK_DB_PATH, ACTIVITY_DB_PATH, init_db, get_cost_summary
+from retro.retro_agent import RetroAgent
+from core.log_analyzer import LogAnalyzer, LogQuery
 
 
 def cmd_start(args):
@@ -25,10 +25,10 @@ def cmd_start(args):
 
 
 def cmd_status(args):
-    from v3.core.ui import create_status_dashboard
-    from v3.core.health_check import run_health_check
-    from v3.core.session_manager import SessionManager
-    from v3.data.cache_manager import CacheManager
+    from core.ui import create_status_dashboard
+    from core.health_check import run_health_check
+    from core.session_manager import SessionManager
+    from data.cache_manager import CacheManager
     import psutil
 
     # Try to use enhanced dashboard first
@@ -57,7 +57,7 @@ def cmd_status(args):
         # Gather active operation information
         active_operation = None
         try:
-            from v3.data.telemetry_manager import TelemetryManager
+            from data.telemetry_manager import TelemetryManager
 
             telemetry_mgr = TelemetryManager()
             in_progress_ops = telemetry_mgr.query_operations(
@@ -244,7 +244,7 @@ def cmd_retro(args):
 
 def cmd_doctor(args):
     try:
-        from v3.core.doctor import run_doctor
+        from core.doctor import run_doctor
 
         run_doctor()
     except ImportError:
@@ -255,7 +255,7 @@ def cmd_doctor(args):
 
 
 def cmd_init(args):
-    from v3.core.init import run_init
+    from core.init import run_init
 
     run_init()
 
@@ -429,7 +429,7 @@ def cmd_logs_timeline(args):
 
 def cmd_health(args):
     """Run health checks on system components."""
-    from v3.core.health_check import run_health_check
+    from core.health_check import run_health_check
 
     report = run_health_check(verbose=args.verbose, auto_fix=args.fix)
 
@@ -452,8 +452,8 @@ def cmd_health(args):
 
 def cmd_resume(args):
     """Resume a previous session."""
-    from v3.core.session_manager import SessionManager
-    from v3.data.checkpoint_manager import CheckpointManager
+    from core.session_manager import SessionManager
+    from data.checkpoint_manager import CheckpointManager
 
     session_mgr = SessionManager()
     checkpoint_mgr = CheckpointManager()
@@ -555,7 +555,7 @@ def cmd_resume(args):
 
 def cmd_checkpoints_list(args):
     """List available checkpoints."""
-    from v3.data.checkpoint_manager import CheckpointManager
+    from data.checkpoint_manager import CheckpointManager
 
     checkpoint_mgr = CheckpointManager()
 
@@ -604,7 +604,7 @@ def cmd_checkpoints_list(args):
 
 def cmd_checkpoints_restore(args):
     """Restore from a specific checkpoint."""
-    from v3.data.checkpoint_manager import CheckpointManager
+    from data.checkpoint_manager import CheckpointManager
 
     checkpoint_mgr = CheckpointManager()
 
@@ -690,7 +690,7 @@ def cmd_checkpoints_restore(args):
 
 def cmd_checkpoints_delete(args):
     """Delete a specific checkpoint."""
-    from v3.data.checkpoint_manager import CheckpointManager
+    from data.checkpoint_manager import CheckpointManager
 
     checkpoint_mgr = CheckpointManager()
 
@@ -730,12 +730,12 @@ def cmd_checkpoints_delete(args):
 
 def cmd_sessions_list(args):
     """List available sessions."""
-    from v3.core.session_manager import SessionManager
+    from core.session_manager import SessionManager
 
     session_mgr = SessionManager()
 
     # List sessions with optional filter
-    from v3.core.session_manager import SessionStatus
+    from core.session_manager import SessionStatus
 
     status_filter = None
     if args.status:
@@ -788,7 +788,7 @@ def cmd_sessions_list(args):
 
 def cmd_telemetry_list(args):
     """List and query telemetry operations."""
-    from v3.data.telemetry_manager import get_telemetry_manager
+    from data.telemetry_manager import get_telemetry_manager
     from datetime import datetime, timedelta
 
     telemetry_mgr = get_telemetry_manager()
@@ -877,7 +877,7 @@ def cmd_telemetry_list(args):
 
 def cmd_telemetry_show(args):
     """Show detailed telemetry for an operation."""
-    from v3.data.telemetry_manager import get_telemetry_manager
+    from data.telemetry_manager import get_telemetry_manager
 
     if not args.id:
         print("Error: --id is required to show operation details")
@@ -1018,7 +1018,7 @@ def cmd_telemetry_show(args):
 
 def cmd_telemetry_export(args):
     """Export telemetry data to file."""
-    from v3.data.telemetry_manager import get_telemetry_manager
+    from data.telemetry_manager import get_telemetry_manager
 
     telemetry_mgr = get_telemetry_manager()
 
@@ -1154,7 +1154,7 @@ def cmd_telemetry_export_from_ops(operations, export_path, format="json"):
 
 def cmd_telemetry_stats(args):
     """Show telemetry statistics."""
-    from v3.data.telemetry_manager import get_telemetry_manager
+    from data.telemetry_manager import get_telemetry_manager
 
     telemetry_mgr = get_telemetry_manager()
 
@@ -1222,8 +1222,8 @@ def cmd_telemetry_stats(args):
 
 def cmd_decisions(args):
     """Query and search decision history."""
-    from v3.data.decision_tracer import get_decision_tracer
-    from v3.data.decision_history import get_decision_history
+    from data.decision_tracer import get_decision_tracer
+    from data.decision_history import get_decision_history
     from datetime import datetime, timedelta
 
     tracer = get_decision_tracer()
@@ -1376,9 +1376,9 @@ def cmd_decisions(args):
 
 def cmd_explain(args):
     """Display decision explanation and visualization."""
-    from v3.core.ui import create_decision_visualizer
-    from v3.data.decision_tracer import get_decision_tracer
-    from v3.data.decision_history import get_decision_history
+    from core.ui import create_decision_visualizer
+    from data.decision_tracer import get_decision_tracer
+    from data.decision_history import get_decision_history
 
     visualizer = create_decision_visualizer()
     tracer = get_decision_tracer()
@@ -1524,16 +1524,16 @@ def cmd_explain(args):
 
 def cmd_progress(args):
     """Display progress visualization."""
-    from v3.core.ui import create_progress_visualizer
-    from v3.core.session_manager import SessionManager
-    from v3.data.telemetry_manager import get_telemetry_manager
-    from v3.logic.progress_tracker import ProgressTracker
+    from core.ui import create_progress_visualizer
+    from core.session_manager import SessionManager
+    from data.telemetry_manager import get_telemetry_manager
+    from logic.progress_tracker import ProgressTracker
 
     visualizer = create_progress_visualizer()
 
     # Task progress
     if args.task:
-        from v3.data.db_manager import TASK_DB_PATH
+        from data.db_manager import TASK_DB_PATH
         import sqlite3
 
         if os.path.exists(TASK_DB_PATH):
@@ -1716,7 +1716,7 @@ def cmd_progress(args):
 
     # Project progress
     elif args.project:
-        from v3.data.db_manager import TASK_DB_PATH
+        from data.db_manager import TASK_DB_PATH
         import sqlite3
 
         if os.path.exists(TASK_DB_PATH):
@@ -1779,8 +1779,8 @@ def cmd_progress(args):
 
 def cmd_report_generate(args):
     """Generate analytics reports."""
-    from v3.data.telemetry_manager import get_telemetry_manager
-    from v3.data.db_manager import get_cost_summary
+    from data.telemetry_manager import get_telemetry_manager
+    from data.db_manager import get_cost_summary
     from datetime import datetime, timedelta
     import json
 
@@ -1960,8 +1960,8 @@ def cmd_report_generate(args):
 
 def cmd_recover(args):
     """Interactive recovery wizard."""
-    from v3.core.session_manager import SessionManager
-    from v3.data.checkpoint_manager import CheckpointManager
+    from core.session_manager import SessionManager
+    from data.checkpoint_manager import CheckpointManager
 
     session_mgr = SessionManager()
     checkpoint_mgr = CheckpointManager()

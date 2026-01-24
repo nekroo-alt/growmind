@@ -5,7 +5,7 @@ Tests for Verifier context validation methods (Task 5.4)
 import os
 import tempfile
 import unittest
-from v3.logic.verifier import Verifier
+from logic.verifier import Verifier
 
 
 class TestVerifierContextValidation(unittest.TestCase):
@@ -121,7 +121,7 @@ def write_file(path, content):
         with open(impl_file, "w") as f:
             f.write(impl_code)
 
-        from v3.data.semantic_mapper import SemanticMapper
+        from data.semantic_mapper import SemanticMapper
 
         with open(impl_file, "r") as f:
             mapper = SemanticMapper(f.read())
@@ -144,7 +144,7 @@ def process():
         with open(impl_file, "w") as f:
             f.write(impl_code)
 
-        from v3.data.semantic_mapper import SemanticMapper
+        from data.semantic_mapper import SemanticMapper
 
         with open(impl_file, "r") as f:
             mapper = SemanticMapper(f.read())
@@ -186,7 +186,7 @@ def test_double():
         with open(test_file, "w") as f:
             f.write(test_code)
 
-        from v3.data.semantic_mapper import SemanticMapper
+        from data.semantic_mapper import SemanticMapper
 
         with open(impl_file, "r") as f:
             mapper = SemanticMapper(f.read())
@@ -202,7 +202,7 @@ def test_double():
         with open(impl_file, "w") as f:
             f.write("def test(): pass\n")
 
-        from v3.data.semantic_mapper import SemanticMapper
+        from data.semantic_mapper import SemanticMapper
 
         with open(impl_file, "r") as f:
             mapper = SemanticMapper(f.read())
@@ -237,7 +237,7 @@ def test_public_func_a():
         with open(test_file, "w") as f:
             f.write(test_code)
 
-        from v3.data.semantic_mapper import SemanticMapper
+        from data.semantic_mapper import SemanticMapper
 
         with open(impl_file, "r") as f:
             mapper = SemanticMapper(f.read())

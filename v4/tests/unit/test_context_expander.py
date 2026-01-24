@@ -15,13 +15,13 @@ import tempfile
 import os
 from unittest.mock import Mock, MagicMock, patch
 
-from v3.logic.context_expander import (
+from logic.context_expander import (
     ContextExpander,
     TaskType,
     ContextSufficiencyResult,
     ExpansionDecision
 )
-from v3.data.context_hierarchy import ContextHierarchyManager, ContextLevel
+from data.context_hierarchy import ContextHierarchyManager, ContextLevel
 
 
 @pytest.fixture
