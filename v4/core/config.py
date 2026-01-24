@@ -13,11 +13,12 @@ for the L4D development platform. It supports:
 import json
 import os
 import logging
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Tuple
 from pathlib import Path
 from dataclasses import dataclass, field, asdict
 from enum import Enum
 import yaml
+import shutil
 
 logger = logging.getLogger(__name__)
 
@@ -168,11 +169,111 @@ class AppConfig:
             logger.warning(f"Unknown profile: {self.profile}, using custom")
 
 
+class SmartDefaults:
+    """Smart default configuration based on auto-detection."""
+
+    @staticmethod
+    def detect_project_size() -> str:
+        """
+        Detect project size.
+
+        Returns:
+            Project size category: small, medium, or large
+        """
+        try:
+            python_files = list(Path(".").rglob("*.py"))
+            file_count = len(python_files)
+
+            # Count lines of code
+            total_lines = 0
+            for file_path in python_files:
+                try:
+                    with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                        lines = f.readlines()
+                        total_lines += sum(
+                            1 for line in lines if line.strip() and not line.strip().startswith("#")
+                        )
+                except Exception:
+                    pass
+
+            # Classify project size
+            if file_count < 50 and total_lines < 5000:
+                return "small"
+            elif file_count < 200 and total_lines < 20000:
+                return "medium"
+            else:
+                return "large"
+        except Exception as e:
+            logger.warning(f"Failed to detect project size: {e}")
+            return "medium"
+
+    @staticmethod
+    def get_available_disk_space() -> int:
+        """
+        Get available disk space.
+
+        Returns:
+            Disk space in GB
+        """
+        try:
+            usage = shutil.disk_usage(os.getcwd())
+            return usage.free // (1024 ** 3)
+        except Exception as e:
+            logger.warning(f"Failed to detect disk space: {e}")
+            return 50  # Default assumption
+
+    @staticmethod
+    def get_defaults() -> Dict[str, Any]:
+        """
+        Get smart defaults based on system detection.
+
+        Returns:
+            Dictionary of smart default configuration
+        """
+        # Detect project size
+        project_size = SmartDefaults.detect_project_size()
+        logger.info(f"Detected project size: {project_size}")
+
+        # Detect available disk space
+        disk_space = SmartDefaults.get_available_disk_space()
+        logger.info(f"Available disk space: {disk_space} GB")
+
+        # Calculate cache size (project-based, limited by disk space)
+        cache_size_map = {"small": 50, "medium": 100, "large": 200}
+        base_cache_size = cache_size_map.get(project_size, 100)
+        max_cache_from_disk = min(500, disk_space * 1024 // 10)  # Max 500MB or 10% of free space
+        cache_size = min(base_cache_size, max_cache_from_disk)
+
+        # Determine optimal depth
+        max_depth = 3 if project_size != "large" else 2
+
+        # Determine token budget
+        token_budget_map = {"small": 2000, "medium": 3000, "large": 4000}
+        token_budget = token_budget_map.get(project_size, 3000)
+
+        # Determine LLM model (prefer cheaper models for smaller projects)
+        llm_model = "gpt-3.5-turbo" if project_size == "small" else "gpt-4"
+
+        logger.info(f"Smart defaults: cache={cache_size}MB, depth={max_depth}, tokens={token_budget}, model={llm_model}")
+
+        return {
+            "project_size": project_size,
+            "cache_size_mb": cache_size,
+            "max_depth": max_depth,
+            "token_budget": token_budget,
+            "llm_model": llm_model,
+            "cache_enabled": True,
+            "adaptive_reasoning": True,
+            "progress_tracking": True,
+            "trap_detection": True,
+        }
+
+
 class ConfigManager:
     """Manages configuration loading, saving, and validation."""
 
     DEFAULT_CONFIG_FILE = ".l4_config"
-    CONFIG_VERSION = "3.0.0"
+    CONFIG_VERSION = "5.0.0"
 
     def __init__(self, config_file: Optional[str] = None):
         """
@@ -329,18 +430,35 @@ class ConfigManager:
         return self._config
 
     def _get_default_config(self) -> Dict[str, Any]:
-        """Get default configuration as dictionary."""
-        return {
+        """Get default configuration as dictionary with smart defaults."""
+        # Apply smart defaults
+        smart_defaults = SmartDefaults.get_defaults()
+
+        # Build base config with smart defaults applied
+        base_config = {
             "version": self.CONFIG_VERSION,
-            "profile": "dev",
-            "llm": asdict(LLMConfig()),
-            "cache": asdict(CacheConfig()),
+            "profile": "balanced",  # Default to balanced profile
+            "llm": asdict(LLMConfig(model=smart_defaults["llm_model"])),
+            "cache": asdict(
+                CacheConfig(
+                    enabled=smart_defaults["cache_enabled"],
+                    max_size_mb=smart_defaults["cache_size_mb"],
+                )
+            ),
             "logging": asdict(LoggingConfig()),
             "telemetry": asdict(TelemetryConfig()),
             "checkpoint": asdict(CheckpointConfig()),
             "session": asdict(SessionConfig()),
-            "custom": {},
+            "custom": {
+                "project_size": smart_defaults["project_size"],
+                "adaptive_reasoning": smart_defaults["adaptive_reasoning"],
+                "progress_tracking": smart_defaults["progress_tracking"],
+                "trap_detection": smart_defaults["trap_detection"],
+            },
         }
+
+        logger.info("Applied smart defaults based on auto-detection")
+        return base_config
 
     def _parse_config_file(self, file_handle) -> Dict[str, Any]:
         """Parse configuration file (JSON or YAML)."""
@@ -414,6 +532,44 @@ class ConfigManager:
         # Only load if not already loaded
         if not self._profiles:
             self._profiles = {
+                # V5 Built-in Profiles
+                "minimal": {
+                    "description": "Minimal configuration for small projects",
+                    "llm": {"model": "gpt-3.5-turbo", "temperature": 0.7},
+                    "cache": {"enabled": True, "max_size_mb": 50},
+                    "logging": {"level": "INFO"},
+                    "telemetry": {"enabled": True},
+                    "custom": {
+                        "adaptive_reasoning": False,
+                        "progress_tracking": False,
+                        "trap_detection": False,
+                    },
+                },
+                "balanced": {
+                    "description": "Balanced configuration for most use cases",
+                    "llm": {"model": "gpt-4", "temperature": 0.7},
+                    "cache": {"enabled": True, "max_size_mb": 100},
+                    "logging": {"level": "INFO"},
+                    "telemetry": {"enabled": True},
+                    "custom": {
+                        "adaptive_reasoning": True,
+                        "progress_tracking": True,
+                        "trap_detection": True,
+                    },
+                },
+                "max": {
+                    "description": "Maximum features for large projects",
+                    "llm": {"model": "gpt-4", "temperature": 0.5},
+                    "cache": {"enabled": True, "max_size_mb": 500},
+                    "logging": {"level": "DEBUG"},
+                    "telemetry": {"enabled": True},
+                    "custom": {
+                        "adaptive_reasoning": True,
+                        "progress_tracking": True,
+                        "trap_detection": True,
+                    },
+                },
+                # Legacy V3/V4 Profiles
                 "dev": {
                     "llm": {"temperature": 0.7},
                     "cache": {"enabled": True},

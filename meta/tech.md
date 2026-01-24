@@ -1187,3 +1187,520 @@ docs/
 ├── DECISION_EXPLAINABILITY.md            # (V4) Decision explainability documentation
 └── STRATEGY_MANAGEMENT.md                # (V4) Strategy management documentation
 ```
+
+---
+
+## 17. V5 Module Hierarchy
+
+### 17.1 New V5 Modules in `data/`
+
+| Module | Responsibility |
+| :--- | :--- |
+| **`data/call_graph_persistence.py`** (V5) | Persistent call graph storage across sessions |
+| **`data/llm_cache_manager.py`** (V5) | LLM response caching with TTL and semantic matching |
+| **`data/usage_tracker.py`** (V5) | File and code usage tracking across sessions |
+| **`data/dependency_analyzer.py`** (V5) | Import dependency analysis and circular dependency detection |
+| **`data/cost_tracker.py`** (V5) | Cost tracking and reporting for LLM API usage |
+| **`data/context_quality_tracker.py`** (V5) | Context quality metrics tracking and improvement |
+
+### 17.2 New V5 Modules in `logic/`
+
+| Module | Responsibility |
+| :--- | :--- |
+| **`logic/housekeeper.py`** (V5) | Dead code detection, cleanup, and maintenance |
+| **`logic/dead_code_detector.py`** (V5) | Detect dead functions, classes, variables, and files |
+| **`logic/safe_deleter.py`** (V5) | Safe deletion pipeline with backup and rollback |
+| **`logic/dependency_cleaner.py`** (V5) | Unused dependency detection and removal |
+| **`logic/cost_optimizer.py`** (V5) | Cost optimization strategies and implementation |
+| **`logic/local_decision_maker.py`** (V5) | Local decision making without LLM for simple scenarios |
+| **`logic/context_compressor.py`** (V5) | Context compression at multiple levels |
+| **`logic/token_budget_manager.py`** (V5) | Adaptive token budget management |
+| **`logic/progressive_context_loader.py`** (V5) | Progressive context loading from minimal to full |
+| **`logic/context_quality_analyzer.py`** (V5) | Context quality analysis and improvement suggestions |
+| **`logic/config_wizard.py`** (V5) | Interactive configuration wizard for setup |
+
+### 17.3 New V5 Modules in `core/`
+
+| Module | Responsibility |
+| :--- | :--- |
+| **`core/interactive_mode.py`** (V5) | Interactive mode for beginner-friendly experience |
+| **`core/cost_reporter.py`** (V5) | Cost reporting and trend analysis |
+| **`core/quality_reporter.py`** (V5) | Context quality reporting and analysis |
+
+---
+
+## 18. V5 Module Descriptions
+
+### Module 48: `data/call_graph_persistence.py` (V5 - Persistent Call Graphs)
+Stores and retrieves call graph data across sessions for code usage analysis.
+
+*   **Call Graph Storage**: Persist call graphs in SQLite for cross-session analysis
+*   **Incremental Updates**: Update call graph as code changes
+*   **Usage Tracking**: Track function/class usage frequency across sessions
+*   **Query Interface**: Query usage statistics, identify unused code
+*   **Key Methods**: `store_call_graph()`, `get_call_graph()`, `get_usage_stats()`, `find_unused_code()`
+
+### Module 49: `data/llm_cache_manager.py` (V5 - LLM Response Caching)
+Caches LLM responses to reduce API costs.
+
+*   **Response Caching**: Cache responses based on prompt hash
+*   **TTL Support**: Time-to-live expiration for cached responses
+*   **Semantic Matching**: Use embeddings for similarity-based caching
+*   **Context Invalidation**: Invalidate cache when related files change
+*   **Cache Statistics**: Track hit rate, savings, size
+*   **Key Methods**: `get_cached_response()`, `cache_response()`, `invalidate_for_files()`, `get_stats()`
+
+### Module 50: `data/usage_tracker.py` (V5 - Usage Tracking)
+Tracks file and code usage across sessions.
+
+*   **File Usage Tracking**: Track which files are accessed and modified
+*   **Code Usage Tracking**: Track which functions/classes are called
+*   **Usage Statistics**: Calculate usage frequency, recency, trends
+*   **Identification**: Identify unused files, functions, classes
+*   **Key Methods**: `track_file_access()`, `track_code_usage()`, `get_usage_report()`, `find_unused_code()`
+
+### Module 51: `data/dependency_analyzer.py` (V5 - Dependency Analysis)
+Analyzes import dependencies and detects circular dependencies.
+
+*   **Import Analysis**: Analyze import statements across project
+*   **Dependency Mapping**: Map module dependencies and dependency depth
+*   **Circular Detection**: Detect circular import dependencies
+*   **Unused Detection**: Identify unused imports
+*   **Key Methods**: `analyze_imports()`, `get_dependency_graph()`, `detect_circular_deps()`, `find_unused_imports()`
+
+### Module 52: `data/cost_tracker.py` (V5 - Cost Tracking)
+Tracks and reports LLM API costs.
+
+*   **Cost Recording**: Record costs per LLM call (tokens, model, provider)
+*   **Cost Aggregation**: Aggregate costs by task, session, project
+*   **Cost Trends**: Track cost increase/decrease over time
+*   **Cost Prediction**: Predict future costs based on usage patterns
+*   **Cost Alerts**: Alert when approaching budget limits
+*   **Key Methods**: `record_cost()`, `get_cost_report()`, `get_cost_trend()`, `predict_cost()`
+
+### Module 53: `data/context_quality_tracker.py` (V5 - Context Quality Tracking)
+Tracks context quality metrics for continuous improvement.
+
+*   **Quality Metrics**: Track completeness, relevance, freshness, conciseness, diversity
+*   **Quality Scoring**: Calculate overall context quality score
+*   **Correlation Analysis**: Correlate quality with task success rate
+*   **Improvement Tracking**: Track quality improvements over time
+*   **Key Methods**: `record_context()`, `calculate_quality_score()`, `get_quality_report()`
+
+### Module 54: `logic/housekeeper.py` (V5 - Housekeeping Agent)
+Orchestrates dead code detection and cleanup operations.
+
+*   **Dead Code Detection**: Coordinate detection of dead functions, classes, files
+*   **Usage Analysis**: Analyze code usage patterns across sessions
+*   **Cleanup Orchestration**: Coordinate safe deletion and cleanup
+*   **Dependency Cleanup**: Coordinate unused dependency removal
+*   **Data Cleanup**: Coordinate old checkpoint, log, and telemetry cleanup
+*   **Key Methods**: `detect_dead_code()`, `cleanup_dead_code()`, `cleanup_dependencies()`, `cleanup_data()`
+
+### Module 55: `logic/dead_code_detector.py` (V5 - Dead Code Detection)
+Detects dead code (functions, classes, variables, files).
+
+*   **Function Detection**: Identify never-called functions, test-only functions, low-usage functions
+*   **Class Detection**: Identify unused classes, abstract bases, mixins
+*   **Variable Detection**: Identify unused local variables, class attributes, module variables
+*   **File Detection**: Identify unused files, rarely accessed files
+*   **Confidence Scoring**: Score confidence for each detection
+*   **Key Methods**: `detect_dead_functions()`, `detect_dead_classes()`, `detect_dead_variables()`, `detect_dead_files()`
+
+### Module 56: `logic/safe_deleter.py` (V5 - Safe Deletion)
+Implements safe deletion pipeline with backup and rollback.
+
+*   **Deletion Pipeline**: Backup → Test → Delete → Validate → Rollback if needed
+*   **Backup Creation**: Create backups before deletion
+*   **Test Execution**: Run tests after deletion to verify no breakage
+*   **Rollback Support**: Rollback if tests fail or issues detected
+*   **Validation**: Validate deletion was successful
+*   **Key Methods**: `safe_delete()`, `create_backup()`, `run_tests()`, `rollback()`
+
+### Module 57: `logic/dependency_cleaner.py` (V5 - Dependency Cleanup)
+Detects and removes unused dependencies.
+
+*   **Unused Detection**: Identify unused dependencies (imports, packages)
+*   **Safe Removal**: Remove dependencies with backup and rollback
+*   **Test Validation**: Run tests after removal to verify no breakage
+*   **Circular Detection**: Identify and report circular dependencies
+*   **Key Methods**: `detect_unused_dependencies()`, `safe_remove_dependencies()`, `detect_circular_deps()`
+
+### Module 58: `logic/cost_optimizer.py` (V5 - Cost Optimization)
+Implements cost optimization strategies.
+
+*   **LLM Call Caching**: Use LLM cache to reduce API calls
+*   **Local Decision Making**: Make decisions locally without LLM when possible
+*   **Token Budget Management**: Optimize token usage per task
+*   **Cost Analysis**: Analyze cost drivers and optimization opportunities
+*   **Key Methods**: `enable_caching()`, `optimize_local_decisions()`, `manage_token_budget()`, `analyze_costs()`
+
+### Module 59: `logic/local_decision_maker.py` (V5 - Local Decision Making)
+Makes decisions locally without LLM for simple scenarios.
+
+*   **Rule-Based Decisions**: Implement decision trees for common patterns
+*   **Decision Trees**: Define decision trees for different scenarios
+*   **Fallback to LLM**: Use LLM for complex, ambiguous decisions
+*   **Accuracy Tracking**: Track local decision accuracy over time
+*   **Key Methods**: `make_decision()`, `should_use_llm()`, `get_accuracy()`
+
+### Module 60: `logic/context_compressor.py` (V5 - Context Compression)
+Compresses context at multiple levels to reduce token usage.
+
+*   **Level 1 Compression**: Remove comments, docstrings, whitespace (20-30% reduction)
+*   **Level 2 Compression**: Summarize functions with signatures only (40-50% reduction)
+*   **Level 3 Compression**: Summarize entire files (60-70% reduction)
+*   **Preservation Rules**: Always preserve signatures, imports, critical logic
+*   **Key Methods**: `compress_level1()`, `compress_level2()`, `compress_level3()`
+
+### Module 61: `logic/token_budget_manager.py` (V5 - Token Budget Management)
+Manages adaptive token budgets based on task complexity.
+
+*   **Dynamic Budgeting**: Adjust token budget based on task complexity
+*   **Progressive Expansion**: Start with minimal budget, expand if needed
+*   **Budget Learning**: Learn optimal budgets per task type from history
+*   **Budget Enforcement**: Enforce budget limits with intelligent pruning
+*   **Key Methods**: `get_budget()`, `expand_budget()`, `learn_optimal_budget()`
+
+### Module 62: `logic/progressive_context_loader.py` (V5 - Progressive Context Loading)
+Loads context progressively from minimal to full.
+
+*   **Minimal Starter**: Start with L0 (immediate) context only
+*   **Progressive Expansion**: Expand to L1, L2, L3 as needed
+*   **Sufficiency Check**: Validate if current context level is sufficient
+*   **Optimal Learning**: Learn optimal context levels per task type
+*   **Key Methods**: `load_context()`, `expand_context()`, `is_sufficient()`
+
+### Module 63: `logic/context_quality_analyzer.py` (V5 - Context Quality Analysis)
+Analyzes context quality and suggests improvements.
+
+*   **Quality Metrics**: Calculate completeness, relevance, freshness, conciseness, diversity
+*   **Quality Scoring**: Calculate overall context quality score
+*   **Improvement Suggestions**: Suggest context improvements
+*   **Automated Application**: Apply high-confidence improvements automatically
+*   **Key Methods**: `analyze_quality()`, `generate_score()`, `suggest_improvements()`
+
+### Module 64: `logic/config_wizard.py` (V5 - Configuration Wizard)
+Interactive configuration wizard for first-time setup.
+
+*   **Interactive Setup**: Guide users through configuration interactively
+*   **Auto-Detection**: Auto-detect project size, resources, budget
+*   **Intelligent Defaults**: Set optimal defaults based on detection
+*   **Profile Selection**: Guide users to select appropriate profile
+*   **Key Methods**: `run_wizard()`, `detect_project()`, `set_defaults()`
+
+### Module 65: `core/interactive_mode.py` (V5 - Interactive Mode)
+Provides beginner-friendly interactive mode.
+
+*   **Interactive Commands**: Interactive prompts for common operations
+*   **Helpful Prompts**: Clear prompts with explanations and examples
+*   **Progress Feedback**: Real-time progress updates
+*   **Error Recovery**: Helpful error messages with recovery suggestions
+*   **Key Methods**: `run_interactive()`, `prompt_user()`, `show_progress()`
+
+### Module 66: `core/cost_reporter.py` (V5 - Cost Reporting)
+Generates cost reports and trend analysis.
+
+*   **Cost Reports**: Generate cost reports by task, session, project
+*   **Cost Trends**: Show cost trends over time with visualizations
+*   **Cost Predictions**: Predict future costs based on usage patterns
+*   **Cost Alerts**: Alert when approaching budget limits
+*   **Key Methods**: `generate_report()`, `show_trend()`, `predict_future()`
+
+### Module 67: `core/quality_reporter.py` (V5 - Quality Reporting)
+Generates context quality reports and analysis.
+
+*   **Quality Reports**: Generate context quality reports with metrics
+*   **Quality Trends**: Show quality improvements over time
+*   **Correlation Analysis**: Correlate quality with task success rate
+*   **Recommendations**: Provide quality improvement recommendations
+*   **Key Methods**: `generate_report()`, `show_trend()`, `correlate_with_success()`
+
+---
+
+## 19. V5 Operational Flow
+
+### V5 Operational Flow (Enhanced)
+
+The V5 operational flow adds progressive context, cost optimization, and housekeeping:
+
+**Phase 0: Initialization (V5 Enhanced)**
+1. **Configuration Wizard**: Run config wizard for first-time users
+2. **Smart Defaults**: Apply intelligent defaults based on project detection
+3. **Setup Logging**: Configure structured logging
+4. **Initialize Components**: Initialize V3 components + V5 cost and quality trackers
+
+**Phase 1: Session Detection (V3)**
+1. **Detect Interrupted Sessions**: Check for interrupted sessions
+2. **Offer Resumption**: Prompt user to resume previous session
+3. **Resume or Start New**: Resume existing session or start new one
+
+**Phase 2: Progressive Context Loading (V5)**
+1. **Start with L0**: Load minimal context (current file and dependencies)
+2. **Assess Sufficiency**: Check if L0 context is sufficient
+3. **Expand as Needed**: Expand to L1, L2, L3 only when needed
+4. **Compress Context**: Apply context compression to reduce tokens
+5. **Enforce Budget**: Enforce token budget with intelligent pruning
+6. **Check Cache**: Check LLM cache for cached responses
+
+**Phase 3: Local Decision Making (V5)**
+1. **Check for Local Decision**: Can decision be made locally?
+2. **Apply Decision Tree**: Apply rule-based decision tree if possible
+3. **Fallback to LLM**: Use LLM only for complex, ambiguous decisions
+4. **Track Accuracy**: Track local decision accuracy over time
+
+**Phase 4: Cost Optimization (V5)**
+1. **Use Cached Responses**: Use LLM cache when available
+2. **Minimize Tokens**: Use minimal token budget, expand only if needed
+3. **Track Costs**: Track cost for each operation
+4. **Generate Reports**: Generate cost reports periodically
+
+**Phase 5: Execution (V4 Enhanced + V5)**
+1. **Create Checkpoint**: Create checkpoint before critical operation
+2. **Track Progress**: Track progress metrics continuously
+3. **Detect Traps**: Monitor for loops, dead ends, circular reasoning
+4. **Track Quality**: Track context quality metrics
+5. **Complete Operation**: End operation tracking
+6. **Record Costs**: Record costs in cost tracker
+
+**Phase 6: Action Validation (V4)**
+1. **Validate Result**: Validate that action achieved intended result
+2. **Check Side Effects**: Check for unintended side effects
+3. **Measure Progress**: Measure progress toward goal
+4. **Validate Progress**: Compare progress against expected rates
+
+**Phase 7: Housekeeping (V5)**
+1. **Track Usage**: Track file and code usage across sessions
+2. **Detect Dead Code**: Detect dead functions, classes, files periodically
+3. **Cleanup Data**: Cleanup old checkpoints, logs, telemetry
+4. **Update Call Graph**: Update persistent call graph with new code
+
+**Phase 8: Meta-Cognition (V4 Enhanced + V5)**
+1. **Record Decision**: Record decision with full context
+2. **Recognize Patterns**: Recognize recurring decision patterns
+3. **Learn from Success**: Update heuristics based on successful decisions
+4. **Learn from Failure**: Extract lessons from failures
+5. **Perform Self-Reflection**: Perform regular self-reflection
+6. **Optimize Cost**: Learn cost optimization strategies
+
+**Phase 9: Session Management (V3 + V5)**
+1. **Update Session State**: Track tasks completed, costs, quality
+2. **Generate Reports**: Generate cost and quality reports
+3. **Persist Session**: Save session state to disk
+4. **Complete Session**: Mark session as complete or pause
+
+**Phase 10: Cleanup (V3 + V5)**
+1. **Garbage Collection**: Clean up old checkpoints
+2. **Archive Data**: Archive old telemetry data
+3. **Rotate Logs**: Rotate log files based on size
+4. **Housekeeping**: Run periodic housekeeping tasks
+
+---
+
+## 20. V5 Configuration
+
+### Environment Variables (Simplified - V5)
+
+```bash
+# Essential Variables Only (V5: 70% reduction from V4)
+L4_PROFILE=balanced                      # Profile: minimal, balanced, max (auto-detected by default)
+L4_LLM_PROVIDER=openai                # LLM provider
+L4_LLM_MODEL=gpt-4                   # LLM model
+L4_LLM_API_KEY=your_api_key           # LLM API key
+
+# Optional: Override Auto-Detection
+L4_AUTO_DETECT=true                    # Auto-detect project settings (default: true)
+L4_PROJECT_SIZE=medium                 # Override project size: small, medium, large
+
+# Optional: Cost Controls
+L4_COST_BUDGET=100                    # Monthly cost budget in USD
+L4_COST_ALERT_THRESHOLD=0.8            # Alert when 80% of budget used
+
+# Optional: Context Control
+L4_START_CONTEXT_LEVEL=0               # Start context level: 0-3 (default: 0)
+L4_MAX_TOKEN_BUDGET=4000              # Maximum token budget (auto-adjusted by default)
+
+# Optional: Housekeeping
+L4_AUTO_HOUSEKEEP=true                 # Enable automatic housekeeping (default: true)
+L4_HOUSEKEEP_INTERVAL=24               # Housekeeping interval in hours (default: 24)
+
+# Optional: Caching
+L4_LLM_CACHE_ENABLED=true             # Enable LLM response caching (default: true)
+L4_CACHE_TTL_HOURS=24                 # Cache TTL in hours (default: 24)
+
+# Optional: Debugging (V4+ variables still available)
+L4_LOG_LEVEL=INFO                      # Log level (default: INFO)
+L4_DEBUG=false                         # Enable debug mode (default: false)
+```
+
+### Configuration Profiles (V5)
+
+**Minimal Profile (for small projects, low budget)**:
+```python
+{
+    "context_start_level": 0,
+    "max_token_budget": 2000,
+    "llm_cache_enabled": true,
+    "local_decisions": true,
+    "housekeeping": true,
+    "cost_tracking": true
+}
+```
+
+**Balanced Profile (default for most projects)**:
+```python
+{
+    "context_start_level": 0,
+    "max_token_budget": 4000,
+    "llm_cache_enabled": true,
+    "local_decisions": true,
+    "housekeeping": true,
+    "cost_tracking": true,
+    "progressive_context": true
+}
+```
+
+**Max Profile (for complex projects, high budget)**:
+```python
+{
+    "context_start_level": 1,
+    "max_token_budget": 8000,
+    "llm_cache_enabled": true,
+    "local_decisions": false,
+    "housekeeping": true,
+    "cost_tracking": true,
+    "progressive_context": true,
+    "adaptive_reasoning": true
+}
+```
+
+### CLI Commands (V5 Enhanced)
+
+```bash
+# Initialization
+l4-dev init                         # Initialize with wizard
+l4-dev config wizard                 # Run configuration wizard
+
+# Development
+l4-dev start                         # Start development (auto-detects profile)
+l4-dev start --interactive          # Start in interactive mode
+l4-dev start --profile minimal       # Use minimal profile
+
+# Housekeeping
+l4-dev housekeep --dry-run          # Preview deletions
+l4-dev housekeep --auto            # Automatic safe deletion
+l4-dev cleanup --dry-run            # Preview cleanup
+l4-dev deps --unused                # Show unused dependencies
+l4-dev deps --cleanup                # Safe removal
+
+# Cost Management
+l4-dev cost --report              # Show cost report
+l4-dev cost --by-task             # Cost per task
+l4-dev cost --trend               # Cost trends over time
+l4-dev cost --predict              # Predict future costs
+
+# Quality
+l4-dev quality --report            # Show quality report
+l4-dev quality --trend            # Quality trends over time
+
+# Session Management
+l4-dev session list                 # List sessions
+l4-dev session resume               # Resume session
+l4-dev session report              # Session report
+
+# Workflows
+l4-dev workflow simple              # Simple feature implementation
+l4-dev workflow complex             # Complex feature with planning
+l4-dev workflow debug              # Debug failing tests
+l4-dev workflow refactor           # Refactor code
+```
+
+---
+
+## 21. V5 Module Dependencies
+
+```
+core/start.py (V5 Enhanced)
+    ├── core/config_wizard.py (V5)
+    ├── data/cost_tracker.py (V5)
+    ├── data/context_quality_tracker.py (V5)
+    ├── core/interactive_mode.py (V5)
+    └── [V4 dependencies]
+
+logic/dispatcher.py (V5 Enhanced)
+    ├── logic/progressive_context_loader.py (V5)
+    ├── logic/local_decision_maker.py (V5)
+    ├── logic/cost_optimizer.py (V5)
+    ├── logic/housekeeper.py (V5)
+    └── [V4 dependencies]
+
+logic/planner.py (V5 Enhanced)
+    ├── logic/token_budget_manager.py (V5)
+    ├── logic/context_compressor.py (V5)
+    └── [V4 dependencies]
+
+logic/implementor.py (V5 Enhanced)
+    ├── data/llm_cache_manager.py (V5)
+    ├── logic/progressive_context_loader.py (V5)
+    ├── logic/local_decision_maker.py (V5)
+    └── [V4 dependencies]
+
+logic/verifier.py (V5 Enhanced)
+    ├── logic/context_quality_analyzer.py (V5)
+    └── [V4 dependencies]
+
+logic/housekeeper.py (V5 - New)
+    ├── logic/dead_code_detector.py (V5)
+    │       ├── data/call_graph_persistence.py (V5)
+    │       ├── data/usage_tracker.py (V5)
+    │       └── logic/planner.py
+    ├── logic/safe_deleter.py (V5)
+    │       ├── data/checkpoint_manager.py (V3)
+    │       └── logic/verifier.py
+    ├── logic/dependency_cleaner.py (V5)
+    │       ├── data/dependency_analyzer.py (V5)
+    │       └── logic/verifier.py
+    └── [V3 cleanup modules]
+
+core/cost_reporter.py (V5)
+    ├── data/cost_tracker.py (V5)
+    └── [V3 reporting modules]
+
+core/quality_reporter.py (V5)
+    ├── data/context_quality_tracker.py (V5)
+    └── [V3 reporting modules]
+```
+
+---
+
+## 22. V5 Documentation Structure
+
+```
+docs/
+├── V2_ARCHITECTURE.md
+├── MIGRATION_V1_TO_V2.md
+├── API_REFERENCE.md
+├── PERFORMANCE.md
+├── TELEMETRY.md
+├── LOGGING.md
+├── RESUMABILITY.md
+├── SESSION_MANAGEMENT.md
+├── MIGRATION_V2_TO_V3.md
+├── TROUBLESHOOTING.md
+├── V4_ARCHITECTURE.md
+├── MIGRATION_V3_TO_V4.md
+├── ADAPTIVE_REASONING.md
+├── TRAP_DETECTION.md
+├── META_COGNITION.md
+├── PROGRESS_TRACKING.md
+├── DECISION_EXPLAINABILITY.md
+├── STRATEGY_MANAGEMENT.md
+├── V5_ARCHITECTURE.md                    # (V5) Complete V5 architecture overview
+├── MIGRATION_V4_TO_V5.md                # (V5) Step-by-step migration guide from V4 to V5
+├── QUICKSTART.md                         # (V5) Quick start guide for new users
+├── HOUSEKEEPING.md                       # (V5) Housekeeping capabilities documentation
+├── COST_OPTIMIZATION.md                  # (V5) Cost optimization documentation
+├── CONFIGURATION.md                      # (V5) Configuration guide
+├── INTERACTIVE_MODE.md                   # (V5) Interactive mode documentation
+└── QUALITY_MANAGEMENT.md                 # (V5) Quality management documentation
+```
