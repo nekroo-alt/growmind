@@ -53,6 +53,7 @@ class FailureAnalysis:
     suggested_prevention: str
     severity: str  # 'low', 'medium', 'high', 'critical'
     analyzed_at: str
+    lesson_id: Optional[str] = None  # Reference to associated lesson
 
 
 class LessonLearner:
@@ -223,7 +224,7 @@ class LessonLearner:
     def _classify_failure_type(self, context: Dict[str, Any], 
                                error_message: str = None) -> str:
         """
-        Classify the type of failure
+        Classify type of failure
         
         Args:
             context: Context dictionary
@@ -232,27 +233,28 @@ class LessonLearner:
         Returns:
             Failure type string
         """
-        # Check error message first
+        # Check error message first (highest priority)
         if error_message:
-            if 'timeout' in error_message.lower():
+            error_msg_lower = error_message.lower()
+            if 'timeout' in error_msg_lower:
                 return 'timeout_failure'
-            elif 'connection' in error_message.lower():
+            elif 'connection' in error_msg_lower:
                 return 'connection_failure'
-            elif 'permission' in error_message.lower() or 'access' in error_message.lower():
+            elif 'permission' in error_msg_lower or 'access' in error_msg_lower:
                 return 'permission_failure'
-            elif 'memory' in error_message.lower():
+            elif 'memory' in error_msg_lower:
                 return 'memory_failure'
-            elif 'invalid' in error_message.lower() or 'validation' in error_message.lower():
+            elif 'invalid' in error_msg_lower or 'validation' in error_msg_lower:
                 return 'validation_failure'
         
-        # Check context
-        situation = context.get('situation_type', '')
-        if 'error' in situation.lower():
-            if 'loop' in context.get('detected_traps', []):
-                return 'loop_failure'
-            elif 'dead_end' in context.get('detected_traps', []):
-                return 'dead_end_failure'
+        # Check context for trap-based failures
+        detected_traps = context.get('detected_traps', [])
+        if 'loop' in detected_traps:
+            return 'loop_failure'
+        elif 'dead_end' in detected_traps:
+            return 'dead_end_failure'
         
+        # Check task type for context-based classification
         task_type = context.get('task_type', '')
         if 'planning' in task_type:
             return 'planning_failure'
@@ -387,6 +389,13 @@ class LessonLearner:
         Returns:
             Severity string ('low', 'medium', 'high', 'critical')
         """
+        # Check error count first for severity adjustment
+        error_count = context.get('recent_error_count', 0)
+        if error_count > 5:
+            return 'critical'
+        elif error_count > 3:
+            return 'high'
+        
         # Critical failures
         if failure_type in ['permission_failure', 'memory_failure']:
             return 'critical'
@@ -398,13 +407,6 @@ class LessonLearner:
         # Medium severity failures
         if failure_type in ['loop_failure', 'dead_end_failure', 'implementation_failure']:
             return 'medium'
-        
-        # Check error count for severity adjustment
-        error_count = context.get('recent_error_count', 0)
-        if error_count > 5:
-            return 'critical'
-        elif error_count > 3:
-            return 'high'
         
         # Default
         return 'low'
@@ -454,9 +456,13 @@ class LessonLearner:
             # Update existing lesson
             lesson_id = similar_lessons[0]['lesson_id']
             self._update_lesson(lesson_id, analysis)
+            # Update analysis object with lesson_id
+            analysis.lesson_id = lesson_id
         else:
             # Create new lesson
-            self._create_lesson_from_failure(analysis)
+            lesson_id = self._create_lesson_from_failure(analysis)
+            # Update analysis object with lesson_id
+            analysis.lesson_id = lesson_id
     
     def _find_similar_lessons(self, analysis: FailureAnalysis) -> List[Dict[str, Any]]:
         """
@@ -521,12 +527,15 @@ class LessonLearner:
             
             conn.commit()
     
-    def _create_lesson_from_failure(self, analysis: FailureAnalysis):
+    def _create_lesson_from_failure(self, analysis: FailureAnalysis) -> str:
         """
         Create a new lesson from a failure
         
         Args:
             analysis: FailureAnalysis object
+            
+        Returns:
+            lesson_id: ID of created lesson
         """
         lesson = LessonLearned(
             lesson_id=str(uuid.uuid4()),
@@ -552,6 +561,8 @@ class LessonLearner:
                 WHERE failure_id = ?
             ''', (lesson.lesson_id, analysis.failure_id))
             conn.commit()
+        
+        return lesson.lesson_id
     
     def _save_lesson(self, lesson: LessonLearned):
         """
@@ -761,7 +772,9 @@ class LessonLearner:
             ''')
             result = cursor.fetchone()
             if result:
-                total_applied, total_avoided, total_attempts = result
+                total_applied = result[0] or 0
+                total_avoided = result[1] or 0
+                total_attempts = result[2] or 0
                 avoidance_rate = total_avoided / total_applied if total_applied > 0 else 0.0
             else:
                 total_applied = 0
@@ -855,7 +868,8 @@ class LessonLearner:
                     contributing_factors=json.loads(row[5]),
                     suggested_prevention=row[6],
                     severity=row[7],
-                    analyzed_at=row[8]
+                    analyzed_at=row[8],
+                    lesson_id=row[9]
                 )
                 failures.append(failure)
             
