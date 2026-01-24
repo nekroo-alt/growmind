@@ -810,7 +810,7 @@ class StrategySelector:
             strategy: Strategy that succeeded
         """
         # Only update if we don't have a learned strategy yet,
-        # or if the current one has performed worse than this one
+        # or if current one has performed worse than this one
         current_optimal = self.learned_optimal_strategies.get(task_type)
         
         if current_optimal is None:
@@ -832,3 +832,288 @@ class StrategySelector:
             logger.info(
                 f"Updated optimal strategy (task_type={task_type}, from={current_optimal.value}, to={strategy.value}, new_rate={new_perf.success_rate:.2%}, old_rate={current_perf.success_rate:.2%})"
             )
+    
+    def validate_switch(
+        self,
+        switch_event: StrategySwitchEvent,
+        post_switch_performance: List[Dict[str, Any]],
+        min_samples: int = 3
+    ) -> Tuple[bool, float, str]:
+        """
+        Validate that a strategy switch was successful
+        
+        Args:
+            switch_event: The switch event to validate
+            post_switch_performance: Performance data after the switch
+            min_samples: Minimum samples needed for validation
+            
+        Returns:
+            Tuple of (success, improvement_score, reason)
+        """
+        logger.info(
+            f"Validating strategy switch (from={switch_event.from_strategy.value}, to={switch_event.to_strategy.value})"
+        )
+        
+        # Need minimum samples for validation
+        if len(post_switch_performance) < min_samples:
+            return (
+                False,
+                0.0,
+                f"Insufficient samples for validation ({len(post_switch_performance)} < {min_samples})"
+            )
+        
+        # Get performance before and after switch
+        before_perf = self.strategy_performance[switch_event.from_strategy]
+        after_perf = self.strategy_performance[switch_event.to_strategy]
+        
+        # Calculate improvement metrics
+        # 1. Success rate improvement
+        success_rate_improvement = (
+            after_perf.success_rate - before_perf.success_rate
+        )
+        
+        # 2. Efficiency improvement
+        efficiency_improvement = (
+            after_perf.average_efficiency - before_perf.average_efficiency
+        )
+        
+        # 3. Calculate recent success rate (post-switch)
+        recent_successes = sum(
+            1 for p in post_switch_performance if p["success"]
+        )
+        recent_total = len(post_switch_performance)
+        recent_success_rate = recent_successes / recent_total
+        
+        # Calculate improvement score (weighted combination)
+        improvement_score = (
+            0.5 * success_rate_improvement +
+            0.3 * efficiency_improvement +
+            0.2 * recent_success_rate
+        )
+        
+        # Determine if switch was successful
+        success = improvement_score > 0.1  # At least 10% improvement
+        
+        # Generate reason
+        if success:
+            reason_parts = [
+                f"Success rate improved by {success_rate_improvement:.2%}"
+            ]
+            if efficiency_improvement > 0:
+                reason_parts.append(
+                    f"efficiency improved by {efficiency_improvement:.2%}"
+                )
+            reason_parts.append(
+                f"recent success rate: {recent_success_rate:.2%}"
+            )
+            reason = ", ".join(reason_parts)
+        else:
+            reason_parts = []
+            if success_rate_improvement < 0:
+                reason_parts.append(
+                    f"Success rate decreased by {abs(success_rate_improvement):.2%}"
+                )
+            if efficiency_improvement < 0:
+                reason_parts.append(
+                    f"efficiency decreased by {abs(efficiency_improvement):.2%}"
+                )
+            if recent_success_rate < before_perf.success_rate:
+                reason_parts.append(
+                    f"recent success rate ({recent_success_rate:.2%}) worse than before ({before_perf.success_rate:.2%})"
+                )
+            reason = ", ".join(reason_parts) if reason_parts else "No significant improvement"
+        
+        # Update switch event with validation results
+        switch_event.success = success
+        time_elapsed = (
+            datetime.now() - switch_event.timestamp
+        ).total_seconds()
+        switch_event.time_to_validate = time_elapsed
+        
+        logger.info(
+            f"Switch validation complete (success={success}, improvement_score={improvement_score:.3f}, reason={reason})"
+        )
+        
+        # Track validation in telemetry
+        if self.telemetry:
+            self.telemetry.record_event(
+                event_type="strategy_switch_validated",
+                severity="info",
+                context={
+                    "from_strategy": switch_event.from_strategy.value,
+                    "to_strategy": switch_event.to_strategy.value,
+                    "success": success,
+                    "improvement_score": improvement_score,
+                    "reason": reason,
+                    "time_to_validate": time_elapsed
+                }
+            )
+        
+        return success, improvement_score, reason
+    
+    def get_switch_statistics(self) -> Dict[str, Any]:
+        """
+        Get statistics about strategy switches
+        
+        Returns:
+            Dictionary with switch statistics
+        """
+        if not self.switch_history:
+            return {
+                "total_switches": 0,
+                "switch_frequency": 0.0,
+                "success_rate": 0.0,
+                "average_improvement": 0.0,
+                "switches_by_strategy": {},
+                "switches_by_reason": {}
+            }
+        
+        total_switches = len(self.switch_history)
+        
+        # Calculate switch frequency (switches per hour in last 24h)
+        now = datetime.now()
+        recent_switches = [
+            s for s in self.switch_history
+            if (now - s.timestamp).total_seconds() <= 86400  # 24 hours
+        ]
+        switch_frequency = len(recent_switches) / 24.0  # switches per hour
+        
+        # Calculate success rate of switches
+        successful_switches = sum(1 for s in self.switch_history if s.success)
+        switch_success_rate = (
+            successful_switches / total_switches
+            if total_switches > 0
+            else 0.0
+        )
+        
+        # Calculate average improvement (for successful switches)
+        successful_switches_with_perf = [
+            s for s in self.switch_history if s.success
+        ]
+        if successful_switches_with_perf:
+            # Estimate improvement from performance metrics
+            improvements = []
+            for switch in successful_switches_with_perf:
+                before_perf = self.strategy_performance[switch.from_strategy]
+                after_perf = self.strategy_performance[switch.to_strategy]
+                improvement = after_perf.success_rate - before_perf.success_rate
+                improvements.append(improvement)
+            average_improvement = sum(improvements) / len(improvements)
+        else:
+            average_improvement = 0.0
+        
+        # Count switches by strategy
+        switches_by_strategy = {}
+        for switch in self.switch_history:
+            key = f"{switch.from_strategy.value} -> {switch.to_strategy.value}"
+            switches_by_strategy[key] = switches_by_strategy.get(key, 0) + 1
+        
+        # Count switches by reason
+        switches_by_reason = {}
+        for switch in self.switch_history:
+            reason = switch.reason
+            switches_by_reason[reason] = switches_by_reason.get(reason, 0) + 1
+        
+        return {
+            "total_switches": total_switches,
+            "switch_frequency": switch_frequency,
+            "success_rate": switch_success_rate,
+            "average_improvement": average_improvement,
+            "switches_by_strategy": switches_by_strategy,
+            "switches_by_reason": switches_by_reason
+        }
+    
+    def get_optimal_switch_points(
+        self,
+        task_type: Optional[str] = None,
+        situation_type: Optional[SituationType] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Get learned optimal switch points based on historical data
+        
+        Args:
+            task_type: Optional task type to filter by
+            situation_type: Optional situation type to filter by
+            
+        Returns:
+            List of optimal switch points with conditions
+        """
+        optimal_points = []
+        
+        # Analyze successful switches to find patterns
+        successful_switches = [
+            s for s in self.switch_history
+            if s.success
+        ]
+        
+        if not successful_switches:
+            return optimal_points
+        
+        # Group by task type if specified
+        if task_type:
+            successful_switches = [
+                s for s in successful_switches
+                if s.context.get("task_type") == task_type
+            ]
+        
+        # Group by situation type if specified
+        if situation_type:
+            successful_switches = [
+                s for s in successful_switches
+                if s.context.get("situation_type") == situation_type.value
+            ]
+        
+        # Find common patterns in successful switches
+        # Pattern 1: Success rate threshold
+        success_rate_switches = [
+            s for s in successful_switches
+            if "Success rate" in s.reason or "success rate" in s.reason.lower()
+        ]
+        if success_rate_switches:
+            # Extract success rate threshold from reasons
+            threshold_matches = []
+            for switch in success_rate_switches:
+                import re
+                match = re.search(r'(\d+(?:\.\d+)?)%', switch.reason)
+                if match:
+                    threshold_matches.append(float(match.group(1)) / 100)
+            
+            if threshold_matches:
+                avg_threshold = sum(threshold_matches) / len(threshold_matches)
+                optimal_points.append({
+                    "condition": "success_rate_below_threshold",
+                    "threshold": avg_threshold,
+                    "frequency": len(success_rate_switches),
+                    "description": f"Switch when success rate drops below {avg_threshold:.1%}"
+                })
+        
+        # Pattern 2: Repeated errors
+        error_switches = [
+            s for s in successful_switches
+            if "Repeated errors" in s.reason or "repeated" in s.reason.lower()
+        ]
+        if error_switches:
+            optimal_points.append({
+                "condition": "repeated_errors",
+                "threshold": 3,
+                "frequency": len(error_switches),
+                "description": "Switch after 3+ consecutive errors"
+            })
+        
+        # Pattern 3: Stagnation
+        stagnation_switches = [
+            s for s in successful_switches
+            if "Stagnation" in s.reason or "stagnation" in s.reason.lower()
+        ]
+        if stagnation_switches:
+            optimal_points.append({
+                "condition": "stagnation",
+                "threshold": 5,
+                "frequency": len(stagnation_switches),
+                "description": "Switch when no progress for 5+ operations"
+            })
+        
+        # Sort by frequency (most common first)
+        optimal_points.sort(key=lambda x: x["frequency"], reverse=True)
+        
+        return optimal_points
