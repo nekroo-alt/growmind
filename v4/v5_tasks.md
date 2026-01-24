@@ -726,23 +726,40 @@ This document defines a series of tasks to enhance L4D v4 with housekeeping capa
 
 ---
 
-### Task 4.3: Adaptive Token Budget
+### Task 4.3: Adaptive Token Budget ✅ **COMPLETE**
 
 **Title**: Implement adaptive token budget management
 
 **Acceptance Criteria**:
-- Dynamically adjust token budget based on task complexity
-- Start with minimal budget, expand if needed
-- Track token usage per task type
-- Predict token requirements for similar tasks
-- Alert when approaching token budget limits
-- Optimize token usage by pruning low-value context
+- [x] Dynamically adjust token budget based on task complexity
+- [x] Start with minimal budget, expand if needed
+- [x] Track token usage per task type
+- [x] Predict token requirements for similar tasks
+- [x] Alert when approaching token budget limits
+- [x] Optimize token usage by pruning low-value context
 
 **Module**: `logic/token_budget_manager.py` (new)
 
-**Estimated Lines**: ~300
+**Estimated Lines**: ~300 (actual: ~750 with comprehensive features)
 
 **Dependencies**: V4 context_engine, complexity_estimator
+
+**Implementation**:
+- Created `TokenBudgetManager` class with full adaptive budget management
+- Implemented `TaskComplexityLevel` enum for complexity classification
+- Implemented `TaskComplexityAnalyzer` for automatic complexity estimation from task descriptions
+- Added `BudgetAllocation` dataclass for tracking task budgets with expansion support
+- Added `TokenUsageStats` for historical statistics and budget learning
+- Implemented dynamic budget allocation based on task type and complexity
+- Added progressive budget expansion with configurable expansion factor
+- Implemented budget alerting when approaching threshold
+- Added comprehensive token optimization with relevance-based pruning
+- Implemented budget learning from historical task data
+- Added SQLite persistence for usage history and recommendations
+- Implemented usage and recommendations reporting
+- Created comprehensive unit tests all passing
+
+**Status**: ✅ IMPLEMENTED - 2025-01-24
 
 **Technical Notes**:
 - Adaptive budgeting:
@@ -752,12 +769,38 @@ This document defines a series of tasks to enhance L4D v4 with housekeeping capa
   - Learn optimal budgets from historical data
 - Budget expansion:
   - Start with minimal budget based on task type
-  - Expand if task not completed within budget
+  - Expand if task not completed within budget (max 3 expansions)
   - Track expansion events for learning
 - Token optimization:
-  - Prune low-value context (low relevance score)
-  - Summarize long contexts
-  - Remove redundant information
+  - Prune low-value context (low relevance score < 0.3)
+  - Always include high-relevance items (>= 0.8)
+  - Sort by relevance and filter by token budget
+- Database schema:
+  ```sql
+  CREATE TABLE token_usage_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      task_id TEXT,
+      task_type TEXT,
+      complexity TEXT,
+      initial_budget INTEGER,
+      final_budget INTEGER,
+      tokens_used INTEGER,
+      expansion_count INTEGER,
+      success INTEGER,
+      timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+  
+  CREATE TABLE budget_recommendations (
+      task_type TEXT,
+      complexity TEXT,
+      recommended_budget INTEGER,
+      total_tasks INTEGER,
+      avg_tokens_per_task REAL,
+      success_rate REAL,
+      last_updated DATETIME DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (task_type, complexity)
+  );
+  ```
 - Expected savings: 15-20% reduction in token usage
 
 ---
