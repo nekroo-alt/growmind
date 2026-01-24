@@ -12,6 +12,7 @@ from v3.logic.reasoning_engine import get_reasoning_engine
 from v3.logic.action_validator import get_action_validator
 from v3.logic.progress_tracker import get_progress_tracker
 from v3.logic.context_expander import get_context_expander
+from v3.logic.progress_tracker import get_progress_tracker as get_progress_tracker_v4
 
 logger = get_module_logger(__name__)
 
@@ -67,15 +68,25 @@ class Verifier:
         self.action_validator = get_action_validator()
         self.progress_tracker = get_progress_tracker()
         self.context_expander = get_context_expander()
+        self.progress_tracker_v4 = get_progress_tracker_v4()
         logger.info("Verifier initialized successfully with V4 adaptive reasoning")
 
     @fcid_mapping("VER-100")
-    def run_tests(self, test_file="v1/test_poc.py"):
+    def run_tests(self, test_file="v1/test_poc.py", tracking_id=None):
         """
         FCID: VER-100
         Functionality: Execute unit and integration tests.
+        V4 Enhancement: Added progress tracking for test execution.
         """
         logger.debug(f"Running tests for {test_file}")
+        
+        # V4: Start progress tracking for test execution
+        if tracking_id:
+            self.progress_tracker_v4.update_progress(
+                tracking_id=tracking_id,
+                metrics={"test_execution_phase": "started"}
+            )
+        
         try:
             if not os.path.exists(test_file):
                 log_activity(
@@ -92,6 +103,15 @@ class Verifier:
 
             if result.returncode == 0:
                 logger.info(f"Tests passed for {test_file}")
+                # V4: Update progress for successful tests
+                if tracking_id:
+                    self.progress_tracker_v4.update_progress(
+                        tracking_id=tracking_id,
+                        metrics={
+                            "test_execution_phase": "completed",
+                            "tests_passed": True
+                        }
+                    )
                 log_activity(
                     summary=f"Running tests for {test_file}",
                     action="Run Tests",
@@ -101,6 +121,15 @@ class Verifier:
                 return True
             else:
                 logger.error(f"Tests failed for {test_file}")
+                # V4: Update progress for failed tests
+                if tracking_id:
+                    self.progress_tracker_v4.update_progress(
+                        tracking_id=tracking_id,
+                        metrics={
+                            "test_execution_phase": "completed",
+                            "tests_passed": False
+                        }
+                    )
                 log_activity(
                     summary=f"Running tests for {test_file}",
                     action="Run Tests",
@@ -599,12 +628,19 @@ class Verifier:
 
     @fcid_mapping("VER-102")
     def run_mutation_tests(
-        self, target_file="v1/impl_poc.py", test_file="v1/test_poc.py"
+        self, target_file="v1/impl_poc.py", test_file="v1/test_poc.py", tracking_id=None
     ):
         """
         FCID: VER-102
-        Functionality: Performs mutation testing by systematically swapping operators and calculating the score.
+        Functionality: Performs mutation testing by systematically swapping operators and calculating a score.
+        V4 Enhancement: Added progress tracking for mutation testing.
         """
+        # V4: Update progress for mutation testing start
+        if tracking_id:
+            self.progress_tracker_v4.update_progress(
+                tracking_id=tracking_id,
+                metrics={"mutation_testing_phase": "started"}
+            )
         if os.getenv("L4_SIMULATION") == "true":
             log_activity(
                 summary=f"Mutation testing for {target_file} (Simulated)",
@@ -675,6 +711,18 @@ class Verifier:
             # Step 4: Calculate score
             mutation_score = (killed_mutations / total_mutations) * 100
 
+            # V4: Update progress for mutation testing completion
+            if tracking_id:
+                self.progress_tracker_v4.update_progress(
+                    tracking_id=tracking_id,
+                    metrics={
+                        "mutation_testing_phase": "completed",
+                        "mutation_score": mutation_score,
+                        "mutations_killed": killed_mutations,
+                        "total_mutations": total_mutations
+                    }
+                )
+            
             log_activity(
                 summary=f"Mutation testing for {target_file}",
                 action="Mutation Test",

@@ -16,6 +16,7 @@ from v3.data.context_hierarchy import get_context_hierarchy
 from v3.data.decision_history import get_decision_history
 from v3.logic.reasoning_engine import get_reasoning_engine
 from v3.logic.context_expander import get_context_expander
+from v3.logic.progress_tracker import get_progress_tracker
 
 logger = get_module_logger(__name__)
 
@@ -34,6 +35,7 @@ class Planner:
         self.decision_history = get_decision_history()
         self.reasoning_engine = get_reasoning_engine()
         self.context_expander = get_context_expander()
+        self.progress_tracker = get_progress_tracker()
         logger.info("Planner initialized successfully with V4 adaptive reasoning")
 
     @fcid_mapping("PLAN-0100")
@@ -65,6 +67,12 @@ class Planner:
         with self.telemetry_manager.track_operation(
             operation_type="planning", title=f"Task breakdown: {task_title}"
         ) as op:
+            # V4: Start progress tracking for planning
+            task_tracking_id = self.progress_tracker.start_tracking(
+                task_id=task_to_break.get("id") if task_to_break else None,
+                task_type="planning"
+            )
+            logger.debug(f"Started progress tracking for task {task_tracking_id}")
             # V4: Use hierarchical context for planning
             # Start with L0 (immediate) context and expand as needed
             context, level = self.context_expander.get_context(
@@ -213,6 +221,34 @@ class Planner:
                     "context_level": level,  # V4: Track context level used
                 },
             )
+
+            # V4: Update progress for planning
+            self.progress_tracker.update_progress(
+                tracking_id=task_tracking_id,
+                metrics={
+                    "subtasks_generated": len(subtasks),
+                    "new_tasks_added": new_tasks_added,
+                    "affected_files": len(impact_analysis["affected_files"]),
+                    "context_size": context_size_chars
+                }
+            )
+
+            # V4: Check if progress is adequate
+            is_adequate = self.progress_tracker.check_progress(tracking_id=task_tracking_id)
+            if not is_adequate["is_adequate"]:
+                logger.warning(f"Planning progress check: {is_adequate['message']}")
+                telemetry.warning(f"Planning progress warning: {is_adequate['message']}")
+                
+                # V4: Check for stagnation or regression
+                stagnation_detected = self.progress_tracker.detect_stagnation(tracking_id=task_tracking_id)
+                if stagnation_detected["is_stagnant"]:
+                    logger.warning(f"Planning stagnation detected: {stagnation_detected['message']}")
+                    telemetry.warning(f"Planning stagnation: {stagnation_detected['message']}")
+                
+                regression_detected = self.progress_tracker.detect_regression(tracking_id=task_tracking_id)
+                if regression_detected["is_regression"]:
+                    logger.error(f"Planning regression detected: {regression_detected['message']}")
+                    telemetry.error(f"Planning regression: {regression_detected['message']}")
 
             op.record_metric("subtasks_generated", len(subtasks))
             op.record_metric("new_tasks_added", new_tasks_added)

@@ -153,6 +153,12 @@ class Implementor:
             title=f"TDD Cycle: {task_title}",
             metadata={"task_id": task_id},
         ) as op:
+            # V4: Start progress tracking for TDD cycle
+            task_tracking_id = self.progress_tracker.start_tracking(
+                task_id=task_id,
+                task_type="implementation"
+            )
+            logger.debug(f"Started progress tracking for task {task_tracking_id}")
             # V4: Use hierarchical context for TDD cycle
             # Start with L0 (immediate) context and expand as needed
             hierarchical_context, level = self.context_expander.get_context(
@@ -220,7 +226,7 @@ class Implementor:
             # Red Phase: Write a failing test
             logger.debug("Starting Red Phase: Writing failing test")
             telemetry.track_step("Red Phase: Writing failing test")
-            success, error = self._run_red_phase(task, context)
+            success, error = self._run_red_phase(task, context, task_tracking_id)
             if not success:
                 logger.error(f"Red Phase failed for task {task_id}: {error}")
                 return False, error
@@ -228,7 +234,7 @@ class Implementor:
             # Green Phase: Write minimal code to pass
             logger.debug("Starting Green Phase: Implementing code")
             telemetry.track_step("Green Phase: Implementing code")
-            success, error = self._run_green_phase(task, context)
+            success, error = self._run_green_phase(task, context, task_tracking_id)
             if not success:
                 logger.error(f"Green Phase failed for task {task_id}: {error}")
                 return False, error
@@ -236,11 +242,39 @@ class Implementor:
             # Refactor Phase: Cleanup
             logger.debug("Starting Refactor Phase: Cleaning up")
             telemetry.track_step("Refactor Phase: Cleaning up")
-            self._run_refactor_phase(task_title)
+            self._run_refactor_phase(task_title, task_tracking_id)
 
             # Check for Refactor Sprint (every 10 commits)
             if get_commit_count() % 10 == 0 and get_commit_count() > 0:
                 self.run_refactor_sprint()
+
+            # V4: Update progress for successful TDD cycle completion
+            self.progress_tracker.update_progress(
+                tracking_id=task_tracking_id,
+                metrics={
+                    "test_files_created": 1,
+                    "implementation_files_created": 1,
+                    "tdd_phases_completed": 3,  # Red, Green, Refactor
+                    "total_phases": 3
+                }
+            )
+
+            # V4: Check if progress is adequate
+            is_adequate = self.progress_tracker.check_progress(tracking_id=task_tracking_id)
+            if not is_adequate["is_adequate"]:
+                logger.warning(f"TDD cycle progress check: {is_adequate['message']}")
+                telemetry.warning(f"TDD cycle progress warning: {is_adequate['message']}")
+                
+                # V4: Check for stagnation or regression
+                stagnation_detected = self.progress_tracker.detect_stagnation(tracking_id=task_tracking_id)
+                if stagnation_detected["is_stagnant"]:
+                    logger.warning(f"TDD cycle stagnation detected: {stagnation_detected['message']}")
+                    telemetry.warning(f"TDD cycle stagnation: {stagnation_detected['message']}")
+                
+                regression_detected = self.progress_tracker.detect_regression(tracking_id=task_tracking_id)
+                if regression_detected["is_regression"]:
+                    logger.error(f"TDD cycle regression detected: {regression_detected['message']}")
+                    telemetry.error(f"TDD cycle regression: {regression_detected['message']}")
 
             # V3: Record TDD cycle completion
             op.record_event(
@@ -274,10 +308,15 @@ class Implementor:
             update_task_status(task_id, "completed")
             return True, None
 
-    def _run_red_phase(self, task, hierarchical_context):
+    def _run_red_phase(self, task, hierarchical_context, tracking_id):
         """
-        V4: Updated to use hierarchical context parameter.
+        V4: Updated to use hierarchical context parameter and progress tracking.
         """
+        # V4: Update progress for Red phase start
+        self.progress_tracker.update_progress(
+            tracking_id=tracking_id,
+            metrics={"current_phase": "red", "phase_progress": 0}
+        )
         task_title = task["title"]
         attempts = 3
         last_error = ""
@@ -335,17 +374,32 @@ Keep changes focused and under 100 lines per commit.
             )
 
             if success:
+                # V4: Update progress for successful Red phase
+                self.progress_tracker.update_progress(
+                    tracking_id=tracking_id,
+                    metrics={"current_phase": "red", "phase_progress": 100}
+                )
                 return True, None
             else:
                 last_error = error_msg
                 telemetry.warning(f"Red Phase attempt {attempt} failed: {error_msg}")
+                # V4: Update progress for failed attempt
+                self.progress_tracker.update_progress(
+                    tracking_id=tracking_id,
+                    metrics={"red_phase_attempts": attempt}
+                )
 
         return False, last_error or "Red Phase failed after maximum attempts."
 
-    def _run_green_phase(self, task, hierarchical_context):
+    def _run_green_phase(self, task, hierarchical_context, tracking_id):
         """
-        V4: Updated to use hierarchical context parameter.
+        V4: Updated to use hierarchical context parameter and progress tracking.
         """
+        # V4: Update progress for Green phase start
+        self.progress_tracker.update_progress(
+            tracking_id=tracking_id,
+            metrics={"current_phase": "green", "phase_progress": 0}
+        )
         task_title = task["title"]
         # If Red phase created multiple files, we should ideally run all of them.
         # For v1, we focus on primary test file or use a heuristic.
@@ -433,6 +487,15 @@ Keep changes focused and under 100 lines per commit.
                         estimated_cost=result["cost"],
                     )
                     if success:
+                        # V4: Update progress for successful Green phase
+                        self.progress_tracker.update_progress(
+                            tracking_id=tracking_id,
+                            metrics={
+                                "current_phase": "green",
+                                "phase_progress": 100,
+                                "green_phase_attempts": attempt
+                            }
+                        )
                         return True, None
                     else:
                         last_error = f"Git Policy Violation: {error_msg}"
@@ -453,6 +516,11 @@ Keep changes focused and under 100 lines per commit.
                     prompt_tokens=result["usage"]["prompt_tokens"],
                     completion_tokens=result["usage"]["completion_tokens"],
                     estimated_cost=result["cost"],
+                )
+                # V4: Update progress for failed attempt
+                self.progress_tracker.update_progress(
+                    tracking_id=tracking_id,
+                    metrics={"green_phase_attempts": attempt}
                 )
 
         return False, last_error or "Green Phase failed after maximum attempts."
@@ -476,12 +544,24 @@ Keep changes focused and under 100 lines per commit.
         except Exception as e:
             return False, f"Test execution error: {str(e)}"
 
-    def _run_refactor_phase(self, task_title):
+    def _run_refactor_phase(self, task_title, tracking_id):
+        # V4: Update progress for Refactor phase start
+        self.progress_tracker.update_progress(
+            tracking_id=tracking_id,
+            metrics={"current_phase": "refactor", "phase_progress": 0}
+        )
+        
         log_activity(
             summary=f"Refactor Phase: {task_title}",
             action="Refactor",
             status="Success",
             cot_blob="Verified code against tests and cleaned up",
+        )
+        
+        # V4: Update progress for successful Refactor phase
+        self.progress_tracker.update_progress(
+            tracking_id=tracking_id,
+            metrics={"current_phase": "refactor", "phase_progress": 100}
         )
         return True
 

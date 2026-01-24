@@ -81,6 +81,9 @@ To keep `product.md` and `technical.md` relatively static, a new database is use
     *   **V2 Enhancement**: Verifies that all downstream consumers are tested
     *   **V3 Enhancement**: Validates checkpoint integrity - ensures checkpoints are valid before commit
     *   **V3 Enhancement**: Verifies telemetry data completeness for all operations
+    *   **V4 Enhancement**: Validates progress after each operation - checks if progress meets expected rates
+    *   **V4 Enhancement**: Detects stagnation - alerts when no progress is made for extended periods
+    *   **V4 Enhancement**: Detects regression - alerts when progress is going backwards
 
 ---
 

@@ -25,6 +25,33 @@ from v3.core.logging_config import get_logger
 
 logger = get_logger(__name__)
 
+# Global singleton instance
+_context_hierarchy_manager: Optional[ContextHierarchyManager] = None
+
+
+def get_context_hierarchy(db_path: str = "context_hierarchy.db", 
+                      cache_capacities: Optional[Dict[str, int]] = None) -> ContextHierarchyManager:
+    """
+    Get or create the global ContextHierarchyManager instance.
+    
+    Args:
+        db_path: Path to SQLite database file
+        cache_capacities: Optional cache capacities per level
+    
+    Returns:
+        Global ContextHierarchyManager instance
+    """
+    global _context_hierarchy_manager
+    
+    if _context_hierarchy_manager is None:
+        _context_hierarchy_manager = ContextHierarchyManager(
+            db_path=db_path,
+            cache_capacities=cache_capacities
+        )
+        logger.info("Created global ContextHierarchyManager instance")
+    
+    return _context_hierarchy_manager
+
 
 class ContextLevel:
     """Context level enumeration."""
