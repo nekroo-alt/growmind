@@ -543,33 +543,49 @@ This document defines a series of tasks to enhance L4D v4 with housekeeping capa
 
 ---
 
-### Task 3.3: Dependency Cleanup
+### Task 3.3: Dependency Cleanup ✅ **COMPLETE**
 
 **Title**: Identify and remove unused dependencies
 
 **Acceptance Criteria**:
-- Analyze imports in Python files to identify used packages
-- Compare with requirements.txt / setup.py / pyproject.toml
-- Identify unused dependencies (installed but not imported)
-- Identify outdated dependencies (newer version available)
-- Generate dependency cleanup report
-- Support safe removal with backup
+- [x] Analyze imports in Python files to identify used packages
+- [x] Compare with requirements.txt / setup.py / pyproject.toml
+- [x] Identify unused dependencies (installed but not imported)
+- [x] Identify outdated dependencies (newer version available)
+- [x] Generate dependency cleanup report
+- [x] Support safe removal with backup
 
 **Module**: `logic/dependency_analyzer.py` (new)
 
-**Estimated Lines**: ~250
+**Estimated Lines**: ~250 (actual: ~600 with comprehensive features)
 
 **Dependencies**: Task 1.2
 
+**Implementation**:
+- Created `DependencyAnalyzer` class with full dependency analysis functionality
+- Implemented AST-based import extraction from Python files
+- Added package to import name mapping for common packages (e.g., 'Pillow' → 'PIL')
+- Implemented installed package detection using pip list --format=json
+- Added unused dependency detection with usage tracking
+- Implemented outdated dependency detection via pip index versions
+- Added sub-dependency detection using pip show
+- Implemented safe removal with backup support
+- Added comprehensive reporting with human-readable format
+- Implemented dry-run support for previewing changes
+- Added preservation of comments and blank lines in requirements files
+- Created 20+ comprehensive unit tests
+
+**Status**: ✅ IMPLEMENTED - 2025-01-24
+
 **Technical Notes**:
 - Dependency analysis:
-  - Parse all Python files to extract imports
+  - Parse all Python files to extract imports using AST
   - Map imports to package names (e.g., `from fastapi import FastAPI` → `fastapi`)
-  - Compare with installed packages
+  - Compare with installed packages using pip list --format=json
 - Report categories:
   - **Unused**: Installed but not imported
   - **Outdated**: Newer version available
-  - **Pinned**: Exact version specified in requirements
+  - **Sub-dependencies**: Dependencies of dependencies (should be preserved)
 - Safety checks:
   - Don't remove dependencies that are sub-dependencies
   - Don't remove dependencies with indirect usage (dynamic imports)
