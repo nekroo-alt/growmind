@@ -421,23 +421,37 @@ This document defines a series of tasks to enhance L4D v4 with housekeeping capa
 
 ## Phase 3: Automatic Housekeeping
 
-### Task 3.1: Safe Deletion Pipeline
+### Task 3.1: Safe Deletion Pipeline ✅ **COMPLETE**
 
 **Title**: Implement safe deletion pipeline for unused code
 
 **Acceptance Criteria**:
-- Create backup before any deletion
-- Run all tests before and after deletion
-- Validate that deletion doesn't break imports
-- Validate that deletion doesn't break tests
-- Rollback automatically if tests fail
-- Log all deletions with reason
+- [x] Create backup before any deletion
+- [x] Run all tests before and after deletion
+- [x] Validate that deletion doesn't break imports
+- [x] Validate that deletion doesn't break tests
+- [x] Rollback automatically if tests fail
+- [x] Log all deletions with reason
 
-**Module**: `logic/housekeeping_pipeline.py` (new)
+**Module**: `logic/safe_deleter.py` (new)
 
-**Estimated Lines**: ~400
+**Estimated Lines**: ~400 (actual: ~550 with comprehensive features)
 
 **Dependencies**: Task 2.1, 2.2, 2.3
+
+**Implementation**:
+- Created `SafeDeleter` class with full safe deletion functionality
+- Implemented backup creation with git and file-based backups
+- Added test execution before and after deletion
+- Implemented import validation using Python's compile and importlib
+- Implemented automatic rollback on test failures
+- Added deletion logging to CSV file for tracking
+- Implemented safe deletion for functions, classes, and files
+- Added dry-run mode for previewing deletions
+- Implemented AST-based deletion for functions and classes
+- Added comprehensive unit tests with 20+ test cases
+
+**Status**: ✅ IMPLEMENTED - 2025-01-24
 
 **Technical Notes**:
 - Safe deletion process:
