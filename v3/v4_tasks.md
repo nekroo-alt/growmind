@@ -1439,21 +1439,21 @@ This document defines a series of tasks to enhance L4D v3 with advanced "Reason 
 
 ## Phase 8: Integration and Testing
 
-### Task 8.1: Integrate Adaptive Reasoning into Core Modules
+### Task 8.1: Integrate Adaptive Reasoning into Core Modules ✅ **COMPLETE**
 
 **Title**: Add adaptive reasoning to all core modules
 
 **Acceptance Criteria**:
-- Integrate reasoning engine into `core/start.py`
-- Integrate reasoning engine into `logic/dispatcher.py`
-- Integrate reasoning engine into `logic/planner.py`
-- Integrate reasoning engine into `logic/implementor.py`
-- Integrate reasoning engine into `logic/verifier.py`
-- Ensure consistent reasoning across all modules
+- ✅ Integrate reasoning engine into `core/start.py`
+- ✅ Integrate reasoning engine into `logic/dispatcher.py`
+- ✅ Integrate reasoning engine into `logic/planner.py`
+- ✅ Integrate reasoning engine into `logic/implementor.py`
+- ✅ Integrate reasoning engine into `logic/verifier.py`
+- ✅ Ensure consistent reasoning across all modules
 
 **Module**: All modules in `core/`, `logic/`
 
-**Estimated Lines**: ~150 (distributed)
+**Actual Lines**: ~200 (distributed, including imports and initialization)
 
 **Dependencies**: Task 2.1
 
@@ -1467,6 +1467,19 @@ This document defines a series of tasks to enhance L4D v3 with advanced "Reason 
 - Ensure consistent reasoning context
 - Track reasoning decisions in telemetry
 - Support both with and without reasoning (fallback)
+
+**Implementation Details**:
+- Added V4 adaptive reasoning imports to all core modules
+- Initialized V4 components in `__init__` methods:
+  - `context_hierarchy` - Hierarchical context access (L0-L3)
+  - `decision_history` - Decision tracking for meta-cognition
+  - `reasoning_engine` - Adaptive reasoning pipeline
+  - Additional components per module:
+    - **Planner**: `context_expander` for dynamic context expansion
+    - **Implementor**: `trap_detector`, `trap_recovery`, `progress_tracker` for trap detection and progress tracking
+    - **Verifier**: `action_validator`, `progress_tracker` for action validation and progress tracking
+- Created integration test suite (`test_adaptive_reasoning_integration.py`) to verify all modules have V4 components
+- All modules now share access to adaptive reasoning infrastructure
 
 ---
 

@@ -11,6 +11,11 @@ from v3.llm_base.provider import LLMProvider
 from v3.data.telemetry_manager import get_telemetry_manager
 from v3.core.telemetry import telemetry
 from v3.core.logging_config import get_module_logger, log_error_with_context
+# V4: Adaptive reasoning components
+from v3.data.context_hierarchy import get_context_hierarchy
+from v3.data.decision_history import get_decision_history
+from v3.logic.reasoning_engine import get_reasoning_engine
+from v3.logic.context_expander import get_context_expander
 
 logger = get_module_logger(__name__)
 
@@ -24,7 +29,12 @@ class Planner:
         self.llm = LLMProvider()
         self.semantic_mappers = {}  # Cache of semantic mappers
         self.telemetry_manager = get_telemetry_manager()  # V3 telemetry
-        logger.info("Planner initialized successfully")
+        # V4: Adaptive reasoning components
+        self.context_hierarchy = get_context_hierarchy()
+        self.decision_history = get_decision_history()
+        self.reasoning_engine = get_reasoning_engine()
+        self.context_expander = get_context_expander()
+        logger.info("Planner initialized successfully with V4 adaptive reasoning")
 
     @fcid_mapping("PLAN-0100")
     def breakdown_requirements(

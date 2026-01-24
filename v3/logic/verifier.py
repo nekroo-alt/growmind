@@ -4,6 +4,12 @@ import ast
 from v3.data.db_manager import log_activity, fcid_mapping
 from v3.data.semantic_mapper import SemanticMapper
 from v3.core.logging_config import get_module_logger
+# V4: Adaptive reasoning components
+from v3.data.context_hierarchy import get_context_hierarchy
+from v3.data.decision_history import get_decision_history
+from v3.logic.reasoning_engine import get_reasoning_engine
+from v3.logic.action_validator import get_action_validator
+from v3.logic.progress_tracker import get_progress_tracker
 
 logger = get_module_logger(__name__)
 
@@ -49,6 +55,16 @@ class OperatorSwapper(ast.NodeTransformer):
 
 
 class Verifier:
+    def __init__(self):
+        logger.info("Initializing Verifier")
+        # V4: Adaptive reasoning components
+        self.context_hierarchy = get_context_hierarchy()
+        self.decision_history = get_decision_history()
+        self.reasoning_engine = get_reasoning_engine()
+        self.action_validator = get_action_validator()
+        self.progress_tracker = get_progress_tracker()
+        logger.info("Verifier initialized successfully with V4 adaptive reasoning")
+
     @fcid_mapping("VER-100")
     def run_tests(self, test_file="v1/test_poc.py"):
         """

@@ -8,6 +8,9 @@ from v3.core.telemetry import telemetry
 from v3.data.telemetry_manager import get_telemetry_manager
 from v3.core.logging_config import get_module_logger
 from v3.data.checkpoint_manager import CheckpointManager
+# V4: Adaptive reasoning components
+from v3.data.context_hierarchy import get_context_hierarchy
+from v3.logic.reasoning_engine import get_reasoning_engine
 
 logger = get_module_logger(__name__)
 
@@ -17,7 +20,10 @@ class Dispatcher:
         logger.info("Initializing Dispatcher")
         self.telemetry_manager = get_telemetry_manager()
         self.checkpoint_manager = CheckpointManager()
-        logger.info("Dispatcher initialized successfully")
+        # V4: Adaptive reasoning components
+        self.context_hierarchy = get_context_hierarchy()
+        self.reasoning_engine = get_reasoning_engine()
+        logger.info("Dispatcher initialized successfully with V4 adaptive reasoning")
 
     @fcid_mapping("DISP-100")
     def dispatch(self, preferred_id=None):

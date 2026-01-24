@@ -15,6 +15,13 @@ from v3.core.telemetry import telemetry
 from v3.data.telemetry_manager import get_telemetry_manager
 from v3.core.logging_config import get_module_logger
 from v3.data.checkpoint_manager import CheckpointManager
+# V4: Adaptive reasoning components
+from v3.data.context_hierarchy import get_context_hierarchy
+from v3.data.decision_history import get_decision_history
+from v3.logic.reasoning_engine import get_reasoning_engine
+from v3.logic.trap_detector import get_trap_detector
+from v3.logic.trap_recovery import get_trap_recovery
+from v3.logic.progress_tracker import get_progress_tracker
 
 logger = get_module_logger(__name__)
 
@@ -29,7 +36,14 @@ class Implementor:
         self.verifier = Verifier()
         self.telemetry_manager = get_telemetry_manager()  # V3 telemetry
         self.checkpoint_manager = CheckpointManager()  # V3 checkpointing
-        logger.info("Implementor initialized successfully")
+        # V4: Adaptive reasoning components
+        self.context_hierarchy = get_context_hierarchy()
+        self.decision_history = get_decision_history()
+        self.reasoning_engine = get_reasoning_engine()
+        self.trap_detector = get_trap_detector()
+        self.trap_recovery = get_trap_recovery()
+        self.progress_tracker = get_progress_tracker()
+        logger.info("Implementor initialized successfully with V4 adaptive reasoning")
 
     def _get_error_reason(self, result):
         raw_content = result.get("raw_content", "").strip()

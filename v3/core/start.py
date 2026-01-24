@@ -30,6 +30,10 @@ from v3.core.logging_config import (
     log_task_failed,
     log_error_with_context,
 )
+# V4: Adaptive reasoning components
+from v3.data.context_hierarchy import get_context_hierarchy
+from v3.data.decision_history import get_decision_history
+from v3.logic.reasoning_engine import get_reasoning_engine
 
 logger = get_module_logger(__name__)
 
@@ -49,7 +53,12 @@ class Orchestrator:
         self.session_manager = get_session_manager()
         self.checkpoint_manager = CheckpointManager()
         self.current_session = None
-        logger.info("Orchestrator initialized successfully")
+        
+        # V4: Adaptive reasoning components
+        self.context_hierarchy = get_context_hierarchy()
+        self.decision_history = get_decision_history()
+        self.reasoning_engine = get_reasoning_engine()
+        logger.info("Orchestrator initialized successfully with V4 adaptive reasoning")
 
     @fcid_mapping("CORE-100")
     def cold_start_check(self):
