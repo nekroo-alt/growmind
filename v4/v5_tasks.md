@@ -52,23 +52,37 @@ This document defines a series of tasks to enhance L4D v4 with housekeeping capa
 
 ## Phase 1: Code Analysis and Dependency Tracking
 
-### Task 1.1: Enhanced AST Analysis with Call Graph Persistence
+### Task 1.1: Enhanced AST Analysis with Call Graph Persistence ✅ **COMPLETE**
 
 **Title**: Enhance AST analysis to track persistent call graphs across sessions
 
 **Acceptance Criteria**:
-- Persist call graphs to SQLite database for faster subsequent analysis
-- Track function/class usage statistics over time
-- Identify hot functions (frequently called) vs cold functions (rarely called)
-- Track import dependencies and usage frequency
-- Support incremental updates to call graphs
-- Export call graphs for external analysis
+- [x] Persist call graphs to SQLite database for faster subsequent analysis
+- [x] Track function/class usage statistics over time
+- [x] Identify hot functions (frequently called) vs cold functions (rarely called)
+- [x] Track import dependencies and usage frequency
+- [x] Support incremental updates to call graphs
+- [x] Export call graphs for external analysis
 
-**Module**: Enhance `data/semantic_mapper.py`, add `data/call_graph_persistence.py` (new)
+**Module**: Enhanced `data/semantic_mapper.py`, added `data/call_graph_persistence.py` (new)
 
 **Estimated Lines**: ~350
 
 **Dependencies**: V4 semantic_mapper
+
+**Implementation**:
+- Created `CallGraphPersistence` class with full persistent call graph functionality
+- Implemented SQLite schema with call_graph, function_usage, import_dependencies, and file_metadata tables
+- Added call graph storage and retrieval with automatic incrementing of call counts
+- Implemented hot/cold function identification based on configurable thresholds
+- Added import dependency tracking for both module imports and from imports
+- Implemented export functionality in JSON, DOT, and GraphML formats
+- Added call graph merging from multiple databases
+- Implemented comprehensive statistics generation
+- Enhanced `SemanticMapper` to use `CallGraphPersistence` for persistent call graph tracking
+- Added 13 comprehensive unit tests all passing
+
+**Status**: ✅ IMPLEMENTED - 2025-01-24
 
 **Technical Notes**:
 - Call graph schema:

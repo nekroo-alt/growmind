@@ -1,17 +1,40 @@
 import ast
 import os
+from typing import Optional
+from .call_graph_persistence import CallGraphPersistence
 
 
 class SemanticMapper:
     """
+    Parses Python source code using AST module to create a semantic map of file.
+
+    V5 Enhancement:
+    - Integrates with CallGraphPersistence for persistent call graph storage
+    - Tracks function/class usage statistics across sessions
+    - Supports incremental updates to call graphs
+    """
+    """
     Parses Python source code using the AST module to create a semantic map of the file.
     """
 
-    def __init__(self, source_code: str):
+    def __init__(self, source_code: str, file_path: Optional[str] = None):
+        """
+        Initialize SemanticMapper.
+
+        Args:
+            source_code: Python source code to analyze
+            file_path: Optional file path for persistence tracking
+        """
         self.source_code = source_code
         self.tree = ast.parse(source_code)
         self.lines = source_code.splitlines()
         self.call_graph = None  # Will be built on demand
+        self.file_path = file_path
+        self.call_graph_persistence = None  # Will be initialized if needed
+
+        # Initialize call graph persistence if file_path is provided
+        if file_path:
+            self.call_graph_persistence = CallGraphPersistence()
 
     def get_summary(self):
         """
@@ -27,9 +50,17 @@ class SemanticMapper:
 
         return summary
 
-    def get_call_graph(self, max_depth=10):
+    def get_call_graph(self, max_depth=10, persist: bool = True):
         """
         Builds and returns a call graph showing which functions call which.
+
+        V5 Enhancement:
+        - Automatically persists call graph if file_path is provided and persist=True
+        - Tracks usage statistics across sessions
+
+        Args:
+            max_depth: Maximum call depth to track (prevents infinite recursion)
+            persist: Whether to persist call graph to database (default: True)
 
         Returns:
             dict: Call graph where keys are caller functions and values are lists
@@ -37,7 +68,106 @@ class SemanticMapper:
         """
         if self.call_graph is None:
             self.call_graph = self._build_call_graph(max_depth)
+
+            # Persist call graph if file_path is provided and persist is True
+            if persist and self.file_path and self.call_graph_persistence:
+                self._persist_call_graph()
+
         return self.call_graph
+
+    def _persist_call_graph(self):
+        """
+        Persist call graph to database.
+
+        V5 Enhancement:
+        - Stores call graph in SQLite database
+        - Stores import dependencies
+        - Updates usage statistics
+        """
+        if self.call_graph_persistence:
+            # Store call graph
+            self.call_graph_persistence.store_call_graph(self.file_path, self.call_graph)
+
+            # Store import dependencies
+            import_deps = self.get_import_dependencies()
+            self.call_graph_persistence.store_import_dependencies(self.file_path, import_deps)
+
+    def get_usage_statistics(self, min_calls: int = 0):
+        """
+        Get usage statistics for this file from persistent storage.
+
+        V5 Enhancement:
+        - Retrieves usage statistics from database
+        - Returns hot/cold function information
+
+        Args:
+            min_calls: Minimum call count threshold
+
+        Returns:
+            list: Usage statistics sorted by call count
+        """
+        if self.call_graph_persistence and self.file_path:
+            return self.call_graph_persistence.get_usage_statistics(
+                self.file_path,
+                min_calls=min_calls
+            )
+        return []
+
+    def get_hot_cold_functions(self, hot_threshold: int = 10, cold_threshold: int = 2):
+        """
+        Get hot and cold functions for this file from persistent storage.
+
+        V5 Enhancement:
+        - Retrieves hot/cold function classification from database
+        - Helps identify frequently vs rarely used functions
+
+        Args:
+            hot_threshold: Minimum call count to be considered hot
+            cold_threshold: Maximum call count to be considered cold
+
+        Returns:
+            tuple: (hot_functions, cold_functions)
+        """
+        if self.call_graph_persistence and self.file_path:
+            # Get all functions for this file
+            all_stats = self.call_graph_persistence.get_usage_statistics(self.file_path)
+
+            # Filter into hot and cold
+            hot = [f for f in all_stats if f["call_count"] >= hot_threshold]
+            cold = [f for f in all_stats if f["call_count"] <= cold_threshold]
+
+            return hot, cold
+        return [], []
+
+    def get_persisted_call_graph(self):
+        """
+        Retrieve call graph from persistent storage for this file.
+
+        V5 Enhancement:
+        - Gets previously stored call graph from database
+        - Useful for cross-session analysis
+
+        Returns:
+            dict: Persisted call graph or empty dict if not found
+        """
+        if self.call_graph_persistence and self.file_path:
+            return self.call_graph_persistence.get_call_graph(self.file_path)
+        return {}
+
+    def get_import_usage(self):
+        """
+        Get import usage statistics for this file from persistent storage.
+
+        V5 Enhancement:
+        - Retrieves import usage from database
+        - Shows which imports are actually used
+
+        Returns:
+            list: Import usage statistics
+        """
+        if self.call_graph_persistence and self.file_path:
+            return self.call_graph_persistence.get_import_dependencies(self.file_path)
+        return []
 
     def _parse_class(self, node: ast.ClassDef):
         """
