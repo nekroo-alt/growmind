@@ -1,899 +1,911 @@
 """
-Lesson Learner - Systematic Learning from Failures
+Lesson Learner Module
 
-This module implements systematic learning from failures to:
-- Record every failure with full context
-- Analyze root cause of each failure
-- Identify patterns in failures
-- Generate lessons learned
-- Update decision heuristics to avoid repeated mistakes
-- Track mistake reduction over time
+This module implements systematic learning from failures for the L4D V4 system.
+It records every failure with full context, analyzes root causes, identifies patterns,
+generates lessons learned, and updates decision heuristics to avoid repeated mistakes.
+
+Key Features:
+- Record failures with full context
+- Root cause analysis
+- Pattern identification
+- Lesson extraction and storage
+- Heuristic updates
+- Mistake reduction tracking
 """
 
-import json
 import sqlite3
-from collections import Counter, defaultdict
-from dataclasses import dataclass, field, asdict
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any, Set
+import json
 import uuid
-import threading
-
-# Import decision history for failure analysis
-try:
-    from v3.data.decision_history import DecisionHistory
-except ImportError:
-    DecisionHistory = None
+from datetime import datetime
+from typing import Dict, List, Optional, Tuple, Any
+from threading import RLock
+import hashlib
+from collections import defaultdict, Counter
 
 
-@dataclass
+class FailureRecord:
+    """Represents a recorded failure with full context."""
+    
+    def __init__(
+        self,
+        failure_id: str,
+        timestamp: str,
+        failure_type: str,
+        context: Dict[str, Any],
+        decision: Dict[str, Any],
+        root_cause: str,
+        severity: str = "medium",
+        resources: Optional[Dict[str, Any]] = None
+    ):
+        self.failure_id = failure_id
+        self.timestamp = timestamp
+        self.failure_type = failure_type
+        self.context = context
+        self.decision = decision
+        self.root_cause = root_cause
+        self.severity = severity  # low, medium, high, critical
+        self.resources = resources or {}
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary."""
+        return {
+            'failure_id': self.failure_id,
+            'timestamp': self.timestamp,
+            'failure_type': self.failure_type,
+            'context': self.context,
+            'decision': self.decision,
+            'root_cause': self.root_cause,
+            'severity': self.severity,
+            'resources': self.resources
+        }
+
+
 class LessonLearned:
-    """Represents a lesson learned from a failure"""
-    lesson_id: str
-    failure_type: str
-    root_cause: str
-    context: Dict[str, Any]
-    prevention: str
-    frequency: int
-    effectiveness: float  # How effective this lesson has been
-    created_at: str
-    updated_at: str
-    sample_failures: List[str] = field(default_factory=list)
-
-
-@dataclass
-class FailureAnalysis:
-    """Represents analysis of a failure"""
-    failure_id: str
-    decision_id: str
-    failure_type: str
-    root_cause: str
-    context: Dict[str, Any]
-    contributing_factors: List[str]
-    suggested_prevention: str
-    severity: str  # 'low', 'medium', 'high', 'critical'
-    analyzed_at: str
-    lesson_id: Optional[str] = None  # Reference to associated lesson
+    """Represents a lesson learned from a failure."""
+    
+    def __init__(
+        self,
+        lesson_id: str,
+        timestamp: str,
+        failure_type: str,
+        root_cause: str,
+        context_pattern: str,
+        prevention: str,
+        severity: str = "medium",
+        effectiveness_score: float = 0.0,
+        application_count: int = 0
+    ):
+        self.lesson_id = lesson_id
+        self.timestamp = timestamp
+        self.failure_type = failure_type
+        self.root_cause = root_cause
+        self.context_pattern = context_pattern
+        self.prevention = prevention
+        self.severity = severity
+        self.effectiveness_score = effectiveness_score
+        self.application_count = application_count
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary."""
+        return {
+            'lesson_id': self.lesson_id,
+            'timestamp': self.timestamp,
+            'failure_type': self.failure_type,
+            'root_cause': self.root_cause,
+            'context_pattern': self.context_pattern,
+            'prevention': self.prevention,
+            'severity': self.severity,
+            'effectiveness_score': self.effectiveness_score,
+            'application_count': self.application_count
+        }
 
 
 class LessonLearner:
     """
-    Lesson Learner for Systematic Learning from Failures
+    Main class for learning from mistakes systematically.
     
-    Records failures, analyzes root causes, identifies patterns,
-    generates lessons learned, and updates heuristics to avoid
-    repeated mistakes.
+    This class:
+    - Records every failure with full context
+    - Analyzes root causes of failures
+    - Identifies patterns in failures
+    - Generates lessons learned
+    - Updates heuristics based on lessons
+    - Tracks mistake reduction over time
     """
     
-    def __init__(self, db_path: str = None):
+    def __init__(self, db_path: str = "lessons_learned.db"):
         """
-        Initialize lesson learner
+        Initialize the LessonLearner.
         
         Args:
-            db_path: Path to SQLite database for lesson persistence
+            db_path: Path to the SQLite database for storing lessons
         """
-        self.db_path = db_path or 'data/lessons_learned.db'
-        self.decision_history = None
-        self.lock = threading.RLock()
-        
-        # Configuration
-        self.min_pattern_frequency = 2  # Minimum frequency to identify a pattern
-        self.effectiveness_threshold = 0.7  # Effectiveness threshold for effective lessons
-        self.severity_weights = {
-            'low': 0.25,
-            'medium': 0.5,
-            'high': 0.75,
-            'critical': 1.0
-        }
-        
-        # Initialize database
-        self._init_db()
-        
-        # Try to initialize decision history
-        if DecisionHistory:
-            try:
-                self.decision_history = DecisionHistory()
-            except Exception as e:
-                print(f"Warning: Could not initialize decision history: {e}")
+        self.db_path = db_path
+        self.lock = RLock()
+        self._init_database()
     
-    def _init_db(self):
-        """Initialize SQLite database for lesson storage"""
+    def _init_database(self):
+        """Initialize the database schema."""
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             
-            # Lessons learned table
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS lessons_learned (
-                    lesson_id TEXT PRIMARY KEY,
-                    failure_type TEXT NOT NULL,
-                    root_cause TEXT NOT NULL,
-                    context TEXT NOT NULL,
-                    prevention TEXT NOT NULL,
-                    frequency INTEGER NOT NULL,
-                    effectiveness REAL NOT NULL,
-                    sample_failures TEXT,
-                    created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL
-                )
-            ''')
-            
             # Failures table
-            cursor.execute('''
+            cursor.execute("""
                 CREATE TABLE IF NOT EXISTS failures (
                     failure_id TEXT PRIMARY KEY,
-                    decision_id TEXT NOT NULL,
-                    failure_type TEXT NOT NULL,
-                    root_cause TEXT NOT NULL,
-                    context TEXT NOT NULL,
-                    contributing_factors TEXT,
-                    suggested_prevention TEXT NOT NULL,
-                    severity TEXT NOT NULL,
-                    analyzed_at TEXT NOT NULL,
-                    lesson_id TEXT
-                )
-            ''')
-            
-            # Mistake tracking table
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS mistake_tracking (
                     timestamp TEXT NOT NULL,
                     failure_type TEXT NOT NULL,
-                    lesson_applied INTEGER NOT NULL,
-                    mistake_avoided INTEGER NOT NULL
+                    context TEXT NOT NULL,
+                    decision TEXT NOT NULL,
+                    root_cause TEXT NOT NULL,
+                    severity TEXT NOT NULL,
+                    resources TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
-            ''')
+            """)
             
-            # Create indexes
-            cursor.execute('CREATE INDEX IF NOT EXISTS idx_failure_type ON lessons_learned(failure_type)')
-            cursor.execute('CREATE INDEX IF NOT EXISTS idx_effectiveness ON lessons_learned(effectiveness)')
-            cursor.execute('CREATE INDEX IF NOT EXISTS idx_frequency ON lessons_learned(frequency)')
-            cursor.execute('CREATE INDEX IF NOT EXISTS idx_decision_id ON failures(decision_id)')
+            # Lessons table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS lessons (
+                    lesson_id TEXT PRIMARY KEY,
+                    timestamp TEXT NOT NULL,
+                    failure_type TEXT NOT NULL,
+                    root_cause TEXT NOT NULL,
+                    context_pattern TEXT NOT NULL,
+                    prevention TEXT NOT NULL,
+                    severity TEXT NOT NULL,
+                    effectiveness_score REAL DEFAULT 0.0,
+                    application_count INTEGER DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Failure patterns table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS failure_patterns (
+                    pattern_id TEXT PRIMARY KEY,
+                    pattern_hash TEXT NOT NULL UNIQUE,
+                    failure_type TEXT NOT NULL,
+                    context_signature TEXT NOT NULL,
+                    frequency INTEGER DEFAULT 1,
+                    last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    first_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Lesson application tracking
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS lesson_applications (
+                    application_id TEXT PRIMARY KEY,
+                    lesson_id TEXT NOT NULL,
+                    decision_id TEXT,
+                    timestamp TEXT NOT NULL,
+                    prevented BOOLEAN,
+                    FOREIGN KEY (lesson_id) REFERENCES lessons(lesson_id)
+                )
+            """)
+            
+            # Create indexes for efficient queries
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_failures_type 
+                ON failures(failure_type)
+            """)
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_failures_timestamp 
+                ON failures(timestamp)
+            """)
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_lessons_type 
+                ON lessons(failure_type)
+            """)
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_lessons_effectiveness 
+                ON lessons(effectiveness_score DESC)
+            """)
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_patterns_hash 
+                ON failure_patterns(pattern_hash)
+            """)
             
             conn.commit()
     
-    def record_failure(self, decision_id: str, context: Dict[str, Any], 
-                      error_message: str = None) -> FailureAnalysis:
+    def record_failure(
+        self,
+        failure_type: str,
+        context: Dict[str, Any],
+        decision: Dict[str, Any],
+        root_cause: str,
+        severity: str = "medium",
+        resources: Optional[Dict[str, Any]] = None
+    ) -> str:
         """
-        Record a failure with full context
+        Record a failure with full context.
         
         Args:
-            decision_id: ID of the decision that failed
-            context: Context dictionary at time of failure
-            error_message: Error message from the failure
-            
+            failure_type: Type of failure (e.g., 'api_rate_limit', 'timeout', 'invalid_context')
+            context: Context at time of failure
+            decision: Decision that led to failure
+            root_cause: Root cause analysis
+            severity: Severity level (low, medium, high, critical)
+            resources: Resources consumed (tokens, time, etc.)
+        
         Returns:
-            FailureAnalysis object with analysis results
+            failure_id: Unique identifier for the failure record
         """
+        failure_id = str(uuid.uuid4())
+        timestamp = datetime.utcnow().isoformat()
+        
         with self.lock:
-            # Analyze the failure
-            analysis = self._analyze_failure(decision_id, context, error_message)
-            
-            # Save failure to database
-            self._save_failure(analysis)
-            
-            # Check if this matches existing lessons
-            self._check_and_update_lessons(analysis)
-            
-            # Identify if this is part of a failure pattern
-            self._identify_failure_patterns()
-            
-            return analysis
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT INTO failures 
+                    (failure_id, timestamp, failure_type, context, decision, root_cause, severity, resources)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    failure_id,
+                    timestamp,
+                    failure_type,
+                    json.dumps(context),
+                    json.dumps(decision),
+                    root_cause,
+                    severity,
+                    json.dumps(resources) if resources else None
+                ))
+                conn.commit()
+        
+        # Update failure patterns
+        self._update_failure_patterns(failure_type, context)
+        
+        return failure_id
     
-    def _analyze_failure(self, decision_id: str, context: Dict[str, Any],
-                        error_message: str = None) -> FailureAnalysis:
+    def _update_failure_patterns(self, failure_type: str, context: Dict[str, Any]):
         """
-        Analyze a failure to determine root cause and contributing factors
+        Update failure pattern tracking.
         
         Args:
-            decision_id: ID of the decision that failed
-            context: Context dictionary at time of failure
-            error_message: Error message from the failure
-            
-        Returns:
-            FailureAnalysis with analysis results
-        """
-        # Determine failure type
-        failure_type = self._classify_failure_type(context, error_message)
-        
-        # Analyze root cause
-        root_cause = self._analyze_root_cause(context, failure_type)
-        
-        # Identify contributing factors
-        contributing_factors = self._identify_contributing_factors(context, failure_type)
-        
-        # Generate prevention strategy
-        prevention = self._generate_prevention(failure_type, root_cause, contributing_factors)
-        
-        # Determine severity
-        severity = self._determine_severity(context, failure_type)
-        
-        analysis = FailureAnalysis(
-            failure_id=str(uuid.uuid4()),
-            decision_id=decision_id,
-            failure_type=failure_type,
-            root_cause=root_cause,
-            context=context,
-            contributing_factors=contributing_factors,
-            suggested_prevention=prevention,
-            severity=severity,
-            analyzed_at=datetime.utcnow().isoformat()
-        )
-        
-        return analysis
-    
-    def _classify_failure_type(self, context: Dict[str, Any], 
-                               error_message: str = None) -> str:
-        """
-        Classify type of failure
-        
-        Args:
-            context: Context dictionary
-            error_message: Error message from failure
-            
-        Returns:
-            Failure type string
-        """
-        # Check error message first (highest priority)
-        if error_message:
-            error_msg_lower = error_message.lower()
-            if 'timeout' in error_msg_lower:
-                return 'timeout_failure'
-            elif 'connection' in error_msg_lower:
-                return 'connection_failure'
-            elif 'permission' in error_msg_lower or 'access' in error_msg_lower:
-                return 'permission_failure'
-            elif 'memory' in error_msg_lower:
-                return 'memory_failure'
-            elif 'invalid' in error_msg_lower or 'validation' in error_msg_lower:
-                return 'validation_failure'
-        
-        # Check context for trap-based failures
-        detected_traps = context.get('detected_traps', [])
-        if 'loop' in detected_traps:
-            return 'loop_failure'
-        elif 'dead_end' in detected_traps:
-            return 'dead_end_failure'
-        
-        # Check task type for context-based classification
-        task_type = context.get('task_type', '')
-        if 'planning' in task_type:
-            return 'planning_failure'
-        elif 'implementation' in task_type:
-            return 'implementation_failure'
-        elif 'validation' in task_type:
-            return 'validation_failure'
-        
-        # Default
-        return 'unknown_failure'
-    
-    def _analyze_root_cause(self, context: Dict[str, Any], 
-                            failure_type: str) -> str:
-        """
-        Analyze the root cause of a failure
-        
-        Args:
-            context: Context dictionary
             failure_type: Type of failure
-            
+            context: Context at time of failure
+        """
+        # Create a signature from context
+        context_signature = self._create_context_signature(context)
+        pattern_hash = hashlib.md5(
+            f"{failure_type}:{context_signature}".encode()
+        ).hexdigest()
+        
+        with self.lock:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                # Check if pattern exists
+                cursor.execute("""
+                    SELECT pattern_id, frequency 
+                    FROM failure_patterns 
+                    WHERE pattern_hash = ?
+                """, (pattern_hash,))
+                
+                result = cursor.fetchone()
+                timestamp = datetime.utcnow().isoformat()
+                
+                if result:
+                    # Update existing pattern
+                    pattern_id, frequency = result
+                    cursor.execute("""
+                        UPDATE failure_patterns
+                        SET frequency = frequency + 1,
+                            last_seen = ?
+                        WHERE pattern_id = ?
+                    """, (timestamp, pattern_id))
+                else:
+                    # Create new pattern
+                    pattern_id = str(uuid.uuid4())
+                    cursor.execute("""
+                        INSERT INTO failure_patterns
+                        (pattern_id, pattern_hash, failure_type, context_signature, frequency, last_seen, first_seen)
+                        VALUES (?, ?, ?, ?, 1, ?, ?)
+                    """, (pattern_id, pattern_hash, failure_type, context_signature, timestamp, timestamp))
+                
+                conn.commit()
+    
+    def _create_context_signature(self, context: Dict[str, Any]) -> str:
+        """
+        Create a signature from context for pattern matching.
+        
+        Args:
+            context: Context dictionary
+        
+        Returns:
+            String signature of the context
+        """
+        # Extract key features for signature
+        features = []
+        
+        # Task type
+        if 'task_type' in context:
+            features.append(f"task:{context['task_type']}")
+        
+        # Situation type
+        if 'situation_type' in context:
+            features.append(f"situation:{context['situation_type']}")
+        
+        # Error type
+        if 'error_type' in context:
+            features.append(f"error:{context['error_type']}")
+        
+        # Strategy used
+        if 'strategy' in context:
+            features.append(f"strategy:{context['strategy']}")
+        
+        # Action type
+        if 'action_type' in context:
+            features.append(f"action:{context['action_type']}")
+        
+        return "|".join(sorted(features))
+    
+    def analyze_root_cause(
+        self,
+        failure_type: str,
+        context: Dict[str, Any],
+        decision: Dict[str, Any]
+    ) -> str:
+        """
+        Analyze root cause of a failure.
+        
+        Args:
+            failure_type: Type of failure
+            context: Context at time of failure
+            decision: Decision that led to failure
+        
         Returns:
             Root cause description
         """
-        root_causes = {
-            'timeout_failure': 'Insufficient timeout configuration or slow operation',
-            'connection_failure': 'Network connectivity issues or service unavailability',
-            'permission_failure': 'Insufficient permissions or incorrect access configuration',
-            'memory_failure': 'Memory exhaustion or memory leak',
-            'validation_failure': 'Invalid input or failed validation checks',
-            'loop_failure': 'Infinite loop detected in execution logic',
-            'dead_end_failure': 'Execution reached a dead end with no viable path forward',
-            'planning_failure': 'Task planning failed due to incomplete or incorrect requirements',
-            'implementation_failure': 'Implementation failed due to logic errors or incorrect approach',
-            'validation_failure': 'Validation failed due to incorrect acceptance criteria or test issues',
-            'unknown_failure': 'Unknown cause - requires further investigation'
-        }
+        # This is a simplified implementation
+        # In production, this could use LLM for deeper analysis
         
-        return root_causes.get(failure_type, 'Unknown cause')
+        root_causes = []
+        
+        # Check for common root causes
+        if 'error_type' in context:
+            root_causes.append(f"Encountered error: {context['error_type']}")
+        
+        if 'strategy' in decision:
+            strategy = decision.get('strategy')
+            root_causes.append(f"Used strategy: {strategy}")
+        
+        if 'reasoning' in decision:
+            reasoning = decision.get('reasoning', '')[:100]
+            root_causes.append(f"Reasoning: {reasoning}")
+        
+        if 'confidence' in decision:
+            confidence = decision['confidence']
+            if confidence < 0.5:
+                root_causes.append("Low confidence decision (< 0.5)")
+        
+        if not root_causes:
+            root_causes.append("Unknown root cause - insufficient context")
+        
+        return " | ".join(root_causes)
     
-    def _identify_contributing_factors(self, context: Dict[str, Any],
-                                     failure_type: str) -> List[str]:
+    def extract_lesson(
+        self,
+        failure_id: str,
+        prevention: Optional[str] = None
+    ) -> Optional[LessonLearned]:
         """
-        Identify contributing factors to a failure
+        Extract a lesson from a failure.
         
         Args:
-            context: Context dictionary
-            failure_type: Type of failure
-            
+            failure_id: ID of the failure to extract lesson from
+            prevention: Prevention strategy (optional, will be generated if not provided)
+        
         Returns:
-            List of contributing factors
-        """
-        factors = []
-        
-        # Check for insufficient context
-        if context.get('context_level') == 'L0':
-            factors.append('Insufficient context used for decision')
-        
-        # Check for strategy issues
-        strategy = context.get('strategy', '')
-        if strategy == 'aggressive':
-            factors.append('Aggressive strategy may have taken excessive risks')
-        
-        # Check for resource constraints
-        resources = context.get('resources', {})
-        if resources.get('tokens_used', 0) > resources.get('token_budget', 0) * 0.9:
-            factors.append('Resource constraints may have impacted decision quality')
-        
-        # Check for error history
-        error_count = context.get('recent_error_count', 0)
-        if error_count > 3:
-            factors.append(f'High error rate ({error_count} recent errors) indicates systemic issues')
-        
-        # Check for trap detection
-        detected_traps = context.get('detected_traps', [])
-        if detected_traps:
-            factors.append(f'Detected traps: {", ".join(detected_traps)}')
-        
-        # Check for task complexity
-        task_type = context.get('task_type', '')
-        if 'complex' in task_type.lower():
-            factors.append('High task complexity may have contributed to failure')
-        
-        return factors if factors else ['No specific contributing factors identified']
-    
-    def _generate_prevention(self, failure_type: str, root_cause: str,
-                           contributing_factors: List[str]) -> str:
-        """
-        Generate prevention strategy for the failure
-        
-        Args:
-            failure_type: Type of failure
-            root_cause: Root cause description
-            contributing_factors: List of contributing factors
-            
-        Returns:
-            Prevention strategy description
-        """
-        preventions = {
-            'timeout_failure': 'Increase timeout values and implement retry logic with exponential backoff',
-            'connection_failure': 'Implement circuit breaker pattern, connection pooling, and retry logic',
-            'permission_failure': 'Verify and configure appropriate permissions before operation',
-            'memory_failure': 'Optimize memory usage, implement pagination for large datasets, add memory monitoring',
-            'validation_failure': 'Implement comprehensive input validation and pre-flight checks',
-            'loop_failure': 'Add loop detection and automatic loop breaking mechanisms',
-            'dead_end_failure': 'Implement progress tracking and early detection of non-productive paths',
-            'planning_failure': 'Gather complete requirements, validate task complexity, use hierarchical planning',
-            'implementation_failure': 'Use TDD, add comprehensive tests, implement code review process',
-            'validation_failure': 'Review and strengthen acceptance criteria, improve test coverage',
-            'unknown_failure': 'Implement comprehensive logging and monitoring to identify patterns'
-        }
-        
-        base_prevention = preventions.get(failure_type, 'Implement monitoring and logging')
-        
-        # Add factor-specific prevention
-        if 'Insufficient context' in ' '.join(contributing_factors):
-            base_prevention += '; Use higher context level (L1/L2) for complex decisions'
-        
-        if 'Aggressive strategy' in ' '.join(contributing_factors):
-            base_prevention += '; Use more conservative strategies for complex or uncertain situations'
-        
-        return base_prevention
-    
-    def _determine_severity(self, context: Dict[str, Any], 
-                           failure_type: str) -> str:
-        """
-        Determine the severity of a failure
-        
-        Args:
-            context: Context dictionary
-            failure_type: Type of failure
-            
-        Returns:
-            Severity string ('low', 'medium', 'high', 'critical')
-        """
-        # Check error count first for severity adjustment
-        error_count = context.get('recent_error_count', 0)
-        if error_count > 5:
-            return 'critical'
-        elif error_count > 3:
-            return 'high'
-        
-        # Critical failures
-        if failure_type in ['permission_failure', 'memory_failure']:
-            return 'critical'
-        
-        # High severity failures
-        if failure_type in ['timeout_failure', 'connection_failure']:
-            return 'high'
-        
-        # Medium severity failures
-        if failure_type in ['loop_failure', 'dead_end_failure', 'implementation_failure']:
-            return 'medium'
-        
-        # Default
-        return 'low'
-    
-    def _save_failure(self, analysis: FailureAnalysis):
-        """
-        Save failure analysis to database
-        
-        Args:
-            analysis: FailureAnalysis object
-        """
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            
-            cursor.execute('''
-                INSERT INTO failures (
-                    failure_id, decision_id, failure_type, root_cause,
-                    context, contributing_factors, suggested_prevention,
-                    severity, analyzed_at, lesson_id
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                analysis.failure_id,
-                analysis.decision_id,
-                analysis.failure_type,
-                analysis.root_cause,
-                json.dumps(analysis.context),
-                json.dumps(analysis.contributing_factors),
-                analysis.suggested_prevention,
-                analysis.severity,
-                analysis.analyzed_at,
-                None  # lesson_id will be set later
-            ))
-            
-            conn.commit()
-    
-    def _check_and_update_lessons(self, analysis: FailureAnalysis):
-        """
-        Check if failure matches existing lessons and update them
-        
-        Args:
-            analysis: FailureAnalysis object
-        """
-        # Find similar lessons
-        similar_lessons = self._find_similar_lessons(analysis)
-        
-        if similar_lessons:
-            # Update existing lesson
-            lesson_id = similar_lessons[0]['lesson_id']
-            self._update_lesson(lesson_id, analysis)
-            # Update analysis object with lesson_id
-            analysis.lesson_id = lesson_id
-        else:
-            # Create new lesson
-            lesson_id = self._create_lesson_from_failure(analysis)
-            # Update analysis object with lesson_id
-            analysis.lesson_id = lesson_id
-    
-    def _find_similar_lessons(self, analysis: FailureAnalysis) -> List[Dict[str, Any]]:
-        """
-        Find lessons similar to this failure
-        
-        Args:
-            analysis: FailureAnalysis object
-            
-        Returns:
-            List of similar lesson dictionaries
-        """
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            
-            # Find lessons with same failure type and similar root cause
-            cursor.execute('''
-                SELECT lesson_id, failure_type, root_cause, prevention, frequency
-                FROM lessons_learned
-                WHERE failure_type = ?
-                ORDER BY effectiveness DESC, frequency DESC
-                LIMIT 5
-            ''', (analysis.failure_type,))
-            
-            lessons = []
-            for row in cursor.fetchall():
-                lesson = {
-                    'lesson_id': row[0],
-                    'failure_type': row[1],
-                    'root_cause': row[2],
-                    'prevention': row[3],
-                    'frequency': row[4]
-                }
-                lessons.append(lesson)
-            
-            return lessons
-    
-    def _update_lesson(self, lesson_id: str, analysis: FailureAnalysis):
-        """
-        Update an existing lesson with new failure
-        
-        Args:
-            lesson_id: ID of lesson to update
-            analysis: FailureAnalysis object
-        """
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            
-            # Increment frequency
-            cursor.execute('''
-                UPDATE lessons_learned
-                SET frequency = frequency + 1,
-                    updated_at = ?
-                WHERE lesson_id = ?
-            ''', (datetime.utcnow().isoformat(), lesson_id))
-            
-            # Update failure with lesson_id
-            cursor.execute('''
-                UPDATE failures
-                SET lesson_id = ?
-                WHERE failure_id = ?
-            ''', (lesson_id, analysis.failure_id))
-            
-            conn.commit()
-    
-    def _create_lesson_from_failure(self, analysis: FailureAnalysis) -> str:
-        """
-        Create a new lesson from a failure
-        
-        Args:
-            analysis: FailureAnalysis object
-            
-        Returns:
-            lesson_id: ID of created lesson
-        """
-        lesson = LessonLearned(
-            lesson_id=str(uuid.uuid4()),
-            failure_type=analysis.failure_type,
-            root_cause=analysis.root_cause,
-            context=analysis.context,
-            prevention=analysis.suggested_prevention,
-            frequency=1,
-            effectiveness=0.5,  # Start with moderate effectiveness
-            created_at=datetime.utcnow().isoformat(),
-            updated_at=datetime.utcnow().isoformat(),
-            sample_failures=[analysis.failure_id]
-        )
-        
-        self._save_lesson(lesson)
-        
-        # Update failure with lesson_id
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute('''
-                UPDATE failures
-                SET lesson_id = ?
-                WHERE failure_id = ?
-            ''', (lesson.lesson_id, analysis.failure_id))
-            conn.commit()
-        
-        return lesson.lesson_id
-    
-    def _save_lesson(self, lesson: LessonLearned):
-        """
-        Save lesson to database
-        
-        Args:
-            lesson: LessonLearned object
-        """
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            
-            cursor.execute('''
-                INSERT INTO lessons_learned (
-                    lesson_id, failure_type, root_cause, context, prevention,
-                    frequency, effectiveness, sample_failures, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                lesson.lesson_id,
-                lesson.failure_type,
-                lesson.root_cause,
-                json.dumps(lesson.context),
-                lesson.prevention,
-                lesson.frequency,
-                lesson.effectiveness,
-                json.dumps(lesson.sample_failures),
-                lesson.created_at,
-                lesson.updated_at
-            ))
-            
-            conn.commit()
-    
-    def _identify_failure_patterns(self):
-        """
-        Identify patterns in failures
-        """
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            
-            # Get recent failures
-            cursor.execute('''
-                SELECT failure_type, root_cause, COUNT(*) as count
-                FROM failures
-                WHERE analyzed_at > datetime('now', '-7 days')
-                GROUP BY failure_type, root_cause
-                HAVING count >= ?
-                ORDER BY count DESC
-            ''', (self.min_pattern_frequency,))
-            
-            patterns = cursor.fetchall()
-            
-            for failure_type, root_cause, count in patterns:
-                print(f"Failure pattern identified: {failure_type} - {root_cause} ({count} occurrences)")
-    
-    def get_lessons_for_context(self, context: Dict[str, Any]) -> List[LessonLearned]:
-        """
-        Get relevant lessons for a given context
-        
-        Args:
-            context: Current context dictionary
-            
-        Returns:
-            List of relevant LessonLearned objects
+            LessonLearned object or None if failure not found
         """
         with self.lock:
-            # Determine failure type from context
-            failure_type = self._classify_failure_type(context)
-            
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT failure_id, timestamp, failure_type, context, decision, root_cause, severity
+                    FROM failures
+                    WHERE failure_id = ?
+                """, (failure_id,))
                 
-                # Get lessons for this failure type
-                cursor.execute('''
-                    SELECT lesson_id, failure_type, root_cause, context, prevention,
-                           frequency, effectiveness, sample_failures, created_at, updated_at
-                    FROM lessons_learned
-                    WHERE failure_type = ? AND effectiveness >= ?
-                    ORDER BY effectiveness DESC, frequency DESC
-                    LIMIT 10
-                ''', (failure_type, self.effectiveness_threshold))
-                
-                lessons = []
-                for row in cursor.fetchall():
-                    lesson = LessonLearned(
-                        lesson_id=row[0],
-                        failure_type=row[1],
-                        root_cause=row[2],
-                        context=json.loads(row[3]),
-                        prevention=row[4],
-                        frequency=row[5],
-                        effectiveness=row[6],
-                        sample_failures=json.loads(row[7]) if row[7] else [],
-                        created_at=row[8],
-                        updated_at=row[9]
-                    )
-                    lessons.append(lesson)
-                
-                return lessons
-    
-    def apply_lesson(self, lesson_id: str, success: bool):
-        """
-        Record whether a lesson was applied and if it was successful
-        
-        Args:
-            lesson_id: ID of the lesson
-            success: Whether the lesson application was successful
-        """
-        with self.lock:
-            # Get lesson to determine failure type
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-                cursor.execute('SELECT failure_type FROM lessons_learned WHERE lesson_id = ?', (lesson_id,))
                 result = cursor.fetchone()
                 if not result:
-                    return
-                failure_type = result[0]
-            
-            # Update lesson effectiveness
-            new_effectiveness = self._calculate_effectiveness(lesson_id, success)
-            
+                    return None
+                
+                failure_id, timestamp, failure_type, context, decision, root_cause, severity = result
+                context = json.loads(context)
+                decision = json.loads(decision)
+        
+        # Generate prevention strategy if not provided
+        if prevention is None:
+            prevention = self._generate_prevention(failure_type, context, decision, root_cause)
+        
+        # Create context pattern for matching
+        context_pattern = self._create_context_pattern(context, failure_type)
+        
+        lesson_id = str(uuid.uuid4())
+        lesson = LessonLearned(
+            lesson_id=lesson_id,
+            timestamp=datetime.utcnow().isoformat(),
+            failure_type=failure_type,
+            root_cause=root_cause,
+            context_pattern=context_pattern,
+            prevention=prevention,
+            severity=severity
+        )
+        
+        # Store lesson
+        with self.lock:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
-                cursor.execute('''
-                    UPDATE lessons_learned
-                    SET effectiveness = ?, updated_at = ?
-                    WHERE lesson_id = ?
-                ''', (new_effectiveness, datetime.utcnow().isoformat(), lesson_id))
+                cursor.execute("""
+                    INSERT INTO lessons
+                    (lesson_id, timestamp, failure_type, root_cause, context_pattern, prevention, severity)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    lesson_id,
+                    lesson.timestamp,
+                    lesson.failure_type,
+                    lesson.root_cause,
+                    lesson.context_pattern,
+                    lesson.prevention,
+                    lesson.severity
+                ))
                 conn.commit()
-            
-            # Record in mistake tracking
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-                cursor.execute('''
-                    INSERT INTO mistake_tracking (timestamp, failure_type, lesson_applied, mistake_avoided)
-                    VALUES (?, ?, ?, ?)
-                ''', (datetime.utcnow().isoformat(), failure_type, 1, 1 if success else 0))
-                conn.commit()
+        
+        return lesson
     
-    def _calculate_effectiveness(self, lesson_id: str, success: bool) -> float:
+    def _create_context_pattern(self, context: Dict[str, Any], failure_type: str) -> str:
         """
-        Calculate new effectiveness score for a lesson
+        Create a pattern string for context matching.
         
         Args:
-            lesson_id: ID of the lesson
-            success: Whether the lesson application was successful
-            
-        Returns:
-            New effectiveness score (0.0 to 1.0)
-        """
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            
-            # Get current effectiveness and frequency
-            cursor.execute('''
-                SELECT effectiveness, frequency FROM lessons_learned WHERE lesson_id = ?
-            ''', (lesson_id,))
-            result = cursor.fetchone()
-            if not result:
-                return 0.5
-            
-            current_effectiveness, frequency = result
-            
-            # Weighted update: recent applications have more weight
-            weight = min(1.0, 5 / frequency)  # More weight for early applications
-            new_effectiveness = (current_effectiveness * (1 - weight) + 
-                              (1.0 if success else 0.0) * weight)
-            
-            return new_effectiveness
-    
-    def get_mistake_statistics(self) -> Dict[str, Any]:
-        """
-        Get statistics about mistakes and lessons
+            context: Context dictionary
+            failure_type: Type of failure
         
         Returns:
-            Dictionary with mistake statistics
+            Pattern string
         """
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
+        # Don't include failure_type in pattern, rely on error_type in context
+        # This allows lessons to match based on observable context rather than internal type
+        
+        patterns = []
+        
+        # Add relevant context features (only include existing keys)
+        for key in ['task_type', 'situation_type', 'error_type', 'action_type', 'strategy']:
+            if key in context:
+                patterns.append(f"{key}={context[key]}")
+        
+        return " AND ".join(patterns)
+    
+    def _generate_prevention(
+        self,
+        failure_type: str,
+        context: Dict[str, Any],
+        decision: Dict[str, Any],
+        root_cause: str
+    ) -> str:
+        """
+        Generate prevention strategy for a failure.
+        
+        Args:
+            failure_type: Type of failure
+            context: Context at time of failure
+            decision: Decision that led to failure
+            root_cause: Root cause analysis
+        
+        Returns:
+            Prevention strategy string
+        """
+        # This is a simplified implementation
+        # In production, this could use LLM for better prevention strategies
+        
+        strategies = {
+            'api_rate_limit': 'Implement rate limiting and exponential backoff',
+            'timeout': 'Increase timeout limits or break operation into smaller chunks',
+            'invalid_context': 'Validate context completeness before decision making',
+            'insufficient_tokens': 'Monitor token usage and implement budget management',
+            'low_confidence': 'Require minimum confidence threshold or request more context',
+            'loop_detected': 'Implement loop detection and recovery mechanisms',
+            'dead_end': 'Implement early progress validation and backtracking',
+            'circular_reasoning': 'Track decision dependencies and document decisions',
+            'scope_creep': 'Freeze task scope and break into smaller subtasks'
+        }
+        
+        if failure_type in strategies:
+            return strategies[failure_type]
+        
+        # Generic prevention based on root cause
+        if 'low confidence' in root_cause:
+            return 'Increase confidence threshold or request more context before decision'
+        elif 'error' in root_cause.lower():
+            return 'Implement error handling and recovery mechanisms'
+        else:
+            return 'Analyze similar past failures and apply learned prevention strategies'
+    
+    def check_lessons(
+        self,
+        current_context: Dict[str, Any],
+        current_decision: Dict[str, Any]
+    ) -> List[LessonLearned]:
+        """
+        Check if any lessons apply to current situation.
+        
+        Args:
+            current_context: Current context
+            current_decision: Current decision being considered
+        
+        Returns:
+            List of applicable lessons
+        """
+        applicable_lessons = []
+        
+        with self.lock:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                # Query all lessons
+                cursor.execute("""
+                    SELECT lesson_id, timestamp, failure_type, root_cause, 
+                           context_pattern, prevention, severity, effectiveness_score, application_count
+                    FROM lessons
+                    ORDER BY effectiveness_score DESC
+                """)
+                
+                results = cursor.fetchall()
+        
+        for result in results:
+            (lesson_id, timestamp, failure_type, root_cause, context_pattern,
+             prevention, severity, effectiveness_score, application_count) = result
             
-            # Total failures
-            cursor.execute('SELECT COUNT(*) FROM failures')
-            total_failures = cursor.fetchone()[0]
+            lesson = LessonLearned(
+                lesson_id=lesson_id,
+                timestamp=timestamp,
+                failure_type=failure_type,
+                root_cause=root_cause,
+                context_pattern=context_pattern,
+                prevention=prevention,
+                severity=severity,
+                effectiveness_score=effectiveness_score,
+                application_count=application_count
+            )
             
-            # Failures by type
-            cursor.execute('''
-                SELECT failure_type, COUNT(*) as count
-                FROM failures
-                GROUP BY failure_type
-                ORDER BY count DESC
-            ''')
-            failures_by_type = dict(cursor.fetchall())
+            # Check if lesson applies
+            if self._lesson_applies(lesson, current_context, current_decision):
+                applicable_lessons.append(lesson)
+        
+        return applicable_lessons
+    
+    def _lesson_applies(
+        self,
+        lesson: LessonLearned,
+        current_context: Dict[str, Any],
+        current_decision: Dict[str, Any]
+    ) -> bool:
+        """
+        Check if a lesson applies to current situation.
+        
+        Args:
+            lesson: Lesson to check
+            current_context: Current context
+            current_decision: Current decision
+        
+        Returns:
+            True if lesson applies
+        """
+        # Parse lesson context pattern
+        pattern_parts = lesson.context_pattern.split(" AND ")
+        
+        matched_conditions = 0
+        
+        for part in pattern_parts:
+            if "=" not in part:
+                continue
             
-            # Total lessons
-            cursor.execute('SELECT COUNT(*) FROM lessons_learned')
-            total_lessons = cursor.fetchone()[0]
+            key, value = part.split("=", 1)
+            key = key.strip()
+            value = value.strip()
             
-            # Average effectiveness
-            cursor.execute('SELECT AVG(effectiveness) FROM lessons_learned')
-            avg_effectiveness = cursor.fetchone()[0] or 0.0
-            
-            # Mistake tracking
-            cursor.execute('''
-                SELECT 
-                    SUM(lesson_applied) as total_applied,
-                    SUM(mistake_avoided) as total_avoided,
-                    COUNT(*) as total_attempts
-                FROM mistake_tracking
-            ''')
-            result = cursor.fetchone()
-            if result:
-                total_applied = result[0] or 0
-                total_avoided = result[1] or 0
-                total_attempts = result[2] or 0
-                avoidance_rate = total_avoided / total_applied if total_applied > 0 else 0.0
+            # Check if current context matches pattern
+            if key in current_context:
+                if str(current_context[key]) != value:
+                    return False
+                matched_conditions += 1
+            elif key in current_decision:
+                if str(current_decision[key]) != value:
+                    return False
+                matched_conditions += 1
             else:
-                total_applied = 0
-                total_avoided = 0
-                total_attempts = 0
-                avoidance_rate = 0.0
-            
-            return {
-                'total_failures': total_failures,
-                'failures_by_type': failures_by_type,
-                'total_lessons': total_lessons,
-                'average_effectiveness': avg_effectiveness,
-                'total_lesson_applications': total_applied,
-                'mistakes_avoided': total_avoided,
-                'mistake_avoidance_rate': avoidance_rate,
-                'total_attempts': total_attempts
-            }
+                # Key not found - pattern doesn't match
+                return False
+        
+        # Must match at least one condition
+        return matched_conditions > 0
     
-    def get_lessons_by_effectiveness(self, min_effectiveness: float = 0.7, 
-                                    limit: int = 20) -> List[LessonLearned]:
+    def apply_lesson(
+        self,
+        lesson_id: str,
+        decision_id: Optional[str] = None,
+        prevented: bool = True
+    ) -> bool:
         """
-        Get lessons sorted by effectiveness
+        Record application of a lesson.
         
         Args:
-            min_effectiveness: Minimum effectiveness threshold
+            lesson_id: ID of the lesson applied
+            decision_id: ID of the decision (optional)
+            prevented: Whether the lesson prevented a failure
+        
+        Returns:
+            True if successful
+        """
+        application_id = str(uuid.uuid4())
+        timestamp = datetime.utcnow().isoformat()
+        
+        with self.lock:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                # Record application
+                cursor.execute("""
+                    INSERT INTO lesson_applications
+                    (application_id, lesson_id, decision_id, timestamp, prevented)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (application_id, lesson_id, decision_id, timestamp, prevented))
+                
+                # Update lesson application count
+                cursor.execute("""
+                    UPDATE lessons
+                    SET application_count = application_count + 1
+                    WHERE lesson_id = ?
+                """, (lesson_id,))
+                
+                # Update effectiveness score
+                if prevented:
+                    cursor.execute("""
+                        UPDATE lessons
+                        SET effectiveness_score = effectiveness_score + 0.1
+                        WHERE lesson_id = ? AND effectiveness_score < 1.0
+                    """, (lesson_id,))
+                
+                conn.commit()
+        
+        return True
+    
+    def get_failure_patterns(
+        self,
+        failure_type: Optional[str] = None,
+        min_frequency: int = 2
+    ) -> List[Dict[str, Any]]:
+        """
+        Get frequent failure patterns.
+        
+        Args:
+            failure_type: Filter by failure type (optional)
+            min_frequency: Minimum frequency threshold
+        
+        Returns:
+            List of failure patterns
+        """
+        patterns = []
+        
+        with self.lock:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                if failure_type:
+                    cursor.execute("""
+                        SELECT pattern_id, pattern_hash, failure_type, context_signature, 
+                               frequency, last_seen, first_seen
+                        FROM failure_patterns
+                        WHERE failure_type = ? AND frequency >= ?
+                        ORDER BY frequency DESC
+                    """, (failure_type, min_frequency))
+                else:
+                    cursor.execute("""
+                        SELECT pattern_id, pattern_hash, failure_type, context_signature, 
+                               frequency, last_seen, first_seen
+                        FROM failure_patterns
+                        WHERE frequency >= ?
+                        ORDER BY frequency DESC
+                    """, (min_frequency,))
+                
+                results = cursor.fetchall()
+        
+        for result in results:
+            pattern_id, pattern_hash, failure_type, context_signature, frequency, last_seen, first_seen = result
+            patterns.append({
+                'pattern_id': pattern_id,
+                'pattern_hash': pattern_hash,
+                'failure_type': failure_type,
+                'context_signature': context_signature,
+                'frequency': frequency,
+                'last_seen': last_seen,
+                'first_seen': first_seen
+            })
+        
+        return patterns
+    
+    def get_lessons(
+        self,
+        failure_type: Optional[str] = None,
+        min_effectiveness: float = 0.0,
+        limit: int = 100
+    ) -> List[LessonLearned]:
+        """
+        Get lessons learned.
+        
+        Args:
+            failure_type: Filter by failure type (optional)
+            min_effectiveness: Minimum effectiveness score
             limit: Maximum number of lessons to return
-            
+        
         Returns:
-            List of LessonLearned objects
+            List of lessons
         """
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
+        lessons = []
+        
+        with self.lock:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                if failure_type:
+                    cursor.execute("""
+                        SELECT lesson_id, timestamp, failure_type, root_cause,
+                               context_pattern, prevention, severity, effectiveness_score, application_count
+                        FROM lessons
+                        WHERE failure_type = ? AND effectiveness_score >= ?
+                        ORDER BY effectiveness_score DESC
+                        LIMIT ?
+                    """, (failure_type, min_effectiveness, limit))
+                else:
+                    cursor.execute("""
+                        SELECT lesson_id, timestamp, failure_type, root_cause,
+                               context_pattern, prevention, severity, effectiveness_score, application_count
+                        FROM lessons
+                        WHERE effectiveness_score >= ?
+                        ORDER BY effectiveness_score DESC
+                        LIMIT ?
+                    """, (min_effectiveness, limit))
+                
+                results = cursor.fetchall()
+        
+        for result in results:
+            (lesson_id, timestamp, failure_type, root_cause, context_pattern,
+             prevention, severity, effectiveness_score, application_count) = result
             
-            cursor.execute('''
-                SELECT lesson_id, failure_type, root_cause, context, prevention,
-                       frequency, effectiveness, sample_failures, created_at, updated_at
-                FROM lessons_learned
-                WHERE effectiveness >= ?
-                ORDER BY effectiveness DESC, frequency DESC
-                LIMIT ?
-            ''', (min_effectiveness, limit))
-            
-            lessons = []
-            for row in cursor.fetchall():
-                lesson = LessonLearned(
-                    lesson_id=row[0],
-                    failure_type=row[1],
-                    root_cause=row[2],
-                    context=json.loads(row[3]),
-                    prevention=row[4],
-                    frequency=row[5],
-                    effectiveness=row[6],
-                    sample_failures=json.loads(row[7]) if row[7] else [],
-                    created_at=row[8],
-                    updated_at=row[9]
-                )
-                lessons.append(lesson)
-            
-            return lessons
+            lessons.append(LessonLearned(
+                lesson_id=lesson_id,
+                timestamp=timestamp,
+                failure_type=failure_type,
+                root_cause=root_cause,
+                context_pattern=context_pattern,
+                prevention=prevention,
+                severity=severity,
+                effectiveness_score=effectiveness_score,
+                application_count=application_count
+            ))
+        
+        return lessons
     
-    def get_recent_failures(self, limit: int = 20) -> List[FailureAnalysis]:
+    def get_mistake_reduction_metrics(self) -> Dict[str, Any]:
         """
-        Get recent failures
+        Get metrics on mistake reduction over time.
+        
+        Returns:
+            Dictionary with reduction metrics
+        """
+        metrics = {
+            'total_failures': 0,
+            'total_lessons': 0,
+            'total_applications': 0,
+            'prevented_failures': 0,
+            'failure_by_type': defaultdict(int),
+            'lesson_effectiveness': [],
+            'patterns_found': 0
+        }
+        
+        with self.lock:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                # Count failures
+                cursor.execute("SELECT COUNT(*) FROM failures")
+                metrics['total_failures'] = cursor.fetchone()[0]
+                
+                # Count failures by type
+                cursor.execute("""
+                    SELECT failure_type, COUNT(*) 
+                    FROM failures 
+                    GROUP BY failure_type
+                """)
+                for failure_type, count in cursor.fetchall():
+                    metrics['failure_by_type'][failure_type] = count
+                
+                # Count lessons
+                cursor.execute("SELECT COUNT(*) FROM lessons")
+                metrics['total_lessons'] = cursor.fetchone()[0]
+                
+                # Count lesson applications
+                cursor.execute("SELECT COUNT(*) FROM lesson_applications")
+                metrics['total_applications'] = cursor.fetchone()[0]
+                
+                # Count prevented failures
+                cursor.execute("""
+                    SELECT COUNT(*) 
+                    FROM lesson_applications 
+                    WHERE prevented = 1
+                """)
+                metrics['prevented_failures'] = cursor.fetchone()[0]
+                
+                # Get effectiveness scores
+                cursor.execute("SELECT effectiveness_score FROM lessons")
+                metrics['lesson_effectiveness'] = [score[0] for score in cursor.fetchall()]
+                
+                # Count patterns
+                cursor.execute("SELECT COUNT(*) FROM failure_patterns")
+                metrics['patterns_found'] = cursor.fetchone()[0]
+        
+        # Calculate derived metrics
+        if metrics['total_lessons'] > 0:
+            metrics['avg_effectiveness'] = sum(metrics['lesson_effectiveness']) / len(metrics['lesson_effectiveness'])
+        else:
+            metrics['avg_effectiveness'] = 0.0
+        
+        if metrics['total_applications'] > 0:
+            metrics['prevention_rate'] = metrics['prevented_failures'] / metrics['total_applications']
+        else:
+            metrics['prevention_rate'] = 0.0
+        
+        # Convert defaultdict to dict
+        metrics['failure_by_type'] = dict(metrics['failure_by_type'])
+        
+        return metrics
+    
+    def delete_old_failures(self, days_old: int = 90) -> int:
+        """
+        Delete old failure records.
         
         Args:
-            limit: Maximum number of failures to return
-            
+            days_old: Delete failures older than this many days
+        
         Returns:
-            List of FailureAnalysis objects
+            Number of failures deleted
         """
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            
-            cursor.execute('''
-                SELECT failure_id, decision_id, failure_type, root_cause,
-                       context, contributing_factors, suggested_prevention,
-                       severity, analyzed_at, lesson_id
-                FROM failures
-                ORDER BY analyzed_at DESC
-                LIMIT ?
-            ''', (limit,))
-            
-            failures = []
-            for row in cursor.fetchall():
-                failure = FailureAnalysis(
-                    failure_id=row[0],
-                    decision_id=row[1],
-                    failure_type=row[2],
-                    root_cause=row[3],
-                    context=json.loads(row[4]),
-                    contributing_factors=json.loads(row[5]),
-                    suggested_prevention=row[6],
-                    severity=row[7],
-                    analyzed_at=row[8],
-                    lesson_id=row[9]
-                )
-                failures.append(failure)
-            
-            return failures
+        from datetime import datetime, timedelta
+        
+        cutoff_date = (datetime.utcnow() - timedelta(days=days_old)).isoformat()
+        
+        with self.lock:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    DELETE FROM failures
+                    WHERE timestamp < ?
+                """, (cutoff_date,))
+                deleted_count = cursor.rowcount
+                conn.commit()
+        
+        return deleted_count
     
-    def cleanup_old_data(self, days: int = 90):
+    def export_lessons(self, output_format: str = "json") -> str:
         """
-        Clean up old failures and lessons
+        Export all lessons to a string.
         
         Args:
-            days: Number of days to keep data
-        """
-        cutoff_date = (datetime.utcnow() - timedelta(days=days)).isoformat()
+            output_format: Format to export ('json' or 'dict')
         
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            
-            # Delete old failures
-            cursor.execute('DELETE FROM failures WHERE analyzed_at < ?', (cutoff_date,))
-            
-            # Delete old lessons with low effectiveness
-            cursor.execute('''
-                DELETE FROM lessons_learned 
-                WHERE updated_at < ? AND effectiveness < 0.5 AND frequency < 3
-            ''', (cutoff_date,))
-            
-            conn.commit()
+        Returns:
+            Exported lessons as string or dict
+        """
+        lessons = self.get_lessons()
+        
+        if output_format == "dict":
+            return [lesson.to_dict() for lesson in lessons]
+        elif output_format == "json":
+            return json.dumps([lesson.to_dict() for lesson in lessons], indent=2)
+        else:
+            raise ValueError(f"Unsupported output format: {output_format}")

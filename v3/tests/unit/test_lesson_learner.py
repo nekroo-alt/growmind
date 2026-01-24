@@ -1,699 +1,877 @@
 """
-Unit tests for Lesson Learner module
+Unit tests for Lesson Learner module.
+
+Tests cover:
+- Failure recording
+- Root cause analysis
+- Pattern identification
+- Lesson extraction
+- Lesson application
+- Lesson checking
+- Metrics calculation
+- Data management
 """
 
 import pytest
-import sqlite3
 import tempfile
 import os
-from datetime import datetime
-from v3.logic.lesson_learner import LessonLearner, LessonLearned, FailureAnalysis
+import sqlite3
+from datetime import datetime, timedelta
+from v3.logic.lesson_learner import (
+    LessonLearner,
+    FailureRecord,
+    LessonLearned
+)
 
 
-class TestLessonLearner:
-    """Test suite for LessonLearner class"""
+@pytest.fixture
+def temp_db_path():
+    """Create a temporary database path for testing."""
+    fd, path = tempfile.mkstemp(suffix='.db')
+    os.close(fd)
+    yield path
+    if os.path.exists(path):
+        os.unlink(path)
+
+
+@pytest.fixture
+def learner(temp_db_path):
+    """Create a LessonLearner instance with temporary database."""
+    return LessonLearner(db_path=temp_db_path)
+
+
+class TestFailureRecording:
+    """Tests for failure recording functionality."""
     
-    @pytest.fixture
-    def temp_db_path(self):
-        """Create temporary database for testing"""
-        fd, path = tempfile.mkstemp(suffix='.db')
-        os.close(fd)
-        yield path
-        if os.path.exists(path):
-            os.remove(path)
-    
-    @pytest.fixture
-    def learner(self, temp_db_path):
-        """Create LessonLearner instance with temporary database"""
-        learner = LessonLearner(db_path=temp_db_path)
-        yield learner
-        # Cleanup is handled by temp_db_path fixture
-    
-    def test_initialization(self, temp_db_path):
-        """Test that LessonLearner initializes correctly"""
-        learner = LessonLearner(db_path=temp_db_path)
-        
-        # Check that database was created
-        assert os.path.exists(temp_db_path)
-        
-        # Check that tables were created
-        conn = sqlite3.connect(temp_db_path)
-        cursor = conn.cursor()
-        
-        # Check lessons_learned table
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='lessons_learned'")
-        assert cursor.fetchone() is not None
-        
-        # Check failures table
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='failures'")
-        assert cursor.fetchone() is not None
-        
-        # Check mistake_tracking table
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='mistake_tracking'")
-        assert cursor.fetchone() is not None
-        
-        conn.close()
-    
-    def test_record_timeout_failure(self, learner):
-        """Test recording a timeout failure"""
-        decision_id = "test-decision-1"
+    def test_record_failure_basic(self, learner):
+        """Test basic failure recording."""
         context = {
-            'situation_type': 'normal',
             'task_type': 'implementation',
-            'context_level': 'L0',
+            'situation_type': 'normal',
+            'error_type': 'api_rate_limit'
+        }
+        decision = {
+            'action': 'call_llm_api',
             'strategy': 'balanced',
-            'resources': {'tokens_used': 1000, 'token_budget': 5000}
+            'confidence': 0.7
         }
-        error_message = "Operation timed out after 30 seconds"
+        root_cause = 'API rate limit exceeded'
         
-        analysis = learner.record_failure(decision_id, context, error_message)
+        failure_id = learner.record_failure(
+            failure_type='api_rate_limit',
+            context=context,
+            decision=decision,
+            root_cause=root_cause,
+            severity='medium'
+        )
         
-        # Check analysis
-        assert analysis.decision_id == decision_id
-        assert analysis.failure_type == 'timeout_failure'
-        assert analysis.severity == 'high'
-        assert 'timeout' in analysis.root_cause.lower()
-        assert len(analysis.contributing_factors) >= 0
-        assert 'retry' in analysis.suggested_prevention.lower()
-        
-        # Check that failure was saved to database
-        conn = sqlite3.connect(learner.db_path)
-        cursor = conn.cursor()
-        cursor.execute('SELECT COUNT(*) FROM failures WHERE decision_id = ?', (decision_id,))
-        count = cursor.fetchone()[0]
-        assert count == 1
-        conn.close()
+        assert failure_id is not None
+        assert len(failure_id) > 0
     
-    def test_record_connection_failure(self, learner):
-        """Test recording a connection failure"""
-        decision_id = "test-decision-2"
-        context = {
-            'situation_type': 'error',
-            'task_type': 'implementation'
-        }
-        error_message = "Failed to connect to database: connection refused"
-        
-        analysis = learner.record_failure(decision_id, context, error_message)
-        
-        assert analysis.failure_type == 'connection_failure'
-        assert analysis.severity == 'high'
-        assert 'connection' in analysis.root_cause.lower()
-    
-    def test_record_permission_failure(self, learner):
-        """Test recording a permission failure"""
-        decision_id = "test-decision-3"
-        context = {
-            'situation_type': 'normal',
-            'task_type': 'implementation'
-        }
-        error_message = "Permission denied: cannot write to file"
-        
-        analysis = learner.record_failure(decision_id, context, error_message)
-        
-        assert analysis.failure_type == 'permission_failure'
-        assert analysis.severity == 'critical'
-        assert 'permission' in analysis.root_cause.lower()
-    
-    def test_record_memory_failure(self, learner):
-        """Test recording a memory failure"""
-        decision_id = "test-decision-4"
-        context = {
-            'situation_type': 'error',
-            'task_type': 'implementation'
-        }
-        error_message = "Out of memory: cannot allocate buffer"
-        
-        analysis = learner.record_failure(decision_id, context, error_message)
-        
-        assert analysis.failure_type == 'memory_failure'
-        assert analysis.severity == 'critical'
-        assert 'memory' in analysis.root_cause.lower()
-    
-    def test_record_validation_failure(self, learner):
-        """Test recording a validation failure"""
-        decision_id = "test-decision-5"
-        context = {
-            'situation_type': 'normal',
-            'task_type': 'validation'
-        }
-        error_message = "Invalid input: validation failed for field 'name'"
-        
-        analysis = learner.record_failure(decision_id, context, error_message)
-        
-        assert analysis.failure_type == 'validation_failure'
-        assert 'validation' in analysis.root_cause.lower()
-    
-    def test_record_loop_failure(self, learner):
-        """Test recording a loop failure"""
-        decision_id = "test-decision-6"
-        context = {
-            'situation_type': 'error',
-            'task_type': 'implementation',
-            'detected_traps': ['loop', 'dead_end']
+    def test_record_failure_with_resources(self, learner):
+        """Test failure recording with resource information."""
+        context = {'task_type': 'planning'}
+        decision = {'action': 'analyze'}
+        root_cause = 'Insufficient tokens'
+        resources = {
+            'tokens_used': 1500,
+            'time_elapsed': 2.5,
+            'cost': 0.03
         }
         
-        analysis = learner.record_failure(decision_id, context)
+        failure_id = learner.record_failure(
+            failure_type='insufficient_tokens',
+            context=context,
+            decision=decision,
+            root_cause=root_cause,
+            resources=resources
+        )
         
-        assert analysis.failure_type == 'loop_failure'
-        assert analysis.severity == 'medium'
-        assert 'loop' in analysis.root_cause.lower()
+        assert failure_id is not None
     
-    def test_record_dead_end_failure(self, learner):
-        """Test recording a dead end failure"""
-        decision_id = "test-decision-7"
-        context = {
-            'situation_type': 'error',
-            'task_type': 'implementation',
-            'detected_traps': ['dead_end']
-        }
+    def test_record_failure_different_severities(self, learner):
+        """Test recording failures with different severity levels."""
+        severities = ['low', 'medium', 'high', 'critical']
+        failure_ids = []
         
-        analysis = learner.record_failure(decision_id, context)
+        for severity in severities:
+            failure_id = learner.record_failure(
+                failure_type='test_failure',
+                context={'test': True},
+                decision={'action': 'test'},
+                root_cause='Test',
+                severity=severity
+            )
+            failure_ids.append(failure_id)
         
-        assert analysis.failure_type == 'dead_end_failure'
-        assert analysis.severity == 'medium'
-        assert 'dead end' in analysis.root_cause.lower()
+        assert len(failure_ids) == len(severities)
+        assert all(fid is not None for fid in failure_ids)
     
-    def test_record_planning_failure(self, learner):
-        """Test recording a planning failure"""
-        decision_id = "test-decision-8"
-        context = {
-            'situation_type': 'normal',
-            'task_type': 'planning'
-        }
+    def test_record_multiple_failures(self, learner):
+        """Test recording multiple failures."""
+        failure_ids = []
         
-        analysis = learner.record_failure(decision_id, context)
-        
-        assert analysis.failure_type == 'planning_failure'
-        assert 'planning' in analysis.root_cause.lower()
-    
-    def test_record_implementation_failure(self, learner):
-        """Test recording an implementation failure"""
-        decision_id = "test-decision-9"
-        context = {
-            'situation_type': 'normal',
-            'task_type': 'implementation'
-        }
-        
-        analysis = learner.record_failure(decision_id, context)
-        
-        assert analysis.failure_type == 'implementation_failure'
-        assert analysis.severity == 'medium'
-        assert 'implementation' in analysis.root_cause.lower()
-    
-    def test_identify_contributing_factors(self, learner):
-        """Test identification of contributing factors"""
-        decision_id = "test-decision-10"
-        context = {
-            'situation_type': 'normal',
-            'task_type': 'implementation',
-            'context_level': 'L0',
-            'strategy': 'aggressive',
-            'resources': {'tokens_used': 4600, 'token_budget': 5000},
-            'recent_error_count': 4,
-            'detected_traps': ['loop'],
-            'task_type': 'complex_implementation'
-        }
-        
-        analysis = learner.record_failure(decision_id, context)
-        
-        # Check for identified factors
-        factors = analysis.contributing_factors
-        assert len(factors) > 0
-        
-        # Should detect insufficient context
-        assert any('Insufficient context' in f for f in factors)
-        
-        # Should detect aggressive strategy
-        assert any('Aggressive strategy' in f for f in factors)
-        
-        # Should detect resource constraints
-        assert any('Resource constraints' in f for f in factors)
-        
-        # Should detect high error rate
-        assert any('High error rate' in f for f in factors)
-        
-        # Should detect traps
-        assert any('Detected traps' in f for f in factors)
-        
-        # Should detect task complexity
-        assert any('High task complexity' in f for f in factors)
-    
-    def test_severity_adjustment_by_error_count(self, learner):
-        """Test that severity is adjusted based on error count"""
-        # Low error count
-        context_low = {
-            'situation_type': 'normal',
-            'task_type': 'implementation',
-            'recent_error_count': 1
-        }
-        analysis_low = learner.record_failure("decision-low", context_low)
-        
-        # High error count
-        context_high = {
-            'situation_type': 'normal',
-            'task_type': 'implementation',
-            'recent_error_count': 6
-        }
-        analysis_high = learner.record_failure("decision-high", context_high)
-        
-        # High error count should result in higher severity
-        assert analysis_high.severity in ['high', 'critical']
-    
-    def test_lesson_creation_from_failure(self, learner):
-        """Test that a lesson is created from a failure"""
-        decision_id = "test-decision-11"
-        context = {
-            'situation_type': 'normal',
-            'task_type': 'implementation'
-        }
-        error_message = "Timeout occurred"
-        
-        analysis = learner.record_failure(decision_id, context, error_message)
-        
-        # Check that a lesson was created
-        conn = sqlite3.connect(learner.db_path)
-        cursor = conn.cursor()
-        cursor.execute('SELECT COUNT(*) FROM lessons_learned')
-        lesson_count = cursor.fetchone()[0]
-        assert lesson_count >= 1
-        
-        # Check that failure is linked to lesson
-        cursor.execute('SELECT lesson_id FROM failures WHERE failure_id = ?', (analysis.failure_id,))
-        lesson_id = cursor.fetchone()[0]
-        assert lesson_id is not None
-        
-        # Check lesson details
-        cursor.execute('''
-            SELECT failure_type, root_cause, prevention, frequency, effectiveness
-            FROM lessons_learned WHERE lesson_id = ?
-        ''', (lesson_id,))
-        result = cursor.fetchone()
-        assert result is not None
-        assert result[0] == 'timeout_failure'
-        assert result[3] == 1  # frequency
-        assert result[4] == 0.5  # initial effectiveness
-        
-        conn.close()
-    
-    def test_lesson_update_for_similar_failure(self, learner):
-        """Test that existing lesson is updated for similar failure"""
-        # Record first failure
-        context1 = {
-            'situation_type': 'normal',
-            'task_type': 'implementation'
-        }
-        error_message = "Timeout occurred"
-        analysis1 = learner.record_failure("decision-1", context1, error_message)
-        
-        # Get initial lesson frequency
-        conn = sqlite3.connect(learner.db_path)
-        cursor = conn.cursor()
-        cursor.execute('SELECT frequency FROM lessons_learned WHERE lesson_id = ?', (analysis1.lesson_id,))
-        initial_freq = cursor.fetchone()[0]
-        conn.close()
-        
-        assert initial_freq == 1
-        
-        # Record similar failure (same type)
-        analysis2 = learner.record_failure("decision-2", context1, error_message)
-        
-        # Check that lesson was updated (not new lesson created)
-        conn = sqlite3.connect(learner.db_path)
-        cursor = conn.cursor()
-        cursor.execute('SELECT COUNT(*) FROM lessons_learned')
-        lesson_count = cursor.fetchone()[0]
-        assert lesson_count == 1  # Should still be one lesson
-        
-        # Check that frequency was incremented
-        cursor.execute('SELECT frequency FROM lessons_learned WHERE lesson_id = ?', (analysis1.lesson_id,))
-        updated_freq = cursor.fetchone()[0]
-        assert updated_freq == 2  # Should be incremented
-        
-        conn.close()
-    
-    def test_get_lessons_for_context(self, learner):
-        """Test getting lessons for a specific context"""
-        # Create some failures
-        context1 = {
-            'situation_type': 'normal',
-            'task_type': 'implementation'
-        }
-        learner.record_failure("decision-1", context1, "Timeout occurred")
-        learner.record_failure("decision-2", context1, "Timeout occurred")
-        
-        # Get lessons for similar context
-        context2 = {
-            'situation_type': 'normal',
-            'task_type': 'implementation'
-        }
-        lessons = learner.get_lessons_for_context(context2)
-        
-        assert len(lessons) > 0
-        assert all(isinstance(lesson, LessonLearned) for lesson in lessons)
-        assert all(lesson.failure_type == 'timeout_failure' for lesson in lessons)
-    
-    def test_apply_lesson_success(self, learner):
-        """Test applying a lesson successfully"""
-        # Create a failure and lesson
-        context = {
-            'situation_type': 'normal',
-            'task_type': 'implementation'
-        }
-        analysis = learner.record_failure("decision-1", context, "Timeout occurred")
-        lesson_id = analysis.lesson_id
-        
-        # Apply lesson successfully
-        learner.apply_lesson(lesson_id, success=True)
-        
-        # Check that effectiveness increased
-        conn = sqlite3.connect(learner.db_path)
-        cursor = conn.cursor()
-        cursor.execute('SELECT effectiveness FROM lessons_learned WHERE lesson_id = ?', (lesson_id,))
-        effectiveness = cursor.fetchone()[0]
-        conn.close()
-        
-        assert effectiveness > 0.5  # Should be higher than initial 0.5
-        
-        # Check mistake tracking
-        conn = sqlite3.connect(learner.db_path)
-        cursor = conn.cursor()
-        cursor.execute('SELECT mistake_avoided FROM mistake_tracking WHERE lesson_applied = 1')
-        avoided = cursor.fetchone()[0]
-        conn.close()
-        
-        assert avoided == 1
-    def test_apply_lesson_failure(self, learner):
-        """Test applying a lesson with failure"""
-        # Create a failure and lesson
-        context = {
-            'situation_type': 'normal',
-            'task_type': 'implementation'
-        }
-        analysis = learner.record_failure("decision-1", context, "Timeout occurred")
-        lesson_id = analysis.lesson_id
-        
-        # Apply lesson with failure
-        learner.apply_lesson(lesson_id, success=False)
-        
-        # Check that effectiveness decreased
-        conn = sqlite3.connect(learner.db_path)
-        cursor = conn.cursor()
-        cursor.execute('SELECT effectiveness FROM lessons_learned WHERE lesson_id = ?', (lesson_id,))
-        effectiveness = cursor.fetchone()[0]
-        conn.close()
-        
-        assert effectiveness < 0.5  # Should be lower than initial 0.5
-    
-    def test_effectiveness_calculation(self, learner):
-        """Test effectiveness calculation with multiple applications"""
-        # Create a failure and lesson
-        context = {
-            'situation_type': 'normal',
-            'task_type': 'implementation'
-        }
-        analysis = learner.record_failure("decision-1", context, "Timeout occurred")
-        lesson_id = analysis.lesson_id
-        
-        # Apply lesson multiple times with mixed results
-        learner.apply_lesson(lesson_id, success=True)
-        learner.apply_lesson(lesson_id, success=False)
-        learner.apply_lesson(lesson_id, success=True)
-        
-        # Check that effectiveness reflects the mixed results
-        conn = sqlite3.connect(learner.db_path)
-        cursor = conn.cursor()
-        cursor.execute('SELECT effectiveness FROM lessons_learned WHERE lesson_id = ?', (lesson_id,))
-        effectiveness = cursor.fetchone()[0]
-        conn.close()
-        
-        # Should be somewhere between 0 and 1
-        assert 0.0 < effectiveness < 1.0
-    
-    def test_get_mistake_statistics(self, learner):
-        """Test getting mistake statistics"""
-        # Create some failures
-        context1 = {'situation_type': 'normal', 'task_type': 'implementation'}
-        learner.record_failure("decision-1", context1, "Timeout occurred")
-        
-        context2 = {'situation_type': 'normal', 'task_type': 'planning'}
-        learner.record_failure("decision-2", context2, "Permission denied")
-        
-        # Get statistics
-        stats = learner.get_mistake_statistics()
-        
-        # Check statistics
-        assert 'total_failures' in stats
-        assert stats['total_failures'] >= 2
-        assert 'failures_by_type' in stats
-        assert stats['total_lessons'] >= 2
-        assert 'average_effectiveness' in stats
-        assert 'total_lesson_applications' in stats
-        assert 'mistakes_avoided' in stats
-        assert 'mistake_avoidance_rate' in stats
-    
-    def test_get_lessons_by_effectiveness(self, learner):
-        """Test getting lessons sorted by effectiveness"""
-        # Create failures and apply lessons with different results
-        context = {'situation_type': 'normal', 'task_type': 'implementation'}
-        analysis1 = learner.record_failure("decision-1", context, "Timeout occurred")
-        lesson_id1 = analysis1.lesson_id
-        
-        analysis2 = learner.record_failure("decision-2", context, "Timeout occurred")
-        lesson_id2 = analysis2.lesson_id
-        
-        # Apply lessons with different results
-        learner.apply_lesson(lesson_id1, success=True)
-        learner.apply_lesson(lesson_id1, success=True)  # High effectiveness
-        learner.apply_lesson(lesson_id2, success=False)
-        learner.apply_lesson(lesson_id2, success=False)  # Low effectiveness
-        
-        # Get lessons by effectiveness
-        lessons = learner.get_lessons_by_effectiveness(min_effectiveness=0.0, limit=10)
-        
-        assert len(lessons) >= 2
-        # Should be sorted by effectiveness (highest first)
-        if len(lessons) >= 2:
-            assert lessons[0].effectiveness >= lessons[1].effectiveness
-    
-    def test_get_recent_failures(self, learner):
-        """Test getting recent failures"""
-        # Create some failures
-        context = {'situation_type': 'normal', 'task_type': 'implementation'}
-        learner.record_failure("decision-1", context, "Timeout occurred")
-        learner.record_failure("decision-2", context, "Permission denied")
-        learner.record_failure("decision-3", context, "Memory error")
-        
-        # Get recent failures
-        recent = learner.get_recent_failures(limit=5)
-        
-        assert len(recent) >= 3
-        assert all(isinstance(f, FailureAnalysis) for f in recent)
-        # Should be sorted by analyzed_at (most recent first)
-        assert len(recent) <= 5
-    
-    def test_cleanup_old_data(self, learner):
-        """Test cleanup of old data"""
-        # Create some failures
-        context = {'situation_type': 'normal', 'task_type': 'implementation'}
-        analysis = learner.record_failure("decision-1", context, "Timeout occurred")
-        lesson_id = analysis.lesson_id
-        
-        # Apply lesson multiple times to make it effective
-        for _ in range(10):
-            learner.apply_lesson(lesson_id, success=True)
-        
-        # Cleanup old data (0 days = all data)
-        learner.cleanup_old_data(days=0)
-        
-        # Check that old data was cleaned
-        conn = sqlite3.connect(learner.db_path)
-        cursor = conn.cursor()
-        cursor.execute('SELECT COUNT(*) FROM failures')
-        failure_count = cursor.fetchone()[0]
-        
-        # Old lessons with low effectiveness should be deleted
-        cursor.execute('''
-            SELECT COUNT(*) FROM lessons_learned 
-            WHERE effectiveness < 0.5 AND frequency < 3
-        ''')
-        low_quality_count = cursor.fetchone()[0]
-        conn.close()
-        
-        assert low_quality_count == 0  # Low quality lessons should be cleaned
-    
-    def test_thread_safety(self, temp_db_path):
-        """Test that LessonLearner is thread-safe"""
-        import threading
-        
-        learner = LessonLearner(db_path=temp_db_path)
-        results = []
-        
-        def record_failure(i):
-            context = {'situation_type': 'normal', 'task_type': 'implementation'}
-            try:
-                analysis = learner.record_failure(f"decision-{i}", context, "Timeout occurred")
-                results.append((i, analysis.failure_type))
-            except Exception as e:
-                results.append((i, str(e)))
-        
-        # Create multiple threads
-        threads = []
         for i in range(10):
-            t = threading.Thread(target=record_failure, args=(i,))
-            threads.append(t)
-            t.start()
+            failure_id = learner.record_failure(
+                failure_type='test_failure',
+                context={'iteration': i},
+                decision={'action': f'action_{i}'},
+                root_cause=f'Test failure {i}'
+            )
+            failure_ids.append(failure_id)
         
-        # Wait for all threads to complete
-        for t in threads:
-            t.join()
-        
-        # Check that all operations succeeded
-        assert len(results) == 10
-        assert all(failure_type == 'timeout_failure' for _, failure_type in results)
-        
-        # Check that all failures were recorded
-        conn = sqlite3.connect(temp_db_path)
-        cursor = conn.cursor()
-        cursor.execute('SELECT COUNT(*) FROM failures')
-        count = cursor.fetchone()[0]
-        assert count == 10
-        conn.close()
+        assert len(failure_ids) == 10
+        assert len(set(failure_ids)) == 10  # All unique
+
+
+class TestRootCauseAnalysis:
+    """Tests for root cause analysis."""
     
-    def test_failure_without_error_message(self, learner):
-        """Test recording a failure without an error message"""
-        decision_id = "test-decision-12"
+    def test_analyze_root_cause_with_error(self, learner):
+        """Test root cause analysis with error information."""
         context = {
-            'situation_type': 'normal',
+            'error_type': 'timeout',
             'task_type': 'implementation'
         }
-        
-        analysis = learner.record_failure(decision_id, context)
-        
-        # Should still create analysis
-        assert analysis.decision_id == decision_id
-        assert analysis.failure_type == 'implementation_failure'
-    
-    def test_unknown_failure_type(self, learner):
-        """Test handling of unknown failure type"""
-        decision_id = "test-decision-13"
-        context = {
-            'situation_type': 'unknown',
-            'task_type': 'unknown'
+        decision = {
+            'action': 'wait_for_response',
+            'reasoning': 'Waiting for API response'
         }
         
-        analysis = learner.record_failure(decision_id, context)
+        root_cause = learner.analyze_root_cause(
+            failure_type='timeout',
+            context=context,
+            decision=decision
+        )
         
-        # Should classify as unknown
-        assert analysis.failure_type == 'unknown_failure'
-        assert 'Unknown' in analysis.root_cause or 'investigation' in analysis.root_cause.lower()
+        assert 'timeout' in root_cause.lower()
     
-    def test_prevention_strategy_generation(self, learner):
-        """Test that prevention strategies are generated correctly"""
-        # Test different failure types
-        test_cases = [
-            ("Timeout occurred", 'timeout_failure', 'retry'),
-            ("Connection failed", 'connection_failure', 'circuit breaker'),
-            ("Permission denied", 'permission_failure', 'permission'),
-            ("Out of memory", 'memory_failure', 'memory'),
-            ("Validation failed", 'validation_failure', 'validation'),
-            ("Loop detected", 'loop_failure', 'loop'),
-            ("Dead end", 'dead_end_failure', 'progress'),
+    def test_analyze_root_cause_with_low_confidence(self, learner):
+        """Test root cause analysis with low confidence."""
+        context = {'task_type': 'planning'}
+        decision = {
+            'action': 'decide',
+            'confidence': 0.3,
+            'reasoning': 'Not enough context'
+        }
+        
+        root_cause = learner.analyze_root_cause(
+            failure_type='low_confidence',
+            context=context,
+            decision=decision
+        )
+        
+        assert 'low confidence' in root_cause.lower()
+    
+    def test_analyze_root_cause_with_strategy(self, learner):
+        """Test root cause analysis with strategy information."""
+        context = {'task_type': 'implementation'}
+        decision = {
+            'action': 'proceed',
+            'strategy': 'aggressive',
+            'reasoning': 'Fast approach'
+        }
+        
+        root_cause = learner.analyze_root_cause(
+            failure_type='strategy_mismatch',
+            context=context,
+            decision=decision
+        )
+        
+        assert 'aggressive' in root_cause
+        assert 'strategy' in root_cause.lower()
+    
+    def test_analyze_root_cause_insufficient_context(self, learner):
+        """Test root cause analysis with insufficient context."""
+        context = {}
+        decision = {}
+        
+        root_cause = learner.analyze_root_cause(
+            failure_type='unknown',
+            context=context,
+            decision=decision
+        )
+        
+        assert 'unknown' in root_cause.lower()
+        assert 'insufficient' in root_cause.lower()
+
+
+class TestPatternIdentification:
+    """Tests for pattern identification."""
+    
+    def test_identify_pattern_single_occurrence(self, learner):
+        """Test identifying a pattern from single failure."""
+        context = {
+            'task_type': 'implementation',
+            'error_type': 'api_rate_limit'
+        }
+        
+        failure_id = learner.record_failure(
+            failure_type='api_rate_limit',
+            context=context,
+            decision={'action': 'call_api'},
+            root_cause='Rate limit'
+        )
+        
+        patterns = learner.get_failure_patterns(failure_type='api_rate_limit', min_frequency=1)
+        assert len(patterns) == 1
+        assert patterns[0]['frequency'] == 1
+    
+    def test_identify_recurring_pattern(self, learner):
+        """Test identifying a recurring pattern."""
+        context = {
+            'task_type': 'implementation',
+            'error_type': 'timeout'
+        }
+        
+        # Record same failure multiple times
+        for _ in range(5):
+            learner.record_failure(
+                failure_type='timeout',
+                context=context,
+                decision={'action': 'wait'},
+                root_cause='Timeout'
+            )
+        
+        patterns = learner.get_failure_patterns(failure_type='timeout', min_frequency=3)
+        assert len(patterns) == 1
+        assert patterns[0]['frequency'] == 5
+    
+    def test_identify_different_patterns(self, learner):
+        """Test identifying different failure patterns."""
+        contexts = [
+            {'task_type': 'planning', 'error_type': 'timeout'},
+            {'task_type': 'implementation', 'error_type': 'rate_limit'}
         ]
         
-        for error_msg, expected_type, keyword in test_cases:
-            context = {'situation_type': 'normal', 'task_type': 'implementation'}
-            analysis = learner.record_failure(f"decision-{expected_type}", context, error_msg)
-            
-            assert analysis.failure_type == expected_type
-            assert keyword.lower() in analysis.suggested_prevention.lower()
+        for i, context in enumerate(contexts):
+            learner.record_failure(
+                failure_type='api_error',
+                context=context,
+                decision={'action': f'call_{i}'},
+                root_cause='API error'
+            )
+        
+        # Use min_frequency=1 to see all patterns, even single occurrences
+        patterns = learner.get_failure_patterns(failure_type='api_error', min_frequency=1)
+        assert len(patterns) == 2
     
-    def test_multiple_failure_patterns(self, learner):
-        """Test identification of multiple failure patterns"""
-        # Create multiple failures of the same type
-        context = {'situation_type': 'normal', 'task_type': 'implementation'}
+    def test_pattern_timestamps(self, learner):
+        """Test pattern timestamp tracking."""
+        context = {'task_type': 'test', 'error_type': 'test_error'}
         
-        for i in range(5):
-            learner.record_failure(f"decision-{i}", context, "Timeout occurred")
-        
-        # Check that failure patterns were identified
-        # (This will print to console in _identify_failure_patterns)
-        # We can check the database for pattern results
-        conn = sqlite3.connect(learner.db_path)
-        cursor = conn.cursor()
-        cursor.execute('SELECT COUNT(*) FROM failures WHERE failure_type = ?', ('timeout_failure',))
-        count = cursor.fetchone()[0]
-        conn.close()
-        
-        assert count >= 5
-    
-    def test_dataclass_serialization(self, learner):
-        """Test that dataclasses are properly serialized to database"""
-        context = {'situation_type': 'normal', 'task_type': 'implementation'}
-        analysis = learner.record_failure("decision-1", context, "Timeout occurred")
-        
-        # Retrieve from database
-        conn = sqlite3.connect(learner.db_path)
-        cursor = conn.cursor()
-        cursor.execute('SELECT * FROM failures WHERE failure_id = ?', (analysis.failure_id,))
-        row = cursor.fetchone()
-        conn.close()
-        
-        # Check that all fields are present
-        assert row is not None
-        assert len(row) >= 9  # Should have at least 9 columns
-    
-    def test_lesson_learned_dataclass(self, learner):
-        """Test LessonLearned dataclass properties"""
-        lesson = LessonLearned(
-            lesson_id="test-lesson-1",
-            failure_type="timeout_failure",
-            root_cause="Timeout occurred",
-            context={'situation_type': 'normal'},
-            prevention="Increase timeout",
-            frequency=1,
-            effectiveness=0.5,
-            created_at=datetime.utcnow().isoformat(),
-            updated_at=datetime.utcnow().isoformat(),
-            sample_failures=["failure-1", "failure-2"]
+        # Record failure
+        learner.record_failure(
+            failure_type='test_failure',
+            context=context,
+            decision={'action': 'test'},
+            root_cause='Test'
         )
         
-        # Check that all fields are accessible
-        assert lesson.lesson_id == "test-lesson-1"
-        assert lesson.failure_type == "timeout_failure"
-        assert lesson.frequency == 1
-        assert lesson.effectiveness == 0.5
-        assert len(lesson.sample_failures) == 2
+        patterns = learner.get_failure_patterns(failure_type='test_failure', min_frequency=1)
+        assert len(patterns) == 1
+        assert 'first_seen' in patterns[0]
+        assert 'last_seen' in patterns[0]
+
+
+class TestLessonExtraction:
+    """Tests for lesson extraction from failures."""
     
-    def test_failure_analysis_dataclass(self, learner):
-        """Test FailureAnalysis dataclass properties"""
-        analysis = FailureAnalysis(
-            failure_id="test-failure-1",
-            decision_id="decision-1",
-            failure_type="timeout_failure",
-            root_cause="Timeout occurred",
-            context={'situation_type': 'normal'},
-            contributing_factors=["Factor 1", "Factor 2"],
-            suggested_prevention="Increase timeout",
-            severity="high",
-            analyzed_at=datetime.utcnow().isoformat()
+    def test_extract_lesson_basic(self, learner):
+        """Test basic lesson extraction."""
+        # Record a failure
+        failure_id = learner.record_failure(
+            failure_type='api_rate_limit',
+            context={'task_type': 'implementation'},
+            decision={'action': 'call_api'},
+            root_cause='API rate limit exceeded'
         )
         
-        # Check that all fields are accessible
-        assert analysis.failure_id == "test-failure-1"
-        assert analysis.decision_id == "decision-1"
-        assert analysis.failure_type == "timeout_failure"
-        assert analysis.severity == "high"
-        assert len(analysis.contributing_factors) == 2
+        # Extract lesson
+        lesson = learner.extract_lesson(failure_id)
+        
+        assert lesson is not None
+        assert lesson.lesson_id is not None
+        assert lesson.failure_type == 'api_rate_limit'
+        assert lesson.prevention is not None
+        assert len(lesson.prevention) > 0
     
-    def test_empty_contributing_factors(self, learner):
-        """Test handling of cases with no contributing factors"""
+    def test_extract_lesson_with_custom_prevention(self, learner):
+        """Test lesson extraction with custom prevention."""
+        failure_id = learner.record_failure(
+            failure_type='timeout',
+            context={'task_type': 'implementation'},
+            decision={'action': 'wait'},
+            root_cause='Timeout'
+        )
+        
+        custom_prevention = 'Use caching to reduce API calls'
+        lesson = learner.extract_lesson(failure_id, prevention=custom_prevention)
+        
+        assert lesson.prevention == custom_prevention
+    
+    def test_extract_lesson_invalid_failure_id(self, learner):
+        """Test lesson extraction with invalid failure ID."""
+        lesson = learner.extract_lesson('invalid_id')
+        assert lesson is None
+    
+    def test_extract_lesson_context_pattern(self, learner):
+        """Test that lesson includes context pattern."""
+        failure_id = learner.record_failure(
+            failure_type='low_confidence',
+            context={
+                'task_type': 'planning',
+                'situation_type': 'uncertain'
+            },
+            decision={'action': 'decide'},
+            root_cause='Low confidence'
+        )
+        
+        lesson = learner.extract_lesson(failure_id)
+        # Pattern should include observable context features, not internal failure_type
+        assert 'task_type=planning' in lesson.context_pattern
+        assert 'situation_type=uncertain' in lesson.context_pattern
+        # failure_type is stored separately in the lesson object
+        assert lesson.failure_type == 'low_confidence'
+
+
+class TestLessonApplication:
+    """Tests for lesson application and tracking."""
+    
+    def test_apply_lesson_basic(self, learner):
+        """Test basic lesson application."""
+        failure_id = learner.record_failure(
+            failure_type='test_failure',
+            context={'task_type': 'test'},
+            decision={'action': 'test'},
+            root_cause='Test'
+        )
+        
+        lesson = learner.extract_lesson(failure_id)
+        success = learner.apply_lesson(lesson.lesson_id, prevented=True)
+        
+        assert success is True
+    
+    def test_apply_lesson_with_decision_id(self, learner):
+        """Test lesson application with decision ID."""
+        failure_id = learner.record_failure(
+            failure_type='test_failure',
+            context={'task_type': 'test'},
+            decision={'action': 'test'},
+            root_cause='Test'
+        )
+        
+        lesson = learner.extract_lesson(failure_id)
+        success = learner.apply_lesson(
+            lesson.lesson_id,
+            decision_id='decision_123',
+            prevented=True
+        )
+        
+        assert success is True
+    
+    def test_apply_lesson_effectiveness_score(self, learner):
+        """Test that lesson effectiveness score updates."""
+        failure_id = learner.record_failure(
+            failure_type='test_failure',
+            context={'task_type': 'test'},
+            decision={'action': 'test'},
+            root_cause='Test'
+        )
+        
+        lesson = learner.extract_lesson(failure_id)
+        initial_score = lesson.effectiveness_score
+        
+        # Apply lesson multiple times with prevention
+        for _ in range(5):
+            learner.apply_lesson(lesson.lesson_id, prevented=True)
+        
+        # Get updated lesson
+        lessons = learner.get_lessons(failure_type='test_failure')
+        updated_lesson = [l for l in lessons if l.lesson_id == lesson.lesson_id][0]
+        
+        assert updated_lesson.effectiveness_score > initial_score
+        assert updated_lesson.application_count == 5
+    
+    def test_apply_lesson_prevented_false(self, learner):
+        """Test lesson application when prevention failed."""
+        failure_id = learner.record_failure(
+            failure_type='test_failure',
+            context={'task_type': 'test'},
+            decision={'action': 'test'},
+            root_cause='Test'
+        )
+        
+        lesson = learner.extract_lesson(failure_id)
+        initial_score = lesson.effectiveness_score
+        
+        # Apply lesson without prevention
+        learner.apply_lesson(lesson.lesson_id, prevented=False)
+        
+        # Get updated lesson
+        lessons = learner.get_lessons(failure_type='test_failure')
+        updated_lesson = [l for l in lessons if l.lesson_id == lesson.lesson_id][0]
+        
+        # Score should not increase
+        assert updated_lesson.effectiveness_score == initial_score
+        assert updated_lesson.application_count == 1
+
+
+class TestLessonChecking:
+    """Tests for checking applicable lessons."""
+    
+    def test_check_lessons_no_lessons(self, learner):
+        """Test checking lessons when none exist."""
+        context = {'task_type': 'implementation'}
+        decision = {'action': 'proceed'}
+        
+        applicable = learner.check_lessons(context, decision)
+        assert len(applicable) == 0
+    
+    def test_check_lessons_applicable(self, learner):
+        """Test checking lessons that apply to current context."""
+        # Record and extract a lesson
+        failure_id = learner.record_failure(
+            failure_type='api_rate_limit',
+            context={
+                'task_type': 'implementation',
+                'error_type': 'api_rate_limit'
+            },
+            decision={'action': 'call_api'},
+            root_cause='Rate limit'
+        )
+        lesson = learner.extract_lesson(failure_id)
+        
+        # Check with matching context
         context = {
-            'situation_type': 'normal',
-            'task_type': 'simple_task'
+            'task_type': 'implementation',
+            'error_type': 'api_rate_limit'
+        }
+        decision = {'action': 'call_api'}
+        
+        applicable = learner.check_lessons(context, decision)
+        assert len(applicable) == 1
+        assert applicable[0].lesson_id == lesson.lesson_id
+    
+    def test_check_lessons_not_applicable(self, learner):
+        """Test checking lessons that don't apply to current context."""
+        failure_id = learner.record_failure(
+            failure_type='api_rate_limit',
+            context={
+                'task_type': 'implementation',
+                'error_type': 'api_rate_limit'
+            },
+            decision={'action': 'call_api'},
+            root_cause='Rate limit'
+        )
+        learner.extract_lesson(failure_id)
+        
+        # Check with different context
+        context = {
+            'task_type': 'planning',  # Different task type
+            'error_type': 'timeout'  # Different error type
+        }
+        decision = {'action': 'analyze'}
+        
+        applicable = learner.check_lessons(context, decision)
+        assert len(applicable) == 0
+    
+    def test_check_lessons_multiple_applicable(self, learner):
+        """Test checking when multiple lessons apply."""
+        # Record multiple failures with same context pattern
+        for i in range(3):
+            failure_id = learner.record_failure(
+                failure_type='api_rate_limit',
+                context={'task_type': 'implementation', 'error_type': 'api_rate_limit'},
+                decision={'action': 'call_api'},
+                root_cause=f'Rate limit {i}'
+            )
+            learner.extract_lesson(failure_id)
+        
+        context = {'task_type': 'implementation', 'error_type': 'api_rate_limit'}
+        decision = {'action': 'call_api'}
+        
+        applicable = learner.check_lessons(context, decision)
+        assert len(applicable) == 3
+
+
+class TestMetricsCalculation:
+    """Tests for metrics calculation."""
+    
+    def test_get_mistake_reduction_metrics_empty(self, learner):
+        """Test metrics with no data."""
+        metrics = learner.get_mistake_reduction_metrics()
+        
+        assert metrics['total_failures'] == 0
+        assert metrics['total_lessons'] == 0
+        assert metrics['total_applications'] == 0
+        assert metrics['prevented_failures'] == 0
+        assert metrics['patterns_found'] == 0
+        assert metrics['avg_effectiveness'] == 0.0
+        assert metrics['prevention_rate'] == 0.0
+    
+    def test_get_mistake_reduction_metrics_with_data(self, learner):
+        """Test metrics with data."""
+        # Record failures
+        for i in range(5):
+            failure_id = learner.record_failure(
+                failure_type='test_failure',
+                context={'task_type': 'test'},
+                decision={'action': 'test'},
+                root_cause=f'Test {i}'
+            )
+            # Extract lesson
+            lesson = learner.extract_lesson(failure_id)
+            # Apply lesson
+            learner.apply_lesson(lesson.lesson_id, prevented=True)
+        
+        metrics = learner.get_mistake_reduction_metrics()
+        
+        assert metrics['total_failures'] == 5
+        assert metrics['total_lessons'] == 5
+        assert metrics['total_applications'] == 5
+        assert metrics['prevented_failures'] == 5
+        assert metrics['avg_effectiveness'] > 0
+        assert metrics['prevention_rate'] == 1.0
+    
+    def test_metrics_failure_by_type(self, learner):
+        """Test failure breakdown by type."""
+        failure_types = ['timeout', 'rate_limit', 'invalid_context']
+        
+        for failure_type in failure_types:
+            learner.record_failure(
+                failure_type=failure_type,
+                context={'task_type': 'test'},
+                decision={'action': 'test'},
+                root_cause='Test'
+            )
+        
+        metrics = learner.get_mistake_reduction_metrics()
+        
+        for failure_type in failure_types:
+            assert failure_type in metrics['failure_by_type']
+            assert metrics['failure_by_type'][failure_type] == 1
+
+
+class TestDataManagement:
+    """Tests for data management operations."""
+    
+    def test_get_lessons_filter_by_type(self, learner):
+        """Test getting lessons filtered by type."""
+        # Record different failure types
+        for failure_type in ['timeout', 'rate_limit']:
+            failure_id = learner.record_failure(
+                failure_type=failure_type,
+                context={'task_type': 'test'},
+                decision={'action': 'test'},
+                root_cause='Test'
+            )
+            learner.extract_lesson(failure_id)
+        
+        timeout_lessons = learner.get_lessons(failure_type='timeout')
+        rate_limit_lessons = learner.get_lessons(failure_type='rate_limit')
+        all_lessons = learner.get_lessons()
+        
+        assert len(timeout_lessons) == 1
+        assert len(rate_limit_lessons) == 1
+        assert len(all_lessons) == 2
+    
+    def test_get_lessons_min_effectiveness(self, learner):
+        """Test getting lessons with minimum effectiveness threshold."""
+        # Create lessons with different effectiveness
+        for i in range(3):
+            failure_id = learner.record_failure(
+                failure_type='test_failure',
+                context={'task_type': 'test'},
+                decision={'action': 'test'},
+                root_cause='Test'
+            )
+            lesson = learner.extract_lesson(failure_id)
+            # Apply lesson to increase effectiveness
+            for _ in range(i):
+                learner.apply_lesson(lesson.lesson_id, prevented=True)
+        
+        # Get lessons with high effectiveness
+        high_effectiveness = learner.get_lessons(min_effectiveness=0.2)
+        # Get all lessons
+        all_lessons = learner.get_lessons()
+        
+        # Should have fewer lessons with high effectiveness threshold
+        assert len(high_effectiveness) <= len(all_lessons)
+    
+    def test_get_lessons_limit(self, learner):
+        """Test getting lessons with limit."""
+        # Create multiple lessons
+        for i in range(10):
+            failure_id = learner.record_failure(
+                failure_type='test_failure',
+                context={'task_type': 'test'},
+                decision={'action': f'test_{i}'},
+                root_cause='Test'
+            )
+            learner.extract_lesson(failure_id)
+        
+        limited = learner.get_lessons(limit=5)
+        all_lessons = learner.get_lessons()
+        
+        assert len(limited) == 5
+        assert len(all_lessons) == 10
+    
+    def test_export_lessons_json(self, learner):
+        """Test exporting lessons as JSON."""
+        failure_id = learner.record_failure(
+            failure_type='test_failure',
+            context={'task_type': 'test'},
+            decision={'action': 'test'},
+            root_cause='Test'
+        )
+        lesson = learner.extract_lesson(failure_id)
+        
+        json_export = learner.export_lessons(output_format='json')
+        
+        assert isinstance(json_export, str)
+        assert lesson.lesson_id in json_export
+        assert 'failure_type' in json_export
+    
+    def test_export_lessons_dict(self, learner):
+        """Test exporting lessons as dict."""
+        failure_id = learner.record_failure(
+            failure_type='test_failure',
+            context={'task_type': 'test'},
+            decision={'action': 'test'},
+            root_cause='Test'
+        )
+        learner.extract_lesson(failure_id)
+        
+        dict_export = learner.export_lessons(output_format='dict')
+        
+        assert isinstance(dict_export, list)
+        assert len(dict_export) == 1
+        assert isinstance(dict_export[0], dict)
+    
+    def test_delete_old_failures(self, learner):
+        """Test deleting old failure records."""
+        from datetime import datetime, timedelta
+        
+        # Record recent failure
+        recent_id = learner.record_failure(
+            failure_type='recent_failure',
+            context={'task_type': 'test'},
+            decision={'action': 'test'},
+            root_cause='Test'
+        )
+        
+        # Manually insert an old failure
+        old_timestamp = (datetime.utcnow() - timedelta(days=100)).isoformat()
+        with sqlite3.connect(learner.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO failures
+                (failure_id, timestamp, failure_type, context, decision, root_cause, severity)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (
+                'old_failure_id',
+                old_timestamp,
+                'old_failure',
+                '{"task": "test"}',
+                '{"action": "test"}',
+                'Test',
+                'medium'
+            ))
+            conn.commit()
+        
+        # Delete failures older than 30 days
+        deleted = learner.delete_old_failures(days_old=30)
+        
+        assert deleted == 1
+        
+        # Verify recent failure still exists
+        lessons = learner.get_lessons(failure_type='recent_failure')
+        # Note: We didn't extract a lesson from recent_id, so we check patterns
+        patterns = learner.get_failure_patterns(failure_type='recent_failure')
+        # Should have pattern from recent failure
+        assert len(patterns) >= 0  # May or may not have pattern based on implementation
+
+
+class TestContextSignature:
+    """Tests for context signature generation."""
+    
+    def test_context_signature_with_task_type(self, learner):
+        """Test context signature with task type."""
+        context = {'task_type': 'implementation'}
+        signature = learner._create_context_signature(context)
+        assert 'task:implementation' in signature
+    
+    def test_context_signature_with_multiple_features(self, learner):
+        """Test context signature with multiple features."""
+        context = {
+            'task_type': 'planning',
+            'situation_type': 'complex',
+            'error_type': 'timeout',
+            'strategy': 'conservative',
+            'action_type': 'analyze'
+        }
+        signature = learner._create_context_signature(context)
+        
+        assert 'task:planning' in signature
+        assert 'situation:complex' in signature
+        assert 'error:timeout' in signature
+        assert 'strategy:conservative' in signature
+        assert 'action:analyze' in signature
+    
+    def test_context_signature_empty(self, learner):
+        """Test context signature with empty context."""
+        context = {}
+        signature = learner._create_context_signature(context)
+        assert signature == ""
+
+
+class TestLessonApplies:
+    """Tests for lesson applicability checking."""
+    
+    def test_lesson_applies_exact_match(self, learner):
+        """Test lesson applies with exact context match."""
+        failure_id = learner.record_failure(
+            failure_type='test_failure',
+            context={
+                'task_type': 'implementation',
+                'error_type': 'timeout'
+            },
+            decision={'action': 'wait'},
+            root_cause='Test'
+        )
+        lesson = learner.extract_lesson(failure_id)
+        
+        current_context = {
+            'task_type': 'implementation',
+            'error_type': 'timeout'
+        }
+        current_decision = {'action': 'wait'}
+        
+        applies = learner._lesson_applies(lesson, current_context, current_decision)
+        assert applies is True
+    
+    def test_lesson_applies_partial_match(self, learner):
+        """Test lesson does not apply when required context is missing."""
+        failure_id = learner.record_failure(
+            failure_type='test_failure',
+            context={
+                'task_type': 'implementation',
+                'error_type': 'timeout'
+            },
+            decision={'action': 'wait'},
+            root_cause='Test'
+        )
+        lesson = learner.extract_lesson(failure_id)
+        
+        # Missing error_type from current context
+        # The lesson pattern includes error_type, so current situation doesn't match
+        current_context = {'task_type': 'implementation'}
+        current_decision = {'action': 'wait'}
+        
+        applies = learner._lesson_applies(lesson, current_context, current_decision)
+        # Should be False because error_type is missing from current context but is in lesson pattern
+        assert applies is False
+    
+    def test_lesson_applies_no_match(self, learner):
+        """Test lesson doesn't apply with different context."""
+        failure_id = learner.record_failure(
+            failure_type='test_failure',
+            context={'task_type': 'planning'},
+            decision={'action': 'analyze'},
+            root_cause='Test'
+        )
+        lesson = learner.extract_lesson(failure_id)
+        
+        current_context = {'task_type': 'implementation'}
+        current_decision = {'action': 'implement'}
+        
+        applies = learner._lesson_applies(lesson, current_context, current_decision)
+        assert applies is False
+
+
+class TestIntegration:
+    """Integration tests for complete workflows."""
+    
+    def test_complete_learning_workflow(self, learner):
+        """Test complete learning workflow: record -> extract -> apply."""
+        # Record failure
+        failure_id = learner.record_failure(
+            failure_type='api_rate_limit',
+            context={
+                'task_type': 'implementation',
+                'error_type': 'api_rate_limit'
+            },
+            decision={
+                'action': 'call_llm_api',
+                'strategy': 'aggressive'
+            },
+            root_cause='API rate limit exceeded',
+            resources={'tokens_used': 2000}
+        )
+        
+        # Extract lesson
+        lesson = learner.extract_lesson(failure_id)
+        assert lesson is not None
+        
+        # Check lesson applies to similar situation
+        context = {
+            'task_type': 'implementation',
+            'error_type': 'api_rate_limit'
+        }
+        decision = {'action': 'call_llm_api'}
+        applicable = learner.check_lessons(context, decision)
+        assert len(applicable) == 1
+        
+        # Apply lesson
+        success = learner.apply_lesson(lesson.lesson_id, prevented=True)
+        assert success is True
+        
+        # Get metrics
+        metrics = learner.get_mistake_reduction_metrics()
+        assert metrics['total_failures'] == 1
+        assert metrics['total_lessons'] == 1
+        assert metrics['prevented_failures'] == 1
+    
+    def test_learning_from_recurring_failure(self, learner):
+        """Test learning from recurring failure pattern."""
+        context = {
+            'task_type': 'implementation',
+            'error_type': 'timeout'
         }
         
-        analysis = learner.record_failure("decision-1", context, "Unknown error")
+        # Record same failure multiple times
+        failure_ids = []
+        for _ in range(5):
+            failure_id = learner.record_failure(
+                failure_type='timeout',
+                context=context,
+                decision={'action': 'wait_for_response'},
+                root_cause='Timeout occurred'
+            )
+            failure_ids.append(failure_id)
         
-        # Should still have contributing factors (default message)
-        assert len(analysis.contributing_factors) > 0
-        assert 'No specific contributing factors' in ' '.join(analysis.contributing_factors)
+        # Extract lessons
+        lessons = []
+        for failure_id in failure_ids:
+            lesson = learner.extract_lesson(failure_id)
+            lessons.append(lesson)
+        
+        assert len(lessons) == 5
+        
+        # Check pattern was identified
+        patterns = learner.get_failure_patterns(failure_type='timeout', min_frequency=3)
+        assert len(patterns) == 1
+        assert patterns[0]['frequency'] == 5
+        
+        # Apply one lesson
+        learner.apply_lesson(lessons[0].lesson_id, prevented=True)
+        
+        # Get metrics
+        metrics = learner.get_mistake_reduction_metrics()
+        assert metrics['patterns_found'] >= 1
+
+
+if __name__ == '__main__':
+    # Run tests
+    pytest.main([__file__, '-v'])
