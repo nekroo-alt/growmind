@@ -259,23 +259,37 @@ This document defines a series of tasks to enhance L4D v4 with housekeeping capa
 
 ## Phase 2: Unused Code Detection
 
-### Task 2.1: Dead Function Detection
+### Task 2.1: Dead Function Detection ✅ **COMPLETE**
 
 **Title**: Detect unused functions in the codebase
 
 **Acceptance Criteria**:
-- Identify functions that are never called
-- Identify functions that are called only by tests (consider for removal in production)
-- Identify functions with zero or low call count
-- Distinguish between public API functions (may be used externally) vs internal functions
-- Generate dead function report
-- Suggest safe removal candidates
+- [x] Identify functions that are never called
+- [x] Identify functions that are called only by tests (consider for removal in production)
+- [x] Identify functions with zero or low call count
+- [x] Distinguish between public API functions (may be used externally) vs internal functions
+- [x] Generate dead function report
+- [x] Suggest safe removal candidates
 
 **Module**: `logic/dead_code_detector.py` (new)
 
-**Estimated Lines**: ~300
+**Estimated Lines**: ~300 (actual: ~700 with comprehensive features)
 
 **Dependencies**: Task 1.1, 1.3
+
+**Implementation**:
+- Created `DeadCodeDetector` class with full dead function, class, and variable detection
+- Implemented function detection using call graph persistence and AST analysis
+- Added public API detection via `__all__` and `__init__.py` analysis
+- Implemented test-only function detection
+- Added confidence scoring (high, medium, low) for dead code candidates
+- Implemented dead class detection with method usage analysis
+- Added unused variable detection using AST variable tracking
+- Implemented multi-format report generation (text, markdown, JSON)
+- Created comprehensive data classes for structured information
+- Added 20+ comprehensive unit tests
+
+**Status**: ✅ IMPLEMENTED - 2025-01-24
 
 **Technical Notes**:
 - Dead function detection:
@@ -291,6 +305,19 @@ This document defines a series of tasks to enhance L4D v4 with housekeeping capa
   - High confidence: Dead, not in public API, no tests
   - Medium confidence: Dead, but has tests
   - Low confidence: Test-only or low usage (may be used in future)
+- Dead class detection:
+  - Track class instantiations via call graph
+  - Track method calls per class
+  - Identify classes with no called methods
+  - Identify classes with very few called methods (<30%)
+- Unused variable detection:
+  - Use AST to track variable assignments and references
+  - Track scope (local, class, module)
+  - Exclude special variables (starts with _, __all__, __version__, etc.)
+- Report formats:
+  - Text: Human-readable summary
+  - Markdown: Documentation-friendly with tables
+  - JSON: Machine-readable for automation
 
 ---
 
