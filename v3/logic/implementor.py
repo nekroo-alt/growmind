@@ -223,6 +223,26 @@ class Implementor:
                     f"Dependency coverage: {quality_metrics['dependency_coverage']}"
                 )
 
+            # V4: Detect loops in Red phase attempts
+            red_loop_traps = self.trap_detector.detect_all_loops(
+                action_history=self.decision_history.get_recent_decisions(limit=5),
+                error_history=self.telemetry_manager.query_operations(status="failed", limit=5),
+                reasoning_history=self.decision_history.get_recent_decisions(limit=5),
+                decision_dependencies=self.decision_history.get_decision_graph()
+            )
+            if red_loop_traps:
+                logger.warning(f"Loop detected in Red phase: {red_loop_traps}")
+                telemetry.warning(f"Loop detected: {red_loop_traps}")
+                # Attempt recovery
+                recovery_result = self.trap_recovery.execute_recovery(
+                    trap_type="infinite_loop",
+                    trap_details=red_loop_traps
+                )
+                if recovery_result["success"]:
+                    logger.info(f"Successfully recovered from loop: {recovery_result['message']}")
+                else:
+                    logger.error(f"Failed to recover from loop: {recovery_result['message']}")
+            
             # Red Phase: Write a failing test
             logger.debug("Starting Red Phase: Writing failing test")
             telemetry.track_step("Red Phase: Writing failing test")
@@ -231,6 +251,26 @@ class Implementor:
                 logger.error(f"Red Phase failed for task {task_id}: {error}")
                 return False, error
 
+            # V4: Detect loops in Green phase attempts
+            green_loop_traps = self.trap_detector.detect_all_loops(
+                action_history=self.decision_history.get_recent_decisions(limit=5),
+                error_history=self.telemetry_manager.query_operations(status="failed", limit=5),
+                reasoning_history=self.decision_history.get_recent_decisions(limit=5),
+                decision_dependencies=self.decision_history.get_decision_graph()
+            )
+            if green_loop_traps:
+                logger.warning(f"Loop detected in Green phase: {green_loop_traps}")
+                telemetry.warning(f"Loop detected: {green_loop_traps}")
+                # Attempt recovery
+                recovery_result = self.trap_recovery.execute_recovery(
+                    trap_type="infinite_loop",
+                    trap_details=green_loop_traps
+                )
+                if recovery_result["success"]:
+                    logger.info(f"Successfully recovered from loop: {recovery_result['message']}")
+                else:
+                    logger.error(f"Failed to recover from loop: {recovery_result['message']}")
+            
             # Green Phase: Write minimal code to pass
             logger.debug("Starting Green Phase: Implementing code")
             telemetry.track_step("Green Phase: Implementing code")
@@ -275,6 +315,24 @@ class Implementor:
                 if regression_detected["is_regression"]:
                     logger.error(f"TDD cycle regression detected: {regression_detected['message']}")
                     telemetry.error(f"TDD cycle regression: {regression_detected['message']}")
+                    
+                    # V4: Detect dead end from regression
+                    dead_end_traps = self.trap_detector.detect_dead_end_no_progress(
+                        progress_history=self.progress_tracker.get_progress_history(tracking_id=task_tracking_id),
+                        threshold=5
+                    )
+                    if dead_end_traps:
+                        logger.warning(f"Dead end detected in TDD cycle: {dead_end_traps}")
+                        telemetry.warning(f"Dead end detected: {dead_end_traps}")
+                        # Attempt recovery
+                        recovery_result = self.trap_recovery.execute_recovery(
+                            trap_type="dead_end",
+                            trap_details=dead_end_traps
+                        )
+                        if recovery_result["success"]:
+                            logger.info(f"Successfully recovered from dead end: {recovery_result['message']}")
+                        else:
+                            logger.error(f"Failed to recover from dead end: {recovery_result['message']}")
 
             # V3: Record TDD cycle completion
             op.record_event(

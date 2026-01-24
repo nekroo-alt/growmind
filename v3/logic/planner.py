@@ -17,6 +17,8 @@ from v3.data.decision_history import get_decision_history
 from v3.logic.reasoning_engine import get_reasoning_engine
 from v3.logic.context_expander import get_context_expander
 from v3.logic.progress_tracker import get_progress_tracker
+from v3.logic.trap_detector import get_trap_detector
+from v3.logic.trap_recovery import get_trap_recovery
 
 logger = get_module_logger(__name__)
 
@@ -36,7 +38,9 @@ class Planner:
         self.reasoning_engine = get_reasoning_engine()
         self.context_expander = get_context_expander()
         self.progress_tracker = get_progress_tracker()
-        logger.info("Planner initialized successfully with V4 adaptive reasoning")
+        self.trap_detector = get_trap_detector()
+        self.trap_recovery = get_trap_recovery()
+        logger.info("Planner initialized successfully with V4 adaptive reasoning and trap detection")
 
     @fcid_mapping("PLAN-0100")
     def breakdown_requirements(
@@ -83,6 +87,25 @@ class Planner:
                 }
             )
             logger.debug(f"Using context level {level} for planning")
+            
+            # V4: Detect scope creep in task breakdown
+            scope_traps = self.trap_detector.detect_scope_creep(
+                original_task=task_to_break,
+                generated_tasks=subtasks_data if 'subtasks_data' in locals() else [],
+                context=context
+            )
+            if scope_traps:
+                logger.warning(f"Scope creep detected in planning: {scope_traps}")
+                telemetry.warning(f"Scope creep detected: {scope_traps}")
+                # Attempt recovery
+                recovery_result = self.trap_recovery.execute_recovery(
+                    trap_type="scope_creep",
+                    trap_details=scope_traps
+                )
+                if recovery_result["success"]:
+                    logger.info(f"Successfully recovered from scope creep: {recovery_result['message']}")
+                else:
+                    logger.error(f"Failed to recover from scope creep: {recovery_result['message']}")
             
             # Step 1: Analyze task impact using AST analysis
             acceptance_criteria = (
@@ -239,9 +262,26 @@ class Planner:
                 logger.warning(f"Planning progress check: {is_adequate['message']}")
                 telemetry.warning(f"Planning progress warning: {is_adequate['message']}")
                 
-                # V4: Check for stagnation or regression
-                stagnation_detected = self.progress_tracker.detect_stagnation(tracking_id=task_tracking_id)
-                if stagnation_detected["is_stagnant"]:
+            # V4: Check for stagnation or regression
+            stagnation_detected = self.progress_tracker.detect_stagnation(tracking_id=task_tracking_id)
+            if stagnation_detected["is_stagnant"]:
+                # V4: Detect dead end from stagnation
+                dead_end_traps = self.trap_detector.detect_dead_end_no_progress(
+                    progress_history=self.progress_tracker.get_progress_history(tracking_id=task_tracking_id),
+                    threshold=5
+                )
+                if dead_end_traps:
+                    logger.warning(f"Dead end detected in planning: {dead_end_traps}")
+                    telemetry.warning(f"Dead end detected: {dead_end_traps}")
+                    # Attempt recovery
+                    recovery_result = self.trap_recovery.execute_recovery(
+                        trap_type="dead_end",
+                        trap_details=dead_end_traps
+                    )
+                    if recovery_result["success"]:
+                        logger.info(f"Successfully recovered from dead end: {recovery_result['message']}")
+                    else:
+                        logger.error(f"Failed to recover from dead end: {recovery_result['message']}")
                     logger.warning(f"Planning stagnation detected: {stagnation_detected['message']}")
                     telemetry.warning(f"Planning stagnation: {stagnation_detected['message']}")
                 

@@ -12,6 +12,8 @@ from v3.data.checkpoint_manager import CheckpointManager
 from v3.data.context_hierarchy import get_context_hierarchy
 from v3.logic.reasoning_engine import get_reasoning_engine
 from v3.logic.context_expander import get_context_expander
+from v3.logic.trap_detector import get_trap_detector
+from v3.logic.trap_recovery import get_trap_recovery
 
 logger = get_module_logger(__name__)
 
@@ -25,7 +27,9 @@ class Dispatcher:
         self.context_hierarchy = get_context_hierarchy()
         self.reasoning_engine = get_reasoning_engine()
         self.context_expander = get_context_expander()
-        logger.info("Dispatcher initialized successfully with V4 adaptive reasoning")
+        self.trap_detector = get_trap_detector()
+        self.trap_recovery = get_trap_recovery()
+        logger.info("Dispatcher initialized successfully with V4 adaptive reasoning and trap detection")
 
     @fcid_mapping("DISP-100")
     def dispatch(self, preferred_id=None):
@@ -41,6 +45,23 @@ class Dispatcher:
             operation_type="dispatch",
             title=f"Dispatch task selection (preferred_id={preferred_id})",
         ) as op:
+            # V4: Detect circular reasoning in task selection
+            circular_traps = self.trap_detector.detect_circular_reasoning(
+                decision_history=self.decision_history.get_recent_decisions(limit=10),
+                task_id=preferred_id
+            )
+            if circular_traps:
+                logger.warning(f"Circular reasoning detected in dispatch: {circular_traps}")
+                telemetry.warning(f"Circular reasoning detected: {circular_traps}")
+                # Attempt recovery
+                recovery_result = self.trap_recovery.execute_recovery(
+                    trap_type="circular_reasoning",
+                    trap_details=circular_traps
+                )
+                if recovery_result["success"]:
+                    logger.info(f"Successfully recovered from circular reasoning: {recovery_result['message']}")
+                else:
+                    logger.error(f"Failed to recover from circular reasoning: {recovery_result['message']}")
             logger.debug(f"Dispatching task (preferred_id={preferred_id})")
             
             # V4: Use hierarchical context for task selection

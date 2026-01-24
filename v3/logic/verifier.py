@@ -13,6 +13,8 @@ from v3.logic.action_validator import get_action_validator
 from v3.logic.progress_tracker import get_progress_tracker
 from v3.logic.context_expander import get_context_expander
 from v3.logic.progress_tracker import get_progress_tracker as get_progress_tracker_v4
+from v3.logic.trap_detector import get_trap_detector
+from v3.logic.trap_recovery import get_trap_recovery
 
 logger = get_module_logger(__name__)
 
@@ -69,7 +71,9 @@ class Verifier:
         self.progress_tracker = get_progress_tracker()
         self.context_expander = get_context_expander()
         self.progress_tracker_v4 = get_progress_tracker_v4()
-        logger.info("Verifier initialized successfully with V4 adaptive reasoning")
+        self.trap_detector = get_trap_detector()
+        self.trap_recovery = get_trap_recovery()
+        logger.info("Verifier initialized successfully with V4 adaptive reasoning and trap detection")
 
     @fcid_mapping("VER-100")
     def run_tests(self, test_file="v1/test_poc.py", tracking_id=None):
@@ -633,8 +637,27 @@ class Verifier:
         """
         FCID: VER-102
         Functionality: Performs mutation testing by systematically swapping operators and calculating a score.
-        V4 Enhancement: Added progress tracking for mutation testing.
+        V4 Enhancement: Added progress tracking and trap detection for mutation testing.
         """
+        # V4: Detect loops in mutation testing attempts
+        validation_loop_traps = self.trap_detector.detect_all_loops(
+            action_history=self.decision_history.get_recent_decisions(limit=5),
+            error_history=self.telemetry_manager.query_operations(status="failed", limit=5),
+            reasoning_history=self.decision_history.get_recent_decisions(limit=5),
+            decision_dependencies=self.decision_history.get_decision_graph()
+        )
+        if validation_loop_traps:
+            logger.warning(f"Loop detected in mutation testing: {validation_loop_traps}")
+            # Attempt recovery
+            recovery_result = self.trap_recovery.execute_recovery(
+                trap_type="infinite_loop",
+                trap_details=validation_loop_traps
+            )
+            if recovery_result["success"]:
+                logger.info(f"Successfully recovered from loop: {recovery_result['message']}")
+            else:
+                logger.error(f"Failed to recover from loop: {recovery_result['message']}")
+        
         # V4: Update progress for mutation testing start
         if tracking_id:
             self.progress_tracker_v4.update_progress(
