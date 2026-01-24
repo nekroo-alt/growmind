@@ -426,6 +426,381 @@ def function():
         self.assertFalse(self.detector._is_special_variable('data'))
         self.assertFalse(self.detector._is_special_variable('result'))
 
+    def test_detect_unused_class_attributes(self):
+        """Test detection of unused class attributes."""
+        # Create file with class attributes
+        class_attr_file = os.path.join(self.test_dir, "class_attrs.py")
+        with open(class_attr_file, 'w') as f:
+            f.write("""
+class MyClass:
+    def __init__(self):
+        self.used_attr = 1
+        self.unused_attr = 2  # Should be detected
+    
+    def method(self):
+        return self.used_attr
+""")
+        
+        unused_vars = self.detector.detect_unused_variables(include_test_files=False)
+        
+        # Should detect unused_attr
+        var_names = [v.variable_name for v in unused_vars]
+        self.assertIn('unused_attr', var_names)
+        
+        # Check scope
+        unused_attr = [v for v in unused_vars if v.variable_name == 'unused_attr'][0]
+        self.assertEqual(unused_attr.scope, 'class')
+
+    def test_detect_unused_module_level_variables(self):
+        """Test detection of unused module-level variables."""
+        # Create file with module-level variables
+        module_file = os.path.join(self.test_dir, "module_vars.py")
+        with open(module_file, 'w') as f:
+            f.write("""
+# Module-level variables
+USED_MODULE_VAR = "used"
+UNUSED_MODULE_VAR = "unused"  # Should be detected
+
+def function():
+    return USED_MODULE_VAR
+""")
+        
+        unused_vars = self.detector.detect_unused_variables(include_test_files=False)
+        
+        # Should detect UNUSED_MODULE_VAR
+        var_names = [v.variable_name for v in unused_vars]
+        self.assertIn('UNUSED_MODULE_VAR', var_names)
+        
+        # Check scope
+        unused_var = [v for v in unused_vars if v.variable_name == 'UNUSED_MODULE_VAR'][0]
+        self.assertEqual(unused_var.scope, 'module')
+
+    def test_unused_variable_multiple_scopes(self):
+        """Test that variables from different scopes are detected."""
+        # Create file with variables in all scopes
+        multi_file = os.path.join(self.test_dir, "multi_scope.py")
+        with open(multi_file, 'w') as f:
+            f.write("""
+# Module-level
+MODULE_UNUSED = "unused"
+
+class TestClass:
+    def __init__(self):
+        self.CLASS_UNUSED = "unused"
+        self.CLASS_USED = "used"
+    
+    def method(self):
+        return self.CLASS_USED
+
+def function():
+    LOCAL_UNUSED = "unused"
+    LOCAL_USED = "used"
+    return LOCAL_USED
+""")
+        
+        unused_vars = self.detector.detect_unused_variables(include_test_files=False)
+        
+        # Should detect all three
+        var_names = [v.variable_name for v in unused_vars]
+        self.assertIn('MODULE_UNUSED', var_names)
+        self.assertIn('CLASS_UNUSED', var_names)
+        self.assertIn('LOCAL_UNUSED', var_names)
+        
+        # Check scopes
+        scopes = {v.variable_name: v.scope for v in unused_vars}
+        self.assertEqual(scopes['MODULE_UNUSED'], 'module')
+        self.assertEqual(scopes['CLASS_UNUSED'], 'class')
+        self.assertEqual(scopes['LOCAL_UNUSED'], 'local')
+
+    def test_used_class_attributes_not_flagged(self):
+        """Test that used class attributes are not flagged."""
+        # Create file with used class attributes
+        used_file = os.path.join(self.test_dir, "used_attrs.py")
+        with open(used_file, 'w') as f:
+            f.write("""
+class MyClass:
+    def __init__(self):
+        self.attr1 = 1
+        self.attr2 = 2
+    
+    def method1(self):
+        return self.attr1
+    
+    def method2(self):
+        return self.attr2
+""")
+        
+        unused_vars = self.detector.detect_unused_variables(include_test_files=False)
+        
+        # Should not detect attr1 or attr2
+        var_names = [v.variable_name for v in unused_vars]
+        self.assertNotIn('attr1', var_names)
+        self.assertNotIn('attr2', var_names)
+
+    def test_used_module_variables_not_flagged(self):
+        """Test that used module variables are not flagged."""
+        # Create file with used module variables
+        used_file = os.path.join(self.test_dir, "used_module.py")
+        with open(used_file, 'w') as f:
+            f.write("""
+# Module-level variables
+VAR1 = "value1"
+VAR2 = "value2"
+
+def func1():
+    return VAR1
+
+def func2():
+    return VAR2
+""")
+        
+        unused_vars = self.detector.detect_unused_variables(include_test_files=False)
+        
+        # Should not detect VAR1 or VAR2
+        var_names = [v.variable_name for v in unused_vars]
+        self.assertNotIn('VAR1', var_names)
+        self.assertNotIn('VAR2', var_names)
+
+    def test_unused_variable_confidence_levels(self):
+        """Test confidence levels for different scopes."""
+        # Create file with various unused variables
+        conf_file = os.path.join(self.test_dir, "confidence.py")
+        with open(conf_file, 'w') as f:
+            f.write("""
+MODULE_UNUSED = "unused"
+
+class TestClass:
+    def __init__(self):
+        self.CLASS_UNUSED = "unused"
+
+def function():
+    LOCAL_UNUSED = "unused"
+    return 1
+""")
+        
+        unused_vars = self.detector.detect_unused_variables(include_test_files=False)
+        
+        # Check confidence levels
+        for var in unused_vars:
+            if var.scope == 'local':
+                self.assertEqual(var.confidence, 'high')
+            elif var.scope in ('class', 'module'):
+                self.assertEqual(var.confidence, 'medium')
+
+    def test_unused_variable_reasons_and_suggestions(self):
+        """Test that reasons and suggestions are generated."""
+        # Create file with unused variable
+        reason_file = os.path.join(self.test_dir, "reasons.py")
+        with open(reason_file, 'w') as f:
+            f.write("""
+def function():
+    unused_var = 42
+    return 1
+""")
+        
+        unused_vars = self.detector.detect_unused_variables(include_test_files=False)
+        
+        # Should have at least one unused variable
+        self.assertGreater(len(unused_vars), 0)
+        
+        var = unused_vars[0]
+        
+        # Should have reasons
+        self.assertIsInstance(var.reasons, list)
+        self.assertGreater(len(var.reasons), 0)
+        
+        # Should have suggestions
+        self.assertIsInstance(var.suggestions, list)
+        self.assertGreater(len(var.suggestions), 0)
+
+    def test_generate_unused_variables_report_text(self):
+        """Test text report generation for unused variables."""
+        report = self.detector.generate_unused_variables_report(format="text")
+        
+        self.assertIsInstance(report, str)
+        self.assertIn("UNUSED VARIABLE DETECTION REPORT", report)
+        self.assertIn("Total Unused Variables:", report)
+        self.assertIn("Scope Breakdown:", report)
+        self.assertIn("Confidence Breakdown:", report)
+
+    def test_generate_unused_variables_report_json(self):
+        """Test JSON report generation for unused variables."""
+        import json
+        
+        report = self.detector.generate_unused_variables_report(format="json")
+        
+        self.assertIsInstance(report, str)
+        data = json.loads(report)
+        self.assertIsInstance(data, list)
+        
+        # Check structure
+        if data:
+            self.assertIn('file_path', data[0])
+            self.assertIn('variable_name', data[0])
+            self.assertIn('scope', data[0])
+            self.assertIn('line_number', data[0])
+            self.assertIn('confidence', data[0])
+
+    def test_generate_unused_variables_report_markdown(self):
+        """Test markdown report generation for unused variables."""
+        report = self.detector.generate_unused_variables_report(format="markdown")
+        
+        self.assertIsInstance(report, str)
+        self.assertIn("# Unused Variable Detection Report", report)
+        self.assertIn("## Summary", report)
+        self.assertIn("| Variable | File:Line |", report)
+
+    def test_loop_variables_not_flagged(self):
+        """Test that loop variables are not flagged."""
+        # Create file with loop variables
+        loop_file = os.path.join(self.test_dir, "loops.py")
+        with open(loop_file, 'w') as f:
+            f.write("""
+def process_items():
+    for item in items:  # item should not be flagged
+        print(item)
+    
+    for i in range(10):  # i should not be flagged
+        print(i)
+    
+    for key, value in data.items():  # key, value should not be flagged
+        print(key, value)
+""")
+        
+        unused_vars = self.detector.detect_unused_variables(include_test_files=False)
+        
+        # Loop variables should not be flagged
+        var_names = [v.variable_name for v in unused_vars]
+        self.assertNotIn('item', var_names)
+        self.assertNotIn('i', var_names)
+        self.assertNotIn('key', var_names)
+        self.assertNotIn('value', var_names)
+
+    def test_comprehension_variables_not_flagged(self):
+        """Test that comprehension variables are not flagged."""
+        # Create file with comprehension
+        comp_file = os.path.join(self.test_dir, "comprehensions.py")
+        with open(comp_file, 'w') as f:
+            f.write("""
+def process():
+    squares = [x**2 for x in range(10)]  # x should not be flagged
+    doubled = {y: y*2 for y in range(5)}  # y should not be flagged
+    return squares
+""")
+        
+        unused_vars = self.detector.detect_unused_variables(include_test_files=False)
+        
+        # Comprehension variables should not be flagged
+        var_names = [v.variable_name for v in unused_vars]
+        self.assertNotIn('x', var_names)
+        self.assertNotIn('y', var_names)
+
+    def test_multiple_unused_in_same_function(self):
+        """Test detection of multiple unused variables in same function."""
+        # Create file with multiple unused variables
+        multi_file = os.path.join(self.test_dir, "multi_unused.py")
+        with open(multi_file, 'w') as f:
+            f.write("""
+def function():
+    unused1 = 1
+    unused2 = 2
+    unused3 = 3
+    used = 4
+    return used
+""")
+        
+        unused_vars = self.detector.detect_unused_variables(include_test_files=False)
+        
+        # Should detect all three unused variables
+        var_names = [v.variable_name for v in unused_vars]
+        self.assertIn('unused1', var_names)
+        self.assertIn('unused2', var_names)
+        self.assertIn('unused3', var_names)
+        
+        # Should not detect 'used'
+        self.assertNotIn('used', var_names)
+
+    def test_unused_variable_in_nested_scopes(self):
+        """Test detection in nested function scopes."""
+        # Create file with nested functions
+        nested_file = os.path.join(self.test_dir, "nested.py")
+        with open(nested_file, 'w') as f:
+            f.write("""
+def outer():
+    outer_unused = 1
+    outer_used = 2
+    
+    def inner():
+        inner_unused = 3
+        inner_used = 4
+        return inner_used
+    
+    return outer_used
+""")
+        
+        unused_vars = self.detector.detect_unused_variables(include_test_files=False)
+        
+        # Should detect both unused variables
+        var_names = [v.variable_name for v in unused_vars]
+        self.assertIn('outer_unused', var_names)
+        self.assertIn('inner_unused', var_names)
+
+    def test_false_positive_prevention(self):
+        """Test prevention of false positives."""
+        # Create file with edge cases that should not be flagged
+        edge_file = os.path.join(self.test_dir, "edge_cases.py")
+        with open(edge_file, 'w') as f:
+            f.write("""
+# Variables used in different contexts
+def function1():
+    x = 1
+    y = 2
+    return x + y
+
+def function2():
+    result = calculate()
+    if result > 0:
+        return result
+    return 0
+
+class TestClass:
+    def __init__(self):
+        self.value = 1
+    
+    def get_value(self):
+        return self.value
+""")
+        
+        unused_vars = self.detector.detect_unused_variables(include_test_files=False)
+        
+        # These should not be flagged
+        var_names = [v.variable_name for v in unused_vars]
+        self.assertNotIn('x', var_names)
+        self.assertNotIn('y', var_names)
+        self.assertNotIn('result', var_names)
+        self.assertNotIn('value', var_names)
+
+    def test_all_report_formats_consistency(self):
+        """Test that all report formats are consistent."""
+        # Generate all report formats
+        text_report = self.detector.generate_unused_variables_report(format="text")
+        json_report = self.detector.generate_unused_variables_report(format="json")
+        markdown_report = self.detector.generate_unused_variables_report(format="markdown")
+        
+        # All should be strings
+        self.assertIsInstance(text_report, str)
+        self.assertIsInstance(json_report, str)
+        self.assertIsInstance(markdown_report, str)
+        
+        # All should mention unused variables
+        self.assertIn("Unused Variable", text_report)
+        self.assertIn("Unused Variable", markdown_report)
+        
+        # JSON should be valid
+        import json
+        data = json.loads(json_report)
+        self.assertIsInstance(data, list)
+
 
 class TestDeadCodeDetectorIntegration(unittest.TestCase):
     """Integration tests for DeadCodeDetector."""
