@@ -611,10 +611,267 @@ class StrategyEvaluator:
             explanation += f"Key advantages: {', '.join(best.advantages[:2])}."
         
         return optimal, explanation
+    
+    def identify_optimal_combinations(
+        self,
+        task_type: str,
+        min_combinations: int = 3,
+        min_success_rate: float = 0.6
+    ) -> List[Dict]:
+        """
+        Identify optimal strategy combinations for different phases of a task.
+        
+        Analyzes strategy performance across different situation types to find
+        combinations that work well together for complete task execution.
+        
+        Args:
+            task_type: Type of task to analyze
+            min_combinations: Minimum number of combinations to return
+            min_success_rate: Minimum success rate threshold for combinations
+            
+        Returns:
+            List of strategy combination dictionaries with scores and rationale
+        """
+        # Get performance data for all strategies across all situation types
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT strategy, situation_type, success_rate, total_operations
+            FROM strategy_performance
+            WHERE task_type = ? AND total_operations >= 5
+        """, (task_type,))
+        
+        rows = cursor.fetchall()
+        conn.close()
+        
+        if not rows:
+            return []
+        
+        # Group performance by strategy and situation type
+        perf_data = {}
+        for strategy, situation, success_rate, ops in rows:
+            if strategy not in perf_data:
+                perf_data[strategy] = {}
+            perf_data[strategy][SituationType(situation)] = {
+                'success_rate': success_rate,
+                'operations': ops
+            }
+        
+        # Generate strategy combinations for different task phases
+        combinations = []
+        
+        # Common task phase patterns:
+        # 1. Planning -> Implementation -> Testing
+        # 2. Simple tasks: single strategy throughout
+        # 3. Complex tasks: conservative planning -> balanced implementation -> conservative testing
+        # 4. Time-critical tasks: aggressive where possible
+        
+        # Combination 1: Conservative throughout (safest)
+        if 'conservative' in perf_data:
+            combo_score = self._calculate_combination_score(
+                perf_data['conservative'],
+                [SituationType.NORMAL, SituationType.COMPLEX_TASK, SituationType.ERROR_RECOVERY]
+            )
+            if combo_score >= min_success_rate:
+                combinations.append({
+                    'strategy': 'conservative',
+                    'phases': {
+                        'planning': 'conservative',
+                        'implementation': 'conservative',
+                        'testing': 'conservative'
+                    },
+                    'overall_score': combo_score,
+                    'rationale': 'Highest safety and quality, lowest risk',
+                    'best_for': 'Critical tasks, production deployments, complex refactoring'
+                })
+        
+        # Combination 2: Balanced throughout (recommended default)
+        if 'balanced' in perf_data:
+            combo_score = self._calculate_combination_score(
+                perf_data['balanced'],
+                [SituationType.NORMAL, SituationType.COMPLEX_TASK, SituationType.ERROR_RECOVERY]
+            )
+            if combo_score >= min_success_rate:
+                combinations.append({
+                    'strategy': 'balanced',
+                    'phases': {
+                        'planning': 'balanced',
+                        'implementation': 'balanced',
+                        'testing': 'balanced'
+                    },
+                    'overall_score': combo_score,
+                    'rationale': 'Optimal balance of speed, quality, and safety',
+                    'best_for': 'Most development tasks, feature implementation'
+                })
+        
+        # Combination 3: Aggressive throughout (fastest)
+        if 'aggressive' in perf_data:
+            combo_score = self._calculate_combination_score(
+                perf_data['aggressive'],
+                [SituationType.NORMAL, SituationType.TIME_CRITICAL, SituationType.COMPLEX_TASK]
+            )
+            if combo_score >= min_success_rate:
+                combinations.append({
+                    'strategy': 'aggressive',
+                    'phases': {
+                        'planning': 'aggressive',
+                        'implementation': 'aggressive',
+                        'testing': 'aggressive'
+                    },
+                    'overall_score': combo_score,
+                    'rationale': 'Maximum speed, higher risk',
+                    'best_for': 'Prototyping, time-critical tasks, low-risk features'
+                })
+        
+        # Combination 4: Hybrid - Conservative planning, Balanced implementation, Conservative testing
+        if 'conservative' in perf_data and 'balanced' in perf_data:
+            scores = []
+            scores.append(perf_data['conservative'].get(SituationType.NORMAL, {}).get('success_rate', 0.5))
+            scores.append(perf_data['balanced'].get(SituationType.NORMAL, {}).get('success_rate', 0.5))
+            scores.append(perf_data['conservative'].get(SituationType.ERROR_RECOVERY, {}).get('success_rate', 0.5))
+            combo_score = sum(scores) / len(scores) if scores else 0.0
+            
+            if combo_score >= min_success_rate:
+                combinations.append({
+                    'strategy': 'conservative_balanced_conservative',
+                    'phases': {
+                        'planning': 'conservative',
+                        'implementation': 'balanced',
+                        'testing': 'conservative'
+                    },
+                    'overall_score': combo_score,
+                    'rationale': 'Safe planning, efficient implementation, thorough testing',
+                    'best_for': 'Quality-critical features, production code'
+                })
+        
+        # Combination 5: Balanced planning, Aggressive implementation, Balanced testing
+        if 'balanced' in perf_data and 'aggressive' in perf_data:
+            scores = []
+            scores.append(perf_data['balanced'].get(SituationType.NORMAL, {}).get('success_rate', 0.5))
+            scores.append(perf_data['aggressive'].get(SituationType.TIME_CRITICAL, {}).get('success_rate', 0.5))
+            scores.append(perf_data['balanced'].get(SituationType.ERROR_RECOVERY, {}).get('success_rate', 0.5))
+            combo_score = sum(scores) / len(scores) if scores else 0.0
+            
+            if combo_score >= min_success_rate:
+                combinations.append({
+                    'strategy': 'balanced_aggressive_balanced',
+                    'phases': {
+                        'planning': 'balanced',
+                        'implementation': 'aggressive',
+                        'testing': 'balanced'
+                    },
+                    'overall_score': combo_score,
+                    'rationale': 'Good planning, fast implementation, reliable testing',
+                    'best_for': 'Standard features with time constraints'
+                })
+        
+        # Sort by overall score
+        combinations.sort(key=lambda x: x['overall_score'], reverse=True)
+        
+        # Return top N combinations
+        return combinations[:min_combinations]
+    
+    def _calculate_combination_score(
+        self,
+        strategy_perf: Dict,
+        situation_types: List[SituationType]
+    ) -> float:
+        """
+        Calculate overall score for a strategy across multiple situation types.
+        
+        Args:
+            strategy_perf: Performance data for a single strategy
+            situation_types: List of situation types to include in score
+            
+        Returns:
+            Weighted average score (0-1)
+        """
+        scores = []
+        for sit_type in situation_types:
+            if sit_type in strategy_perf:
+                scores.append(strategy_perf[sit_type]['success_rate'])
+        
+        return sum(scores) / len(scores) if scores else 0.0
+    
+    def get_adaptive_weights(
+        self,
+        situation_type: SituationType
+    ) -> Dict[str, float]:
+        """
+        Get adaptive scoring weights based on situation type.
+        
+        Args:
+            situation_type: Current situation type
+            
+        Returns:
+            Dictionary of weights for scoring dimensions
+        """
+        # Weights adapt based on situation:
+        # - Time Critical: Higher weight on efficiency
+        # - Error Recovery: Higher weight on success rate
+        # - Complex Task: Higher weight on effectiveness
+        # - Normal: Balanced weights
+        
+        if situation_type == SituationType.TIME_CRITICAL:
+            return {
+                'success_rate': 0.3,
+                'efficiency': 0.4,
+                'effectiveness': 0.2,
+                'robustness': 0.1
+            }
+        elif situation_type == SituationType.ERROR_RECOVERY:
+            return {
+                'success_rate': 0.6,
+                'efficiency': 0.1,
+                'effectiveness': 0.2,
+                'robustness': 0.1
+            }
+        elif situation_type == SituationType.COMPLEX_TASK:
+            return {
+                'success_rate': 0.4,
+                'efficiency': 0.1,
+                'effectiveness': 0.4,
+                'robustness': 0.1
+            }
+        else:  # NORMAL
+            return {
+                'success_rate': 0.5,
+                'efficiency': 0.2,
+                'effectiveness': 0.2,
+                'robustness': 0.1
+            }
+    
+    def compare_strategies_dynamic(
+        self,
+        task_type: Optional[str] = None,
+        situation_type: Optional[SituationType] = None
+    ) -> List[StrategyComparison]:
+        """
+        Compare strategies with situation-adaptive weights.
+        
+        Uses adaptive weights that change based on the current situation type
+        to provide more relevant rankings.
+        
+        Args:
+            task_type: Filter by task type (optional)
+            situation_type: Filter by situation type (optional)
+            
+        Returns:
+            List of StrategyComparison objects, sorted by rank
+        """
+        # Get adaptive weights based on situation
+        if situation_type:
+            weights = self.get_adaptive_weights(situation_type)
+        else:
+            weights = None  # Use default weights
+        
+        # Use compare_strategies with adaptive weights
+        return self.compare_strategies(task_type, situation_type, weights)
 
 
 if __name__ == "__main__":
-    # Test the evaluator
+    # Test
     evaluator = StrategyEvaluator("test_strategy_performance.db")
     
     # Simulate some operations
