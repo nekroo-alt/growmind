@@ -1220,6 +1220,308 @@ def cmd_telemetry_stats(args):
             print(f"  Failed: {failed}")
 
 
+def cmd_decisions(args):
+    """Query and search decision history."""
+    from v3.data.decision_tracer import get_decision_tracer
+    from v3.data.decision_history import get_decision_history
+    from datetime import datetime, timedelta
+
+    tracer = get_decision_tracer()
+    history_mgr = get_decision_history()
+
+    # Parse time range if provided
+    start_time = None
+    end_time = None
+
+    if args.last:
+        try:
+            hours = int(args.last.rstrip("h"))
+            start_time = (datetime.utcnow() - timedelta(hours=hours)).isoformat()
+        except ValueError:
+            print(f"Invalid time range: {args.last}")
+            return
+
+    if args.start:
+        try:
+            start_time = args.start
+        except ValueError:
+            print(f"Invalid start time format: {args.start}")
+            return
+
+    if args.end:
+        try:
+            end_time = args.end
+        except ValueError:
+            print(f"Invalid end time format: {args.end}")
+            return
+
+    # Search decisions
+    decisions = tracer.search(
+        task_id=args.task_id,
+        operation_id=args.operation_id,
+        start_time=start_time,
+        end_time=end_time,
+        min_confidence=args.min_confidence,
+        max_confidence=args.max_confidence,
+        action_pattern=args.action,
+        limit=args.limit
+    )
+
+    # If no filters applied, use decision history for broader search
+    if not decisions and not args.task_id and not args.operation_id:
+        decisions = history_mgr.list_decisions(
+            task_id=args.task_id,
+            operation_id=args.operation_id,
+            outcome=args.outcome,
+            min_confidence=args.min_confidence,
+            max_confidence=args.max_confidence,
+            limit=args.limit
+        )
+
+    # Additional search methods
+    if args.context_key and args.context_value:
+        context_results = tracer.search_context(
+            context_key=args.context_key,
+            context_value=args.context_value,
+            limit=args.limit
+        )
+        # Merge results
+        seen_ids = {d.get('decision_id') for d in decisions}
+        for ctx_dec in context_results:
+            if ctx_dec.get('decision_id') not in seen_ids:
+                decisions.append(ctx_dec)
+
+    if args.reasoning:
+        reasoning_results = tracer.search_reasoning(
+            reasoning_keyword=args.reasoning,
+            limit=args.limit
+        )
+        # Merge results
+        seen_ids = {d.get('decision_id') for d in decisions}
+        for res_dec in reasoning_results:
+            if res_dec.get('decision_id') not in seen_ids:
+                decisions.append(res_dec)
+
+    # Filter by outcome if specified
+    if args.outcome:
+        decisions = [d for d in decisions if d.get('outcome') == args.outcome]
+
+    if not decisions:
+        print("No matching decisions found.")
+        return
+
+    # Display results
+    print(f"\nFound {len(decisions)} matching decisions:\n")
+
+    for i, decision in enumerate(decisions, 1):
+        decision_id = decision.get('decision_id', 'N/A')[:16]
+        action = decision.get('selected_action') or decision.get('action', 'N/A')
+        timestamp = decision.get('timestamp', 'N/A').replace('T', ' ').split('.')[0][:19]
+        confidence = decision.get('confidence', 0.0)
+        outcome = decision.get('outcome', 'N/A')
+
+        # Format status with emoji
+        outcome_emoji = {
+            'success': '✅',
+            'failure': '❌',
+            'unknown': '❓'
+        }.get(outcome, '')
+
+        print(f"{i}. [{decision_id}...] {action}")
+        print(f"   Timestamp: {timestamp}")
+        print(f"   Confidence: {confidence:.2f}")
+        print(f"   Outcome: {outcome_emoji} {outcome}")
+
+        # Show task/operation IDs
+        if decision.get('task_id'):
+            print(f"   Task ID: {decision['task_id']}")
+        if decision.get('operation_id'):
+            print(f"   Operation: {decision['operation_id'][:16]}...")
+
+        # Show reasoning keyword match
+        if args.reasoning and decision.get('reasoning_chain'):
+            reasoning_chain = decision['reasoning_chain']
+            if reasoning_chain:
+                first_step = reasoning_chain[0]
+                thought = first_step.get('thought', '')[:100]
+                print(f"   Reasoning: {thought}...")
+
+        print()
+
+    # Export if requested
+    if args.export:
+        if args.export.endswith('.json'):
+            tracer.export_traces(decisions, format='json', file_path=args.export)
+        elif args.export.endswith('.csv'):
+            tracer.export_traces(decisions, format='csv', file_path=args.export)
+        else:
+            print(f"Unsupported export format: {args.export}")
+
+    # Show statistics if requested
+    if args.stats:
+        stats = tracer.get_statistics()
+        print("\n" + "=" * 60)
+        print("Decision Statistics")
+        print("=" * 60)
+        print(f"Total Decisions: {stats['total_decisions']}")
+        print(f"Average Confidence: {stats['average_confidence']:.2f}")
+        print(f"\nConfidence Distribution:")
+        print(f"  High (>=0.9): {stats['confidence_distribution']['high']}")
+        print(f"  Medium (0.7-0.9): {stats['confidence_distribution']['medium']}")
+        print(f"  Low (<0.7): {stats['confidence_distribution']['low']}")
+        print(f"\nTop 10 Tasks by Decision Count:")
+        for task in stats['top_tasks']:
+            print(f"  Task {task['task_id']}: {task['decisions']} decisions")
+
+
+def cmd_explain(args):
+    """Display decision explanation and visualization."""
+    from v3.core.ui import create_decision_visualizer
+    from v3.data.decision_tracer import get_decision_tracer
+    from v3.data.decision_history import get_decision_history
+
+    visualizer = create_decision_visualizer()
+    tracer = get_decision_tracer()
+    history_mgr = get_decision_history()
+
+    # Decision tree visualization
+    if args.tree:
+        decisions = []
+        
+        if args.last:
+            # Get last N decisions
+            all_decisions = history_mgr.list_decisions(limit=args.last)
+            decisions.extend(all_decisions)
+        elif args.operation_id:
+            # Get decisions for specific operation
+            all_decisions = history_mgr.list_decisions(operation_id=args.operation_id)
+            decisions.extend(all_decisions)
+        elif args.task_id:
+            # Get decisions for specific task
+            all_decisions = history_mgr.list_decisions(task_id=args.task_id)
+            decisions.extend(all_decisions)
+        else:
+            # Get recent decisions
+            all_decisions = history_mgr.list_decisions(limit=50)
+            decisions.extend(all_decisions)
+        
+        # Add parent-child relationships
+        for decision in decisions:
+            # Get dependencies
+            decision_id = decision.get("decision_id")
+            dependencies = history_mgr.get_decision_graph(decision_id)
+            
+            # Set parent_id from dependencies
+            upstream = dependencies.get("upstream", [])
+            if upstream:
+                decision["parent_id"] = upstream[0].get("decision_id")
+            else:
+                decision["parent_id"] = None
+        
+        visualizer.display_decision_tree(
+            decisions,
+            max_depth=args.max_depth,
+            show_confidence=args.confidence,
+            show_alternatives=args.alternatives
+        )
+
+    # Reasoning chain visualization
+    elif args.reasoning and args.id:
+        decision = history_mgr.get_decision(args.id)
+        if decision:
+            visualizer.display_reasoning_chain(
+                decision,
+                show_steps=True,
+                show_context=args.context
+            )
+        else:
+            print(f"Decision not found: {args.id}")
+
+    # Key decisions visualization
+    elif args.key:
+        decisions = history_mgr.list_decisions(limit=100)
+        
+        if args.operation_id:
+            decisions = [d for d in decisions if d.get("operation_id") == args.operation_id]
+        elif args.task_id:
+            decisions = [d for d in decisions if d.get("task_id") == args.task_id]
+        
+        visualizer.display_key_decisions(
+            decisions,
+            confidence_threshold=args.confidence_threshold,
+            limit=args.limit
+        )
+
+    # Decision heatmap
+    elif args.heatmap:
+        decisions = history_mgr.list_decisions(limit=200)
+        
+        if args.operation_id:
+            decisions = [d for d in decisions if d.get("operation_id") == args.operation_id]
+        elif args.task_id:
+            decisions = [d for d in decisions if d.get("task_id") == args.task_id]
+        
+        visualizer.display_decision_heatmap(
+            decisions,
+            metric=args.metric
+        )
+
+    # Default: show last decision explanation
+    elif args.last:
+        decisions = history_mgr.list_decisions(limit=1)
+        if decisions:
+            decision = decisions[0]
+            print(f"\n{'='*60}")
+            print(f"LAST DECISION EXPLANATION")
+            print("=" * 60)
+            print(f"Decision ID: {decision.get('decision_id', 'N/A')}")
+            print(f"Action: {decision.get('action', 'N/A')}")
+            print(f"Timestamp: {decision.get('timestamp', 'N/A')}")
+            print(f"Confidence: {decision.get('confidence', 0.0):.2f}")
+            print(f"Outcome: {decision.get('outcome', 'N/A')}")
+            
+            # Show reasoning if available
+            reasoning_chain = decision.get('reasoning_chain', [])
+            if reasoning_chain:
+                print(f"\nReasoning Chain:")
+                for step in reasoning_chain[:5]:  # Show first 5 steps
+                    thought = step.get('thought', '')
+                    conclusion = step.get('conclusion', '')
+                    print(f"  Step {step.get('step', '?')}: {thought}")
+                    if conclusion:
+                        print(f"    Conclusion: {conclusion}")
+            
+            # Show alternatives if available
+            alternatives = decision.get('alternatives', [])
+            if alternatives:
+                print(f"\nAlternatives Considered:")
+                for alt in alternatives[:5]:
+                    alt_action = alt.get('action', 'N/A')
+                    alt_reason = alt.get('reason_for_rejection', '')
+                    print(f"  • {alt_action}")
+                    if alt_reason:
+                        print(f"    Rejected: {alt_reason}")
+            
+            print("=" * 60 + "\n")
+        else:
+            print("No decisions found.")
+    
+    # Export decisions
+    if args.export:
+        decisions = history_mgr.list_decisions(limit=1000)
+        
+        if args.operation_id:
+            decisions = [d for d in decisions if d.get("operation_id") == args.operation_id]
+        elif args.task_id:
+            decisions = [d for d in decisions if d.get("task_id") == args.task_id]
+        
+        visualizer.export_visualization(
+            decisions,
+            export_path=args.export,
+            format=args.format
+        )
+
+
 def cmd_progress(args):
     """Display progress visualization."""
     from v3.core.ui import create_progress_visualizer
@@ -2122,6 +2424,110 @@ def main():
     )
     add_common_args(progress_p)
 
+    # Decisions command (V4 - Decision Query)
+    decisions_p = subparsers.add_parser("decisions", help="Query and search decision history")
+    decisions_p.add_argument(
+        "--task-id", type=int, help="Filter by task ID"
+    )
+    decisions_p.add_argument(
+        "--operation-id", help="Filter by operation ID"
+    )
+    decisions_p.add_argument(
+        "--start", help="Start time (ISO format)"
+    )
+    decisions_p.add_argument(
+        "--end", help="End time (ISO format)"
+    )
+    decisions_p.add_argument(
+        "--last", help="Time range (e.g., 1h, 24h)"
+    )
+    decisions_p.add_argument(
+        "--min-confidence", type=float, help="Minimum confidence threshold"
+    )
+    decisions_p.add_argument(
+        "--max-confidence", type=float, help="Maximum confidence threshold"
+    )
+    decisions_p.add_argument(
+        "--action", help="Filter by action pattern"
+    )
+    decisions_p.add_argument(
+        "--outcome", choices=["success", "failure"], help="Filter by outcome"
+    )
+    decisions_p.add_argument(
+        "--context-key", help="Search by context key"
+    )
+    decisions_p.add_argument(
+        "--context-value", help="Search by context value"
+    )
+    decisions_p.add_argument(
+        "--reasoning", help="Search reasoning by keyword"
+    )
+    decisions_p.add_argument(
+        "--limit", type=int, default=50, help="Maximum number to show (default: 50)"
+    )
+    decisions_p.add_argument(
+        "--export", help="Export to file (CSV or JSON)"
+    )
+    decisions_p.add_argument(
+        "--stats", action="store_true", help="Show decision statistics"
+    )
+    add_common_args(decisions_p)
+
+    # Explain command (V4 - Decision Visualization)
+    explain_p = subparsers.add_parser("explain", help="Explain and visualize decisions")
+    explain_p.add_argument(
+        "--id", help="Decision ID to explain"
+    )
+    explain_p.add_argument(
+        "--last", type=int, help="Show last N decisions (default: show last decision with details)"
+    )
+    explain_p.add_argument(
+        "--tree", action="store_true", help="Display decision tree visualization"
+    )
+    explain_p.add_argument(
+        "--reasoning", action="store_true", help="Display reasoning chain for a decision"
+    )
+    explain_p.add_argument(
+        "--key", action="store_true", help="Display key decisions"
+    )
+    explain_p.add_argument(
+        "--heatmap", action="store_true", help="Display decision heatmap"
+    )
+    explain_p.add_argument(
+        "--operation-id", help="Filter by operation ID"
+    )
+    explain_p.add_argument(
+        "--task-id", type=int, help="Filter by task ID"
+    )
+    explain_p.add_argument(
+        "--max-depth", type=int, default=5, help="Maximum depth for decision tree (default: 5)"
+    )
+    explain_p.add_argument(
+        "--confidence-threshold", type=float, default=0.7, help="Minimum confidence for key decisions (default: 0.7)"
+    )
+    explain_p.add_argument(
+        "--limit", type=int, default=10, help="Maximum decisions to display (default: 10)"
+    )
+    explain_p.add_argument(
+        "--confidence", action="store_true", help="Show confidence scores"
+    )
+    explain_p.add_argument(
+        "--alternatives", action="store_true", help="Show considered alternatives"
+    )
+    explain_p.add_argument(
+        "--context", action="store_true", help="Show context in reasoning steps"
+    )
+    explain_p.add_argument(
+        "--metric", choices=["confidence", "time", "tokens"], default="confidence", help="Metric for heatmap (default: confidence)"
+    )
+    explain_p.add_argument(
+        "--export", help="Export decisions to file"
+    )
+    explain_p.add_argument(
+        "--format", choices=["json", "pdf", "png"], default="json", help="Export format (default: json)"
+    )
+    add_common_args(explain_p)
+
     args = parser.parse_args()
 
     # Change CWD to project root
@@ -2184,6 +2590,10 @@ def main():
         cmd_report_generate(args)
     elif args.command == "progress":
         cmd_progress(args)
+    elif args.command == "decisions":
+        cmd_decisions(args)
+    elif args.command == "explain":
+        cmd_explain(args)
     else:
         parser.print_help()
 

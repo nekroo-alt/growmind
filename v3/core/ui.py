@@ -1886,3 +1886,695 @@ def create_progress_visualizer(use_rich: Optional[bool] = None) -> ProgressVisua
         ProgressVisualizer instance
     """
     return ProgressVisualizer(use_rich)
+
+
+# ============================================================================
+# Decision Visualization (V4)
+# ============================================================================
+
+
+class DecisionVisualizer:
+    """
+    Decision visualization for explainability.
+
+    Displays decision flow graphs, reasoning chains, key decision points,
+    alternatives considered, and color-codes by confidence level.
+    """
+
+    def __init__(self, use_rich: Optional[bool] = None):
+        """
+        Initialize decision visualizer.
+
+        Args:
+            use_rich: Force use of rich library (None = auto-detect)
+        """
+        self.use_rich = (
+            RICH_AVAILABLE if use_rich is None else use_rich and RICH_AVAILABLE
+        )
+        self.console = Console() if self.use_rich else None
+
+    def display_decision_tree(
+        self,
+        decisions: List[Dict[str, Any]],
+        max_depth: int = 5,
+        show_confidence: bool = True,
+        show_alternatives: bool = True,
+    ) -> None:
+        """
+        Display decision flow graph as tree structure.
+
+        Args:
+            decisions: List of decision dictionaries with decision_id, parent_id, etc.
+            max_depth: Maximum depth to display
+            show_confidence: Show confidence scores
+            show_alternatives: Show considered alternatives
+        """
+        if self.use_rich and self.console:
+            self._display_rich_decision_tree(
+                decisions, max_depth, show_confidence, show_alternatives
+            )
+        else:
+            self._display_plain_decision_tree(
+                decisions, max_depth, show_confidence, show_alternatives
+            )
+
+    def _display_rich_decision_tree(
+        self,
+        decisions: List[Dict[str, Any]],
+        max_depth: int,
+        show_confidence: bool,
+        show_alternatives: bool,
+    ) -> None:
+        """Display decision tree with rich formatting."""
+        if not decisions:
+            self.console.print("[dim]No decisions found[/dim]")
+            return
+
+        # Build tree structure
+        tree = {}
+        root_decisions = []
+
+        for decision in decisions:
+            decision_id = decision.get("decision_id")
+            parent_id = decision.get("parent_id")
+            
+            if parent_id:
+                if parent_id not in tree:
+                    tree[parent_id] = []
+                tree[parent_id].append(decision)
+            else:
+                root_decisions.append(decision)
+
+        # Display tree recursively
+        for root in root_decisions:
+            self._display_decision_node(
+                root, tree, depth=0, max_depth=max_depth,
+                show_confidence=show_confidence,
+                show_alternatives=show_alternatives
+            )
+
+    def _display_decision_node(
+        self,
+        decision: Dict[str, Any],
+        tree: Dict[str, List[Dict[str, Any]]],
+        depth: int,
+        max_depth: int,
+        show_confidence: bool,
+        show_alternatives: bool,
+    ) -> None:
+        """Recursively display a decision node."""
+        if depth > max_depth:
+            return
+
+        indent = "  " * depth
+        
+        # Get decision info
+        decision_id = decision.get("decision_id", "")[:8]
+        action = decision.get("action", "N/A")
+        confidence = decision.get("confidence", 0.0)
+        outcome = decision.get("outcome", "unknown")
+        timestamp = decision.get("timestamp", "")
+        
+        # Color code by outcome and confidence
+        if outcome == "success":
+            outcome_color = "green"
+        elif outcome == "failure":
+            outcome_color = "red"
+        else:
+            outcome_color = "yellow"
+            
+        if confidence >= 0.8:
+            conf_color = "green"
+        elif confidence >= 0.5:
+            conf_color = "yellow"
+        else:
+            conf_color = "red"
+
+        # Display node
+        self.console.print(f"{indent}┌─ [{decision_id}] {action}")
+        
+        if show_confidence:
+            self.console.print(f"{indent}│  Confidence: [{conf_color}]{confidence:.2f}[/{conf_color}]")
+        
+        self.console.print(f"{indent}│  Outcome: [{outcome_color}]{outcome}[/{outcome_color}]")
+        
+        if timestamp:
+            from datetime import datetime
+            try:
+                dt = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+                time_str = dt.strftime("%H:%M:%S")
+                self.console.print(f"{indent}│  Time: {time_str}")
+            except:
+                pass
+
+        # Display alternatives if requested
+        if show_alternatives:
+            alternatives = decision.get("alternatives", [])
+            if alternatives:
+                self.console.print(f"{indent}│  Alternatives:")
+                for alt in alternatives[:3]:  # Show max 3
+                    alt_action = alt.get("action", "N/A")
+                    alt_reason = alt.get("reason_for_rejection", "")
+                    self.console.print(f"{indent}│    • {alt_action}")
+                    if alt_reason:
+                        self.console.print(f"{indent}│      ({alt_reason})")
+
+        # Get children
+        decision_id = decision.get("decision_id")
+        children = tree.get(decision_id, [])
+        
+        if children:
+            self.console.print(f"{indent}│")
+            for child in children:
+                self._display_decision_node(
+                    child, tree, depth=depth+1, max_depth=max_depth,
+                    show_confidence=show_confidence,
+                    show_alternatives=show_alternatives
+                )
+            self.console.print(f"{indent}└")
+        else:
+            self.console.print(f"{indent}└")
+
+    def _display_plain_decision_tree(
+        self,
+        decisions: List[Dict[str, Any]],
+        max_depth: int,
+        show_confidence: bool,
+        show_alternatives: bool,
+    ) -> None:
+        """Display decision tree with plain text formatting."""
+        if not decisions:
+            print("No decisions found.")
+            return
+
+        print("\n" + "=" * 60)
+        print("DECISION TREE")
+        print("=" * 60 + "\n")
+
+        # Build tree structure
+        tree = {}
+        root_decisions = []
+
+        for decision in decisions:
+            decision_id = decision.get("decision_id")
+            parent_id = decision.get("parent_id")
+            
+            if parent_id:
+                if parent_id not in tree:
+                    tree[parent_id] = []
+                tree[parent_id].append(decision)
+            else:
+                root_decisions.append(decision)
+
+        # Display tree recursively
+        for root in root_decisions:
+            self._display_plain_decision_node(
+                root, tree, depth=0, max_depth=max_depth,
+                show_confidence=show_confidence,
+                show_alternatives=show_alternatives
+            )
+
+        print("=" * 60 + "\n")
+
+    def _display_plain_decision_node(
+        self,
+        decision: Dict[str, Any],
+        tree: Dict[str, List[Dict[str, Any]]],
+        depth: int,
+        max_depth: int,
+        show_confidence: bool,
+        show_alternatives: bool,
+    ) -> None:
+        """Recursively display a decision node in plain text."""
+        if depth > max_depth:
+            return
+
+        indent = "  " * depth
+        
+        # Get decision info
+        decision_id = decision.get("decision_id", "")[:8]
+        action = decision.get("action", "N/A")
+        confidence = decision.get("confidence", 0.0)
+        outcome = decision.get("outcome", "unknown")
+        timestamp = decision.get("timestamp", "")
+        
+        # Display node
+        print(f"{indent}┌─ [{decision_id}] {action}")
+        
+        if show_confidence:
+            print(f"{indent}│  Confidence: {confidence:.2f}")
+        
+        print(f"{indent}│  Outcome: {outcome}")
+        
+        if timestamp:
+            from datetime import datetime
+            try:
+                dt = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+                time_str = dt.strftime("%H:%M:%S")
+                print(f"{indent}│  Time: {time_str}")
+            except:
+                pass
+
+        # Display alternatives if requested
+        if show_alternatives:
+            alternatives = decision.get("alternatives", [])
+            if alternatives:
+                print(f"{indent}│  Alternatives:")
+                for alt in alternatives[:3]:
+                    alt_action = alt.get("action", "N/A")
+                    alt_reason = alt.get("reason_for_rejection", "")
+                    print(f"{indent}│    • {alt_action}")
+                    if alt_reason:
+                        print(f"{indent}│      ({alt_reason})")
+
+        # Get children
+        decision_id = decision.get("decision_id")
+        children = tree.get(decision_id, [])
+        
+        if children:
+            print(f"{indent}│")
+            for child in children:
+                self._display_plain_decision_node(
+                    child, tree, depth=depth+1, max_depth=max_depth,
+                    show_confidence=show_confidence,
+                    show_alternatives=show_alternatives
+                )
+            print(f"{indent}└")
+        else:
+            print(f"{indent}└")
+
+    def display_reasoning_chain(
+        self,
+        decision: Dict[str, Any],
+        show_steps: bool = True,
+        show_context: bool = False,
+    ) -> None:
+        """
+        Display reasoning chain for a decision.
+
+        Args:
+            decision: Decision dictionary with reasoning_chain
+            show_steps: Show individual reasoning steps
+            show_context: Show context at each step
+        """
+        if self.use_rich and self.console:
+            self._display_rich_reasoning_chain(decision, show_steps, show_context)
+        else:
+            self._display_plain_reasoning_chain(decision, show_steps, show_context)
+
+    def _display_rich_reasoning_chain(
+        self,
+        decision: Dict[str, Any],
+        show_steps: bool,
+        show_context: bool,
+    ) -> None:
+        """Display reasoning chain with rich formatting."""
+        decision_id = decision.get("decision_id", "N/A")[:8]
+        action = decision.get("action", "N/A")
+        reasoning_chain = decision.get("reasoning_chain", [])
+        
+        self.console.print(f"\n[bold cyan]Decision: [{decision_id}] {action}[/bold cyan]\n")
+        
+        if not reasoning_chain:
+            self.console.print("[dim]No reasoning chain recorded[/dim]")
+            return
+        
+        for i, step in enumerate(reasoning_chain, 1):
+            step_num = step.get("step", i)
+            thought = step.get("thought", "")
+            conclusion = step.get("conclusion", "")
+            
+            self.console.print(f"[bold]Step {step_num}:[/bold]")
+            self.console.print(f"  Thought: {thought}")
+            
+            if conclusion:
+                self.console.print(f"  Conclusion: {conclusion}")
+            
+            if show_context:
+                context = step.get("context")
+                if context:
+                    self.console.print(f"  Context: {str(context)[:100]}...")
+            
+            self.console.print()
+
+    def _display_plain_reasoning_chain(
+        self,
+        decision: Dict[str, Any],
+        show_steps: bool,
+        show_context: bool,
+    ) -> None:
+        """Display reasoning chain with plain text formatting."""
+        decision_id = decision.get("decision_id", "N/A")[:8]
+        action = decision.get("action", "N/A")
+        reasoning_chain = decision.get("reasoning_chain", [])
+        
+        print("\n" + "=" * 60)
+        print(f"REASONING CHAIN: [{decision_id}] {action}")
+        print("=" * 60 + "\n")
+        
+        if not reasoning_chain:
+            print("No reasoning chain recorded.\n")
+            return
+        
+        for i, step in enumerate(reasoning_chain, 1):
+            step_num = step.get("step", i)
+            thought = step.get("thought", "")
+            conclusion = step.get("conclusion", "")
+            
+            print(f"Step {step_num}:")
+            print(f"  Thought: {thought}")
+            
+            if conclusion:
+                print(f"  Conclusion: {conclusion}")
+            
+            if show_context:
+                context = step.get("context")
+                if context:
+                    print(f"  Context: {str(context)[:100]}...")
+            
+            print()
+        
+        print("=" * 60 + "\n")
+
+    def display_key_decisions(
+        self,
+        decisions: List[Dict[str, Any]],
+        confidence_threshold: float = 0.7,
+        limit: int = 10,
+    ) -> None:
+        """
+        Display key decision points.
+
+        Args:
+            decisions: List of decision dictionaries
+            confidence_threshold: Minimum confidence to highlight
+            limit: Maximum number to display
+        """
+        if self.use_rich and self.console:
+            self._display_rich_key_decisions(decisions, confidence_threshold, limit)
+        else:
+            self._display_plain_key_decisions(decisions, confidence_threshold, limit)
+
+    def _display_rich_key_decisions(
+        self,
+        decisions: List[Dict[str, Any]],
+        confidence_threshold: float,
+        limit: int,
+    ) -> None:
+        """Display key decisions with rich formatting."""
+        # Filter by confidence threshold
+        key_decisions = [
+            d for d in decisions
+            if d.get("confidence", 0.0) >= confidence_threshold
+        ]
+        
+        # Sort by confidence (descending)
+        key_decisions.sort(key=lambda d: d.get("confidence", 0.0), reverse=True)
+        
+        # Limit results
+        key_decisions = key_decisions[:limit]
+        
+        if not key_decisions:
+            self.console.print(
+                f"[dim]No decisions with confidence >= {confidence_threshold}[/dim]"
+            )
+            return
+        
+        table = Table(title="🔑 Key Decisions", show_header=True, header_style="bold cyan")
+        table.add_column("ID", style="dim")
+        table.add_column("Action", style="cyan")
+        table.add_column("Confidence", justify="right")
+        table.add_column("Outcome")
+        table.add_column("Time", style="dim")
+        
+        for decision in key_decisions:
+            decision_id = decision.get("decision_id", "")[:8]
+            action = decision.get("action", "N/A")[:40]
+            confidence = decision.get("confidence", 0.0)
+            outcome = decision.get("outcome", "unknown")
+            timestamp = decision.get("timestamp", "")
+            
+            # Color code confidence
+            if confidence >= 0.8:
+                conf_str = f"[green]{confidence:.2f}[/green]"
+            elif confidence >= 0.7:
+                conf_str = f"[yellow]{confidence:.2f}[/yellow]"
+            else:
+                conf_str = f"[red]{confidence:.2f}[/red]"
+            
+            # Color code outcome
+            outcome_emoji = {
+                "success": "✅",
+                "failure": "❌",
+                "unknown": "❓"
+            }.get(outcome, "")
+            
+            # Format timestamp
+            time_str = ""
+            if timestamp:
+                from datetime import datetime
+                try:
+                    dt = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+                    time_str = dt.strftime("%H:%M:%S")
+                except:
+                    pass
+            
+            table.add_row(
+                decision_id,
+                action,
+                conf_str,
+                f"{outcome_emoji} {outcome}",
+                time_str
+            )
+        
+        self.console.print(table)
+
+    def _display_plain_key_decisions(
+        self,
+        decisions: List[Dict[str, Any]],
+        confidence_threshold: float,
+        limit: int,
+    ) -> None:
+        """Display key decisions with plain text formatting."""
+        # Filter by confidence threshold
+        key_decisions = [
+            d for d in decisions
+            if d.get("confidence", 0.0) >= confidence_threshold
+        ]
+        
+        # Sort by confidence (descending)
+        key_decisions.sort(key=lambda d: d.get("confidence", 0.0), reverse=True)
+        
+        # Limit results
+        key_decisions = key_decisions[:limit]
+        
+        if not key_decisions:
+            print(f"\nNo decisions with confidence >= {confidence_threshold}\n")
+            return
+        
+        print("\n" + "=" * 60)
+        print("KEY DECISIONS")
+        print("=" * 60 + "\n")
+        
+        for i, decision in enumerate(key_decisions, 1):
+            decision_id = decision.get("decision_id", "")[:8]
+            action = decision.get("action", "N/A")
+            confidence = decision.get("confidence", 0.0)
+            outcome = decision.get("outcome", "unknown")
+            timestamp = decision.get("timestamp", "")
+            
+            # Format timestamp
+            time_str = ""
+            if timestamp:
+                from datetime import datetime
+                try:
+                    dt = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+                    time_str = dt.strftime("%H:%M:%S")
+                except:
+                    pass
+            
+            # Format outcome
+            outcome_emoji = {
+                "success": "✅",
+                "failure": "❌",
+                "unknown": "❓"
+            }.get(outcome, "")
+            
+            print(f"{i}. [{decision_id}] {action}")
+            print(f"   Confidence: {confidence:.2f}")
+            print(f"   Outcome: {outcome_emoji} {outcome}")
+            if time_str:
+                print(f"   Time: {time_str}")
+            print()
+        
+        print("=" * 60 + "\n")
+
+    def display_decision_heatmap(
+        self,
+        decisions: List[Dict[str, Any]],
+        metric: str = "confidence",
+    ) -> None:
+        """
+        Display decision heatmap by confidence or other metric.
+
+        Args:
+            decisions: List of decision dictionaries
+            metric: Metric to visualize (confidence, time, etc.)
+        """
+        if self.use_rich and self.console:
+            self._display_rich_heatmap(decisions, metric)
+        else:
+            self._display_plain_heatmap(decisions, metric)
+
+    def _display_rich_heatmap(
+        self,
+        decisions: List[Dict[str, Any]],
+        metric: str,
+    ) -> None:
+        """Display heatmap with rich formatting."""
+        if not decisions:
+            self.console.print("[dim]No decisions to display[/dim]")
+            return
+
+        table = Table(title=f"📊 Decision {metric.title()} Heatmap", show_header=True)
+        table.add_column("Time", style="dim")
+        table.add_column("Low (0-0.33)", style="red")
+        table.add_column("Medium (0.34-0.66)", style="yellow")
+        table.add_column("High (0.67-1.0)", style="green")
+        
+        # Group by time (hourly buckets)
+        time_buckets = {}
+        for decision in decisions:
+            timestamp = decision.get("timestamp", "")
+            if not timestamp:
+                continue
+            
+            from datetime import datetime
+            try:
+                dt = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+                time_key = dt.strftime("%Y-%m-%d %H:00")
+                
+                if time_key not in time_buckets:
+                    time_buckets[time_key] = {"low": 0, "medium": 0, "high": 0}
+                
+                confidence = decision.get("confidence", 0.0)
+                if confidence < 0.34:
+                    time_buckets[time_key]["low"] += 1
+                elif confidence < 0.67:
+                    time_buckets[time_key]["medium"] += 1
+                else:
+                    time_buckets[time_key]["high"] += 1
+            except:
+                pass
+        
+        # Sort by time
+        sorted_times = sorted(time_buckets.keys())[-10:]  # Last 10 hours
+        
+        for time_key in sorted_times:
+            bucket = time_buckets[time_key]
+            table.add_row(
+                time_key,
+                f"[red]{bucket['low']}[/red]" if bucket['low'] > 0 else "—",
+                f"[yellow]{bucket['medium']}[/yellow]" if bucket['medium'] > 0 else "—",
+                f"[green]{bucket['high']}[/green]" if bucket['high'] > 0 else "—",
+            )
+        
+        self.console.print(table)
+
+    def _display_plain_heatmap(
+        self,
+        decisions: List[Dict[str, Any]],
+        metric: str,
+    ) -> None:
+        """Display heatmap with plain text formatting."""
+        if not decisions:
+            print(f"\nNo decisions to display\n")
+            return
+
+        print("\n" + "=" * 60)
+        print(f"DECISION {metric.upper()} HEATMAP")
+        print("=" * 60 + "\n")
+        
+        # Group by time (hourly buckets)
+        time_buckets = {}
+        for decision in decisions:
+            timestamp = decision.get("timestamp", "")
+            if not timestamp:
+                continue
+            
+            from datetime import datetime
+            try:
+                dt = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+                time_key = dt.strftime("%Y-%m-%d %H:00")
+                
+                if time_key not in time_buckets:
+                    time_buckets[time_key] = {"low": 0, "medium": 0, "high": 0}
+                
+                confidence = decision.get("confidence", 0.0)
+                if confidence < 0.34:
+                    time_buckets[time_key]["low"] += 1
+                elif confidence < 0.67:
+                    time_buckets[time_key]["medium"] += 1
+                else:
+                    time_buckets[time_key]["high"] += 1
+            except:
+                pass
+        
+        # Sort by time
+        sorted_times = sorted(time_buckets.keys())[-10:]  # Last 10 hours
+        
+        print(f"{'Time':<20} {'Low (0-0.33)':<15} {'Medium (0.34-0.66)':<20} {'High (0.67-1.0)':<15}")
+        print("-" * 70)
+        
+        for time_key in sorted_times:
+            bucket = time_buckets[time_key]
+            print(f"{time_key:<20} {bucket['low']:<15} {bucket['medium']:<20} {bucket['high']:<15}")
+        
+        print("\n" + "=" * 60 + "\n")
+
+    def export_visualization(
+        self,
+        decisions: List[Dict[str, Any]],
+        export_path: str,
+        format: str = "json",
+    ) -> None:
+        """
+        Export decision visualization to file.
+
+        Args:
+            decisions: List of decision dictionaries
+            export_path: Output file path
+            format: Export format (json, pdf, png)
+        """
+        import json
+
+        if format == "json":
+            with open(export_path, "w") as f:
+                json.dump(decisions, f, indent=2, default=str)
+            print(f"✓ Decisions exported to {export_path}")
+        
+        elif format == "pdf" or format == "png":
+            # For now, just export JSON with a note
+            # Full PDF/PNG generation would require graphviz/matplotlib
+            json_path = export_path.rsplit(".", 1)[0] + ".json"
+            with open(json_path, "w") as f:
+                json.dump(decisions, f, indent=2, default=str)
+            print(f"✓ Decisions exported to {json_path}")
+            print(f"  Note: Full {format.upper()} export requires graphviz/matplotlib")
+            print(f"  Use the JSON export with external visualization tools")
+        
+        else:
+            print(f"Unsupported export format: {format}")
+
+
+def create_decision_visualizer(use_rich: Optional[bool] = None) -> DecisionVisualizer:
+    """
+    Factory function to create a decision visualizer.
+
+    Args:
+        use_rich: Force use of rich library (None = auto-detect)
+
+    Returns:
+        DecisionVisualizer instance
+    """
+    return DecisionVisualizer(use_rich)
