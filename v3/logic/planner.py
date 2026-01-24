@@ -65,6 +65,17 @@ class Planner:
         with self.telemetry_manager.track_operation(
             operation_type="planning", title=f"Task breakdown: {task_title}"
         ) as op:
+            # V4: Use hierarchical context for planning
+            # Start with L0 (immediate) context and expand as needed
+            context, level = self.context_expander.get_context(
+                task_type="planning",
+                task_info={
+                    "title": task_title,
+                    "task_to_break": task_to_break
+                }
+            )
+            logger.debug(f"Using context level {level} for planning")
+            
             # Step 1: Analyze task impact using AST analysis
             acceptance_criteria = (
                 task_to_break["acceptance_criteria"] if task_to_break else ""
@@ -184,7 +195,7 @@ class Planner:
                 else 0
             )
 
-            # V3: Record planning metrics and events
+            # V4: Record planning metrics and events including context level
             op.record_event(
                 event_type="breakdown_completed",
                 severity="info",
@@ -199,6 +210,7 @@ class Planner:
                     "context_size_chars": context_size_chars,
                     "context_size_lines": context_size_lines,
                     "avg_complexity": avg_complexity,
+                    "context_level": level,  # V4: Track context level used
                 },
             )
 

@@ -139,6 +139,7 @@ class Implementor:
         Returns (success, error_message).
 
         V3 Enhancement: Integrated telemetry tracking for TDD cycle operations.
+        V4 Enhancement: Integrated hierarchical context access.
         """
         task_id = task["id"]
         task_title = task["title"]
@@ -152,6 +153,18 @@ class Implementor:
             title=f"TDD Cycle: {task_title}",
             metadata={"task_id": task_id},
         ) as op:
+            # V4: Use hierarchical context for TDD cycle
+            # Start with L0 (immediate) context and expand as needed
+            hierarchical_context, level = self.context_expander.get_context(
+                task_type="implementation",
+                task_info={
+                    "task_id": task_id,
+                    "title": task_title,
+                    "acceptance_criteria": acceptance_criteria
+                }
+            )
+            logger.debug(f"Using context level {level} for TDD cycle")
+            
             # Context Injection with AST-based analysis
             # Use enhanced ContextEngine with task title and acceptance criteria
             # for intelligent file scoping and dependency-aware context selection
@@ -244,11 +257,27 @@ class Implementor:
             logger.info(
                 f"Created checkpoint {checkpoint_id} after task {task_id} completed"
             )
+            
+            # V4: Record context usage in telemetry
+            op.record_event(
+                event_type="context_level_used",
+                severity="info",
+                message=f"TDD cycle used context level {level}",
+                context={
+                    "operation": "tdd_cycle",
+                    "context_level": level,
+                    "task_id": task_id,
+                    "task_title": task_title,
+                },
+            )
 
             update_task_status(task_id, "completed")
             return True, None
 
-    def _run_red_phase(self, task, context):
+    def _run_red_phase(self, task, hierarchical_context):
+        """
+        V4: Updated to use hierarchical context parameter.
+        """
         task_title = task["title"]
         attempts = 3
         last_error = ""
@@ -268,7 +297,7 @@ Ensure the tests are comprehensive and would fail until the implementation is co
 Prefer using `pytest`.
 Keep changes focused and under 100 lines per commit.
 """
-            user_prompt = f"Task: {task_title}\nContext: {context}\nAcceptance Criteria: {task['acceptance_criteria']}"
+            user_prompt = f"Task: {task_title}\nContext: {hierarchical_context}\nAcceptance Criteria: {task['acceptance_criteria']}"
             if last_error:
                 user_prompt += f"\n\nPrevious attempt failed with error: {last_error}\nPlease adjust the test generation to comply with policies and requirements."
 
@@ -298,7 +327,7 @@ Keep changes focused and under 100 lines per commit.
                 "ACT-100",
                 f"Red Phase: {task_title}",
                 files=list(test_changes.keys()),
-                cot=f"Added test cases for {task_title} across {len(test_changes)} files. Attempt {attempt}.",
+                cot=f"Added test cases for {task_title} across {len(test_changes)} files. Attempt {attempt}. Context level: L0-L3.",
                 tokens_used=result["usage"]["total_tokens"],
                 prompt_tokens=result["usage"]["prompt_tokens"],
                 completion_tokens=result["usage"]["completion_tokens"],
@@ -313,10 +342,13 @@ Keep changes focused and under 100 lines per commit.
 
         return False, last_error or "Red Phase failed after maximum attempts."
 
-    def _run_green_phase(self, task, context):
+    def _run_green_phase(self, task, hierarchical_context):
+        """
+        V4: Updated to use hierarchical context parameter.
+        """
         task_title = task["title"]
-        # If the Red phase created multiple files, we should ideally run all of them.
-        # For v1, we focus on the primary test file or use a heuristic.
+        # If Red phase created multiple files, we should ideally run all of them.
+        # For v1, we focus on primary test file or use a heuristic.
         test_file = (
             "v1/test_multi_poc.py"
             if "multi" in task_title.lower()
@@ -336,7 +368,7 @@ Keep changes focused and under 100 lines per commit.
 
             # Construct prompt for fix generation
             system_prompt = """You are a TDD expert and senior software engineer.
-Your task is to generate the minimal code required to pass the provided tests (the "Green" phase of TDD).
+Your task is to generate minimal code required to pass of provided tests (the "Green" phase of TDD).
 
 Output Format:
 For each file you want to create or update, use the following format:
@@ -348,7 +380,7 @@ File: path/to/file.py
 Respect the Open-Closed Principle and avoid modifying stable modules unless necessary.
 Keep changes focused and under 100 lines per commit.
 """
-            user_prompt = f"Task: {task_title}\nContext: {context}\n"
+            user_prompt = f"Task: {task_title}\nContext: {hierarchical_context}\n"
             if last_error:
                 user_prompt += f"\nPrevious attempt failed with error:\n{last_error}\nPlease fix the implementation and ensure it complies with all policies (line limits, etc.)."
 
@@ -394,7 +426,7 @@ Keep changes focused and under 100 lines per commit.
                         "ACT-101",
                         f"Green Phase: {task_title}",
                         files=list(suggested_changes.keys()),
-                        cot=f"Implementation passed on attempt {attempt} and met 100% mutation quality gate.",
+                        cot=f"Implementation passed on attempt {attempt} and met 100% mutation quality gate. Context level: L0-L3.",
                         tokens_used=result["usage"]["total_tokens"],
                         prompt_tokens=result["usage"]["prompt_tokens"],
                         completion_tokens=result["usage"]["completion_tokens"],
