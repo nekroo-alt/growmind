@@ -915,6 +915,479 @@ class TrapDetector:
         
         return detections
     
+    # ========== CIRCULAR REASONING DETECTION METHODS (Task 4.4) ==========
+    
+    def detect_circular_reasoning_decision_cycle(
+        self,
+        decision_history: List[Dict[str, Any]],
+        cycle_min_length: int = 3,
+        window: Optional[int] = None
+    ) -> Optional[TrapDetection]:
+        """
+        Detect decision cycles (A → B → C → A pattern).
+        
+        Detects cycles based on action content repetition, not just parent-child
+        relationships. A cycle occurs when the same action appears again after
+        one or more different actions, indicating circular reasoning.
+        
+        Args:
+            decision_history: List of decision records with 'action' field
+            cycle_min_length: Minimum cycle length to detect
+            window: Number of recent decisions to check (default from detection_criteria)
+        
+        Returns:
+            TrapDetection if circular reasoning detected, None otherwise
+        """
+        circle_def = self.get_trap_definition(TrapType.CIRCULAR_REASONING)
+        if not circle_def:
+            return None
+        
+        if window is None:
+            window = circle_def.detection_criteria.get("cycle_detection_window", 15)
+        
+        recent_decisions = decision_history[-window:] if len(decision_history) > window else decision_history
+        
+        if len(recent_decisions) < cycle_min_length:
+            return None
+        
+        # Extract actions in order (support both 'action' and 'decision' fields)
+        actions = [str(d.get("action", d.get("decision", ""))) for d in recent_decisions]
+        
+        # Detect cycles by looking for repeated actions
+        # A cycle is when action[i] == action[j] for some i < j,
+        # and (j - i) >= cycle_min_length
+        cycles_found = []
+        
+        for i in range(len(actions)):
+            for j in range(i + cycle_min_length, len(actions)):
+                if actions[i] == actions[j]:
+                    # Found a cycle from i to j
+                    cycle_actions = actions[i:j+1]
+                    cycle_decisions = recent_decisions[i:j+1]
+                    cycles_found.append({
+                        "start_index": i,
+                        "end_index": j,
+                        "cycle_length": len(cycle_actions),
+                        "actions": cycle_actions,
+                        "decisions": cycle_decisions
+                    })
+                    break  # Only record the first occurrence of each cycle
+        
+        if cycles_found:
+            # Use shortest cycle (most recent and concise)
+            shortest_cycle = min(cycles_found, key=lambda c: (c["end_index"] - c["start_index"]))
+            
+            cycle_len = shortest_cycle["end_index"] - shortest_cycle["start_index"]
+            severity = TrapSeverity.CRITICAL if cycle_len >= 5 else TrapSeverity.WARNING
+            # Higher confidence for longer cycles: 0.75 base + 0.05 per extra decision
+            confidence = min(0.95, 0.76 + (cycle_len - cycle_min_length) * 0.05)
+            
+            cycle_action_list = shortest_cycle["actions"]
+            
+            return TrapDetection(
+                trap_type=TrapType.CIRCULAR_REASONING,
+                severity=severity,
+                confidence=confidence,
+                evidence={
+                    "circular_reasoning_type": "decision_cycle",
+                    "cycle_length": cycle_len,
+                    "cycle_actions": cycle_action_list,
+                    "cycle_decisions": shortest_cycle["decisions"],
+                    "total_cycles_found": len(cycles_found),
+                    "window": window,
+                    "decision_count": len(recent_decisions)
+                },
+                suggestion=f"Decision cycle detected: {' → '.join([str(a)[:20] for a in cycle_action_list])}. Cycle length: {cycle_len} decisions. Break cycle by documenting decisions or introducing new information."
+            )
+        
+        return None
+    
+    def detect_circular_reasoning_revisiting_rejected(
+        self,
+        decision_history: List[Dict[str, Any]],
+        threshold: int = 3,
+        window: Optional[int] = None
+    ) -> Optional[TrapDetection]:
+        """
+        Detect revisiting previously rejected options.
+        
+        Args:
+            decision_history: List of decision records with 'action', 'rejected' or 'alternatives' fields
+            threshold: Number of revisits to trigger detection
+            window: Number of recent decisions to check
+        
+        Returns:
+            TrapDetection if circular reasoning detected, None otherwise
+        """
+        circle_def = self.get_trap_definition(TrapType.CIRCULAR_REASONING)
+        if not circle_def:
+            return None
+        
+        if window is None:
+            window = circle_def.detection_criteria.get("cycle_detection_window", 15)
+        
+        recent_decisions = decision_history[-window:] if len(decision_history) > window else decision_history
+        
+        # Track rejected options and their rejections
+        rejected_options = defaultdict(list)
+        option_history = []
+        
+        for i, decision in enumerate(recent_decisions):
+            action = str(decision.get("action", decision.get("decision", "")))
+            
+            # Check for rejected alternatives
+            alternatives = decision.get("alternatives") or decision.get("rejected") or []
+            if isinstance(alternatives, str):
+                alternatives = [alternatives]
+            
+            for alt in alternatives:
+                alt_key = str(alt)
+                rejected_options[alt_key].append({
+                    "index": i,
+                    "decision": action,
+                    "timestamp": decision.get("timestamp", datetime.now().isoformat()),
+                    "reason": decision.get("rejection_reason", "Not specified")
+                })
+            
+            # Track action for later revisiting detection
+            option_history.append({
+                "action": action,
+                "index": i,
+                "was_rejected": [alt_key in rejected_options for alt in alternatives]
+            })
+        
+        # Detect revisits of rejected options
+        revisited_options = []
+        for i, option in enumerate(option_history):
+            action = option["action"]
+            
+            # Check if this action was previously rejected
+            if action in rejected_options:
+                rejections = rejected_options[action]
+                
+                # Check if this action appears after being rejected
+                for rejection in rejections:
+                    if rejection["index"] < option["index"]:
+                        # This is a revisit
+                        revisited_options.append({
+                            "option": action,
+                            "rejected_at": rejection["index"],
+                            "revisited_at": option["index"],
+                            "rejection_reason": rejection["reason"],
+                            "decisions_between": option["index"] - rejection["index"]
+                        })
+                        break
+        
+        if len(revisited_options) >= threshold:
+            severity = TrapSeverity.CRITICAL if len(revisited_options) >= 5 else TrapSeverity.WARNING
+            confidence = min(0.9, 0.6 + (len(revisited_options) - threshold) * 0.1)
+            
+            # Group by option
+            option_stats = defaultdict(int)
+            for revisit in revisited_options:
+                option_stats[revisit["option"]] += 1
+            
+            return TrapDetection(
+                trap_type=TrapType.CIRCULAR_REASONING,
+                severity=severity,
+                confidence=confidence,
+                evidence={
+                    "circular_reasoning_type": "revisiting_rejected",
+                    "revisit_count": len(revisited_options),
+                    "threshold": threshold,
+                    "unique_options_revisited": len(option_stats),
+                    "option_revisit_counts": dict(option_stats),
+                    "revisits": revisited_options[:10],  # First 10 for brevity
+                    "window": window
+                },
+                suggestion=f"Revisiting previously rejected options {len(revisited_options)} times. {len(option_stats)} unique options were reconsidered. Document decision rationale permanently and avoid revisiting rejected options."
+            )
+        
+        return None
+    
+    def detect_circular_reasoning_contradictory_decisions(
+        self,
+        decision_history: List[Dict[str, Any]],
+        window: Optional[int] = None
+    ) -> Optional[TrapDetection]:
+        """
+        Detect contradictory decisions.
+        
+        Contradictory decisions occur when decisions that should be consistent
+        are made in opposite ways (e.g., choosing conservative then aggressive
+        strategy, or enabling then disabling of same feature).
+        
+        Args:
+            decision_history: List of decision records with 'decision', 'factors', or 'context' fields
+            window: Number of recent decisions to check
+        
+        Returns:
+            TrapDetection if circular reasoning detected, None otherwise
+        """
+        circle_def = self.get_trap_definition(TrapType.CIRCULAR_REASONING)
+        if not circle_def:
+            return None
+        
+        if window is None:
+            window = circle_def.detection_criteria.get("cycle_detection_window", 15)
+        
+        recent_decisions = decision_history[-window:] if len(decision_history) > window else decision_history
+        
+        if len(recent_decisions) < 2:
+            return None
+        
+        contradictions = []
+        
+        # Define contradiction patterns (value sets that contradict each other)
+        contradiction_patterns = [
+            # Strategy contradictions
+            (["conservative", "balanced", "aggressive"], "strategy"),
+            # Boolean toggle contradictions
+            (["enabled", "disabled", "enable", "disable", "on", "off"], "toggle"),
+            # Direction contradictions
+            (["increase", "decrease", "increment", "decrement"], "direction"),
+            # Priority contradictions
+            (["high", "medium", "low"], "priority"),
+            # State contradictions
+            (["start", "stop", "begin", "end"], "state")
+        ]
+        
+        # Normalize value patterns to lowercase for comparison
+        contradiction_patterns = [
+            ([v.lower() for v in values], pattern_type) 
+            for values, pattern_type in contradiction_patterns
+        ]
+        
+        # Extract decision context
+        decision_contexts = []
+        for i, decision in enumerate(recent_decisions):
+            decision_text = str(decision.get("decision", "")).lower()
+            factors = decision.get("factors", {})
+            context = decision.get("context", {})
+            
+            # Combine all key-value pairs
+            key_values = {}
+            combined_dict = {**factors, **context}
+            for key, value in combined_dict.items():
+                key_values[str(key).lower()] = str(value).lower().strip()
+            
+            decision_contexts.append({
+                "index": i,
+                "decision_text": decision_text,
+                "key_values": key_values
+            })
+        
+        # Check for contradictions
+        for i in range(len(decision_contexts)):
+            for j in range(i + 1, len(decision_contexts)):
+                ctx1 = decision_contexts[i]
+                ctx2 = decision_contexts[j]
+                
+                # Check for direct contradiction in key values
+                for key in ctx1["key_values"]:
+                    if key in ctx2["key_values"]:
+                        val1 = ctx1["key_values"][key]
+                        val2 = ctx2["key_values"][key]
+                        
+                        if val1 != val2:
+                            # Check if values are in same contradiction pattern
+                            for pattern, pattern_type in contradiction_patterns:
+                                if val1 in pattern and val2 in pattern:
+                                    contradictions.append({
+                                        "key": key,
+                                        "decision1_index": ctx1["index"],
+                                        "decision2_index": ctx2["index"],
+                                        "value1": val1,
+                                        "value2": val2,
+                                        "pattern_type": pattern_type,
+                                        "decisions_apart": ctx2["index"] - ctx1["index"]
+                                    })
+                                    break  # Only record first pattern match
+        
+        if contradictions:
+            severity = TrapSeverity.CRITICAL if len(contradictions) >= 3 else TrapSeverity.WARNING
+            confidence = min(0.9, 0.6 + len(contradictions) * 0.1)
+            
+            return TrapDetection(
+                trap_type=TrapType.CIRCULAR_REASONING,
+                severity=severity,
+                confidence=confidence,
+                evidence={
+                    "circular_reasoning_type": "contradictory_decisions",
+                    "contradiction_count": len(contradictions),
+                    "contradictions": contradictions[:15],  # First 15 for brevity
+                    "window": window,
+                    "total_decisions": len(recent_decisions)
+                },
+                suggestion=f"Detected {len(contradictions)} contradictory decisions. Recent decisions contain opposing choices on same topics. Review decision history and establish consistent decision criteria."
+            )
+        
+        return None
+    
+    def detect_circular_reasoning_dependencies(
+        self,
+        decision_history: List[Dict[str, Any]],
+        cycle_min_length: int = 2,
+        window: Optional[int] = None
+    ) -> Optional[TrapDetection]:
+        """
+        Detect decision dependencies that form cycles.
+        
+        This is different from detect_infinite_recursion() as it focuses on
+        logical dependencies (decision A depends on B, B depends on C, C depends on A)
+        rather than parent-child relationships.
+        
+        Args:
+            decision_history: List of decision records with 'depends_on' field
+            cycle_min_length: Minimum cycle length to detect
+            window: Number of recent decisions to check
+        
+        Returns:
+            TrapDetection if circular reasoning detected, None otherwise
+        """
+        circle_def = self.get_trap_definition(TrapType.CIRCULAR_REASONING)
+        if not circle_def:
+            return None
+        
+        if window is None:
+            window = circle_def.detection_criteria.get("cycle_detection_window", 15)
+        
+        recent_decisions = decision_history[-window:] if len(decision_history) > window else decision_history
+        
+        if len(recent_decisions) < cycle_min_length:
+            return None
+        
+        # Build dependency graph
+        dependency_graph = {}
+        decision_ids = {}
+        
+        # First pass: collect all decision IDs
+        window_ids = set()
+        for decision in recent_decisions:
+            decision_id = decision.get("decision_id") or decision.get("id", str(hash(str(decision))))
+            window_ids.add(decision_id)
+        
+        # Second pass: build graph with all dependencies (filter only missing IDs)
+        for decision in recent_decisions:
+            decision_id = decision.get("decision_id") or decision.get("id", str(hash(str(decision))))
+            decision_ids[decision_id] = decision
+            
+            # Get dependencies
+            depends_on = decision.get("depends_on", [])
+            if isinstance(depends_on, str):
+                depends_on = [depends_on]
+            
+            # Only include dependencies that exist in our window (filter None and missing)
+            valid_deps = [dep for dep in depends_on if dep and dep in window_ids]
+            dependency_graph[decision_id] = valid_deps
+        
+        # Detect cycles in dependency graph using DFS
+        cycles_found = []
+        
+        def dfs(current_id, path, visited_global):
+            """DFS with proper cycle detection."""
+            if current_id in path:
+                # Cycle detected - node already in current path
+                cycle_start = path.index(current_id)
+                cycle = path[cycle_start:] + [current_id]
+                if len(cycle) >= cycle_min_length + 1:  # +1 because cycle includes start twice
+                    if cycle not in cycles_found:
+                        cycles_found.append(cycle)
+                return
+            
+            if current_id in visited_global:
+                # Already visited this node in a different traversal, no need to continue
+                return
+            
+            visited_global.add(current_id)
+            path.append(current_id)
+            
+            # Check all dependencies (only follow valid dependencies in graph)
+            for dep_id in dependency_graph.get(current_id, []):
+                dfs(dep_id, path, visited_global)  # Don't copy path - share it
+            
+            path.pop()
+        
+        # Run DFS from each node with shared visited set
+        visited_global = set()
+        for node_id in dependency_graph:
+            if node_id not in visited_global:
+                dfs(node_id, [], visited_global)
+        
+        if cycles_found:
+            # Use the longest cycle found
+            longest_cycle = cycles_found[0]
+            for cycle in cycles_found:
+                if len(cycle) > len(longest_cycle):
+                    longest_cycle = cycle
+            
+            severity = TrapSeverity.CRITICAL if len(longest_cycle) >= 4 else TrapSeverity.WARNING
+            confidence = min(0.95, 0.7 + (len(longest_cycle) - cycle_min_length) * 0.05)
+            
+            cycle_decisions = [
+                decision_ids.get(cycle_id, {}) for cycle_id in longest_cycle[:-1]
+            ]
+            
+            return TrapDetection(
+                trap_type=TrapType.CIRCULAR_REASONING,
+                severity=severity,
+                confidence=confidence,
+                evidence={
+                    "circular_reasoning_type": "dependency_cycle",
+                    "cycle_length": len(longest_cycle) - 1,  # -1 because cycle includes start twice
+                    "cycle_ids": longest_cycle[:-1],
+                    "cycle_decisions": cycle_decisions,
+                    "total_cycles_found": len(cycles_found),
+                    "window": window,
+                    "decision_count": len(recent_decisions)
+                },
+                suggestion=f"Circular dependency detected: {' → '.join([str(c)[:20] for c in longest_cycle[:-1]])}. Decisions have mutual dependencies that cannot be resolved. Break cycle by removing or modifying one of the dependencies."
+            )
+        
+        return None
+    
+    def detect_all_circular_reasoning(
+        self,
+        decision_history: List[Dict[str, Any]]
+    ) -> List[TrapDetection]:
+        """
+        Run all circular reasoning detection algorithms.
+        
+        Args:
+            decision_history: List of decision records
+        
+        Returns:
+            List of all detected circular reasoning patterns
+        """
+        detections = []
+        
+        # Detect decision cycles (action content repetition)
+        decision_cycle = self.detect_circular_reasoning_decision_cycle(decision_history)
+        if decision_cycle:
+            detections.append(decision_cycle)
+        
+        # Detect infinite recursion (parent_id cycles)
+        infinite_recursion = self.detect_infinite_recursion(decision_history)
+        if infinite_recursion:
+            detections.append(infinite_recursion)
+        
+        # Detect revisiting rejected options
+        revisiting = self.detect_circular_reasoning_revisiting_rejected(decision_history)
+        if revisiting:
+            detections.append(revisiting)
+        
+        # Detect contradictory decisions
+        contradictory = self.detect_circular_reasoning_contradictory_decisions(decision_history)
+        if contradictory:
+            detections.append(contradictory)
+        
+        # Detect dependency cycles
+        dependencies = self.detect_circular_reasoning_dependencies(decision_history)
+        if dependencies:
+            detections.append(dependencies)
+        
+        return detections
+    
     # ========== DEAD END DETECTION METHODS (Task 4.3) ==========
     
     def detect_dead_end_no_progress(
