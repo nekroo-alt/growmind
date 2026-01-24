@@ -3,6 +3,7 @@ import os
 import sqlite3
 import argparse
 from datetime import datetime, timedelta
+from typing import Dict, Any
 
 # Get__name__ absolute path of the L4 root (parent of v1)
 # __file__ is /Users/ken/Desktop/growmind/v1/l4_cli.py
@@ -1374,6 +1375,205 @@ def cmd_decisions(args):
             print(f"  Task {task['task_id']}: {task['decisions']} decisions")
 
 
+def cmd_profile_list(args):
+    """List all available configuration profiles."""
+    from core.config import get_config
+
+    try:
+        config_manager = None
+        # Try to get existing config manager
+        try:
+            from core.config import _config_manager
+            if _config_manager is not None:
+                config_manager = _config_manager
+        except:
+            pass
+
+        if config_manager is None:
+            from core.config import ConfigManager
+            config_manager = ConfigManager()
+
+        profiles = config_manager.list_profiles()
+
+        if not profiles:
+            print("No profiles found.")
+            return
+
+        print(f"\nFound {len(profiles)} configuration profiles:\n")
+
+        for profile in profiles:
+            name = profile["name"]
+            description = profile.get("description", "")
+            inherits = profile.get("inherits")
+
+            print(f"📋 {name}")
+            print(f"   Description: {description}")
+            if inherits:
+                print(f"   Inherits: {inherits}")
+            print()
+
+        # Show current profile
+        try:
+            config = get_config()
+            print(f"Current profile: {config.profile}")
+        except:
+            pass
+
+    except Exception as e:
+        print(f"Error listing profiles: {e}")
+
+
+def cmd_profile_show(args):
+    """Show details of a specific profile."""
+    from core.config import ConfigManager
+
+    config_manager = ConfigManager()
+
+    if not args.profile:
+        print("Error: --profile is required to show profile details")
+        print("Use 'l4-dev profile list' to see available profiles")
+        return
+
+    try:
+        # Get profile with inheritance
+        profile_config = config_manager.get_profile_with_inheritance(args.profile)
+
+        print(f"\nProfile: {args.profile}\n")
+        print("=" * 60)
+
+        def print_config_section(config_dict: Dict[str, Any], section_name: str) -> None:
+            """Print a configuration section."""
+            if section_name in config_dict:
+                section = config_dict[section_name]
+                print(f"\n[{section_name}]")
+                for key, value in section.items():
+                    print(f"  {key}: {value}")
+
+        # Print all sections
+        print_config_section(profile_config, "llm")
+        print_config_section(profile_config, "cache")
+        print_config_section(profile_config, "logging")
+        print_config_section(profile_config, "telemetry")
+        print_config_section(profile_config, "checkpoint")
+        print_config_section(profile_config, "session")
+        print_config_section(profile_config, "custom")
+
+        print("\n" + "=" * 60)
+
+    except ValueError as e:
+        print(f"Error: {e}")
+    except Exception as e:
+        print(f"Error showing profile: {e}")
+
+
+def cmd_profile_use(args):
+    """Switch to a different configuration profile."""
+    from core.config import ConfigManager
+
+    config_manager = ConfigManager()
+
+    if not args.profile:
+        print("Error: --profile is required to switch profiles")
+        print("Use 'l4-dev profile list' to see available profiles")
+        return
+
+    try:
+        print(f"\nSwitching to profile: {args.profile}")
+
+        # Switch profile
+        new_config = config_manager.switch_profile(args.profile)
+
+        print(f"✓ Successfully switched to profile '{args.profile}'")
+        print(f"  Configuration saved to .l4_config")
+
+        # Show summary
+        print(f"\nProfile Summary:")
+        print(f"  LLM Model: {new_config.llm.model}")
+        print(f"  Cache Size: {new_config.cache.max_size_mb}MB")
+        print(f"  Logging Level: {new_config.logging.level}")
+
+        custom_settings = new_config.custom
+        if custom_settings:
+            print(f"  Adaptive Reasoning: {custom_settings.get('adaptive_reasoning', False)}")
+            print(f"  Progress Tracking: {custom_settings.get('progress_tracking', False)}")
+            print(f"  Trap Detection: {custom_settings.get('trap_detection', False)}")
+
+        print()
+
+    except ValueError as e:
+        print(f"Error: {e}")
+    except Exception as e:
+        print(f"Error switching profile: {e}")
+
+
+def cmd_profile_diff(args):
+    """Compare two configuration profiles."""
+    from core.config import ConfigManager
+
+    config_manager = ConfigManager()
+
+    if not args.profile1 or not args.profile2:
+        print("Error: --profile1 and --profile2 are required to compare profiles")
+        print("Usage: l4-dev profile diff --profile1 <name> --profile2 <name>")
+        return
+
+    try:
+        comparison = config_manager.compare_profiles(args.profile1, args.profile2)
+
+        print(f"\nComparing profiles: {args.profile1} vs {args.profile2}\n")
+        print("=" * 60)
+
+        # Show summary
+        summary = comparison["summary"]
+        print(f"\nSummary:")
+        print(f"  Total Differences: {summary['total']}")
+        print(f"  Added in {args.profile2}: {summary['added']}")
+        print(f"  Removed from {args.profile2}: {summary['removed']}")
+        print(f"  Changed: {summary['changed']}")
+
+        # Show detailed differences
+        if comparison["differences"]:
+            print(f"\nDetailed Differences:\n")
+
+            # Group differences by type
+            by_type = {}
+            for diff in comparison["differences"]:
+                diff_type = diff["type"]
+                if diff_type not in by_type:
+                    by_type[diff_type] = []
+                by_type[diff_type].append(diff)
+
+            # Print each type
+            for diff_type in ["added", "removed", "changed"]:
+                if diff_type in by_type:
+                    diff_list = by_type[diff_type]
+                    emoji = "➕" if diff_type == "added" else ("➖" if diff_type == "removed" else "🔄")
+                    print(f"{emoji} {diff_type.title()} ({len(diff_list)}):")
+
+                    for diff in diff_list:
+                        key = diff["key"]
+                        v1 = diff.get("profile1")
+                        v2 = diff.get("profile2")
+
+                        if diff_type == "changed":
+                            print(f"  {key}:")
+                            print(f"    {args.profile1}: {v1}")
+                            print(f"    {args.profile2}: {v2}")
+                        else:
+                            print(f"  {key}: {v2}")
+                    print()
+
+        else:
+            print("\nNo differences found. Profiles are identical.")
+
+        print("=" * 60 + "\n")
+
+    except ValueError as e:
+        print(f"Error: {e}")
+    except Exception as e:
+        print(f"Error comparing profiles: {e}")
+
+
 def cmd_explain(args):
     """Display decision explanation and visualization."""
     from core.ui import create_decision_visualizer
@@ -2473,6 +2673,48 @@ def main():
     )
     add_common_args(decisions_p)
 
+    # Profile command (V5 - Configuration Profiles)
+    profile_p = subparsers.add_parser("profile", help="Manage configuration profiles")
+    profile_subparsers = profile_p.add_subparsers(
+        dest="profile_command", help="Profile commands"
+    )
+
+    # Profile list command
+    profile_list_p = profile_subparsers.add_parser(
+        "list", help="List all available profiles"
+    )
+    add_common_args(profile_list_p)
+
+    # Profile show command
+    profile_show_p = profile_subparsers.add_parser(
+        "show", help="Show details of a specific profile"
+    )
+    profile_show_p.add_argument(
+        "--profile", required=True, help="Profile name to show"
+    )
+    add_common_args(profile_show_p)
+
+    # Profile use command
+    profile_use_p = profile_subparsers.add_parser(
+        "use", help="Switch to a different profile"
+    )
+    profile_use_p.add_argument(
+        "--profile", required=True, help="Profile name to switch to"
+    )
+    add_common_args(profile_use_p)
+
+    # Profile diff command
+    profile_diff_p = profile_subparsers.add_parser(
+        "diff", help="Compare two configuration profiles"
+    )
+    profile_diff_p.add_argument(
+        "--profile1", required=True, help="First profile to compare"
+    )
+    profile_diff_p.add_argument(
+        "--profile2", required=True, help="Second profile to compare"
+    )
+    add_common_args(profile_diff_p)
+
     # Explain command (V4 - Decision Visualization)
     explain_p = subparsers.add_parser("explain", help="Explain and visualize decisions")
     explain_p.add_argument(
@@ -2592,6 +2834,17 @@ def main():
         cmd_progress(args)
     elif args.command == "decisions":
         cmd_decisions(args)
+    elif args.command == "profile":
+        if args.profile_command == "list":
+            cmd_profile_list(args)
+        elif args.profile_command == "show":
+            cmd_profile_show(args)
+        elif args.profile_command == "use":
+            cmd_profile_use(args)
+        elif args.profile_command == "diff":
+            cmd_profile_diff(args)
+        else:
+            print("Please specify a profile command: list, show, use, diff")
     elif args.command == "explain":
         cmd_explain(args)
     else:

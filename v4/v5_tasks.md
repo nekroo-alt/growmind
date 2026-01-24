@@ -1028,57 +1028,76 @@ This document defines a series of tasks to enhance L4D v4 with housekeeping capa
 
 ---
 
-### Task 5.3: Configuration Profiles
+### Task 5.3: Configuration Profiles ✅ **COMPLETE**
 
 **Title**: Implement configuration profiles for different use cases
 
 **Acceptance Criteria**:
-- Define profiles for different use cases (development, production, testing)
-- Support custom profiles
-- Switch between profiles easily
-- Inherit from base profiles
-- Override specific settings per profile
-- Generate profile comparison
+- [x] Define profiles for different use cases (development, production, testing)
+- [x] Support custom profiles
+- [x] Switch between profiles easily
+- [x] Inherit from base profiles
+- [x] Override specific settings per profile
+- [x] Generate profile comparison
 
-**Module**: Enhance `core/config.py`
+**Module**: Enhanced `core/config.py`, added profile CLI commands to `l4_cli.py`
 
-**Estimated Lines**: ~250
+**Estimated Lines**: ~250 (actual: ~450 with comprehensive features)
 
 **Dependencies**: Task 5.1
 
+**Implementation**:
+- Enhanced `ConfigManager` with full profile management functionality
+- Implemented profile inheritance with circular dependency detection
+- Added profile comparison with detailed diff output (added, removed, changed)
+- Added profile switching with validation and auto-save
+- Implemented comprehensive CLI commands: list, show, use, diff
+- Added profile listing with descriptions and inheritance information
+- Added profile details display with all sections
+- Added profile comparison with emoji-enhanced output
+- Added profile summary after switching
+
+**Status**: ✅ IMPLEMENTED - 2025-01-25
+
 **Technical Notes**:
-- Built-in profiles:
+- Built-in V5 profiles:
   ```python
   profiles = {
       'minimal': {
           'description': 'Minimal configuration for small projects',
-          'cache_enabled': True,
-          'cache_size_mb': 50,
-          'adaptive_reasoning': False,
-          'progress_tracking': False,
-          'trap_detection': False,
-          'llm_model': 'gpt-3.5-turbo',
-          'token_budget': 2000
+          'llm': {'model': 'gpt-3.5-turbo', 'temperature': 0.7},
+          'cache': {'enabled': True, 'max_size_mb': 50},
+          'logging': {'level': 'INFO'},
+          'telemetry': {'enabled': True},
+          'custom': {
+              'adaptive_reasoning': False,
+              'progress_tracking': False,
+              'trap_detection': False
+          }
       },
       'balanced': {
           'description': 'Balanced configuration for most use cases',
-          'cache_enabled': True,
-          'cache_size_mb': 100,
-          'adaptive_reasoning': True,
-          'progress_tracking': True,
-          'trap_detection': True,
-          'llm_model': 'gpt-4',
-          'token_budget': 3000
+          'llm': {'model': 'gpt-4', 'temperature': 0.7},
+          'cache': {'enabled': True, 'max_size_mb': 100},
+          'logging': {'level': 'INFO'},
+          'telemetry': {'enabled': True},
+          'custom': {
+              'adaptive_reasoning': True,
+              'progress_tracking': True,
+              'trap_detection': True
+          }
       },
       'max': {
           'description': 'Maximum features for large projects',
-          'cache_enabled': True,
-          'cache_size_mb': 500,
-          'adaptive_reasoning': True,
-          'progress_tracking': True,
-          'trap_detection': True,
-          'llm_model': 'gpt-4',
-          'token_budget': 5000
+          'llm': {'model': 'gpt-4', 'temperature': 0.5},
+          'cache': {'enabled': True, 'max_size_mb': 500},
+          'logging': {'level': 'DEBUG'},
+          'telemetry': {'enabled': True},
+          'custom': {
+              'adaptive_reasoning': True,
+              'progress_tracking': True,
+              'trap_detection': True
+          }
       }
   }
   ```
@@ -1087,11 +1106,16 @@ This document defines a series of tasks to enhance L4D v4 with housekeeping capa
   custom_profile = {
       'inherits': 'balanced',
       'overrides': {
-          'token_budget': 4000,
-          'cache_size_mb': 200
+          'llm': {'token_budget': 4000},
+          'cache': {'max_size_mb': 200}
       }
   }
   ```
+- Profile methods:
+  - `get_profile_with_inheritance()`: Get profile with full inheritance chain applied
+  - `list_profiles()`: List all profiles with descriptions and inheritance info
+  - `compare_profiles()`: Compare two profiles with detailed differences
+  - `switch_profile()`: Switch to a profile and save configuration
 - CLI commands:
   ```bash
   l4-dev profile list              # List all profiles

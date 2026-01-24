@@ -431,11 +431,182 @@ class ConfigManager:
         Add or update a configuration profile.
 
         Args:
-            profile_name: Name of the profile
-            config: Configuration dictionary for the profile
+            profile_name: Name of profile
+            config: Configuration dictionary for profile
         """
         self._profiles[profile_name] = config
         logger.info(f"Profile '{profile_name}' added/updated")
+
+    def get_profile_with_inheritance(self, profile_name: str) -> Dict[str, Any]:
+        """
+        Get a profile with full inheritance chain applied.
+
+        Args:
+            profile_name: Name of profile
+
+        Returns:
+            Dict containing resolved profile configuration
+        """
+        if profile_name not in self._profiles:
+            raise ValueError(f"Profile '{profile_name}' not found")
+
+        # Start with base config
+        result = self._get_default_config()
+
+        # Apply inheritance chain
+        current_profile = profile_name
+        visited = set()
+
+        while current_profile and current_profile not in visited:
+            if current_profile in visited:
+                logger.warning(f"Circular inheritance detected for profile '{current_profile}'")
+                break
+
+            visited.add(current_profile)
+
+            if current_profile not in self._profiles:
+                logger.warning(f"Base profile '{current_profile}' not found")
+                break
+
+            profile_config = self._profiles[current_profile]
+            result = self._merge_configs(result, profile_config)
+
+            # Check for inheritance
+            current_profile = profile_config.get("inherits")
+
+        return result
+
+    def list_profiles(self) -> List[Dict[str, Any]]:
+        """
+        List all available profiles with descriptions.
+
+        Returns:
+            List of profile information dictionaries
+        """
+        profiles = []
+        for name, config in self._profiles.items():
+            profile_info = {"name": name, "description": config.get("description", "")}
+
+            # Check if it inherits from another profile
+            if "inherits" in config:
+                profile_info["inherits"] = config["inherits"]
+
+            profiles.append(profile_info)
+
+        return profiles
+
+    def compare_profiles(self, profile1: str, profile2: str) -> Dict[str, Any]:
+        """
+        Compare two profiles and return differences.
+
+        Args:
+            profile1: Name of first profile
+            profile2: Name of second profile
+
+        Returns:
+            Dict containing comparison results
+        """
+        if profile1 not in self._profiles:
+            raise ValueError(f"Profile '{profile1}' not found")
+        if profile2 not in self._profiles:
+            raise ValueError(f"Profile '{profile2}' not found")
+
+        # Get resolved profiles with inheritance
+        p1_config = self.get_profile_with_inheritance(profile1)
+        p2_config = self.get_profile_with_inheritance(profile2)
+
+        differences = []
+
+        # Compare nested structures recursively
+        def compare_dicts(
+            d1: Dict[str, Any],
+            d2: Dict[str, Any],
+            prefix: str = "",
+        ) -> None:
+            """Recursively compare two dictionaries."""
+            all_keys = set(d1.keys()) | set(d2.keys())
+
+            for key in sorted(all_keys):
+                full_key = f"{prefix}.{key}" if prefix else key
+                v1 = d1.get(key)
+                v2 = d2.get(key)
+
+                if key not in d2:
+                    differences.append(
+                        {"key": full_key, "profile1": v1, "profile2": None, "type": "removed"}
+                    )
+                elif key not in d1:
+                    differences.append(
+                        {"key": full_key, "profile1": None, "profile2": v2, "type": "added"}
+                    )
+                elif isinstance(v1, dict) and isinstance(v2, dict):
+                    compare_dicts(v1, v2, full_key)
+                elif v1 != v2:
+                    differences.append(
+                        {"key": full_key, "profile1": v1, "profile2": v2, "type": "changed"}
+                    )
+
+        compare_dicts(p1_config, p2_config)
+
+        return {
+            "profile1": profile1,
+            "profile2": profile2,
+            "differences": differences,
+            "summary": {
+                "total": len(differences),
+                "added": len([d for d in differences if d["type"] == "added"]),
+                "removed": len([d for d in differences if d["type"] == "removed"]),
+                "changed": len([d for d in differences if d["type"] == "changed"]),
+            },
+        }
+
+    def switch_profile(self, profile_name: str) -> AppConfig:
+        """
+        Switch to a different profile and save configuration.
+
+        Args:
+            profile_name: Name of profile to switch to
+
+        Returns:
+            AppConfig: New configuration with profile applied
+        """
+        if profile_name not in self._profiles:
+            raise ValueError(f"Profile '{profile_name}' not found")
+
+        # Clear cached config
+        self._config = None
+
+        # Load config with new profile
+        config_dict = self._get_default_config()
+
+        # Apply profile with inheritance
+        profile_config = self.get_profile_with_inheritance(profile_name)
+        config_dict = self._merge_configs(config_dict, profile_config)
+
+        # Set profile name
+        config_dict["profile"] = profile_name
+
+        # Validate and create AppConfig
+        validation_result = validate_config(config_dict)
+        if not validation_result.is_valid:
+            logger.error("Configuration validation failed:")
+            for error in validation_result.errors:
+                logger.error(f"  [{error.section}.{error.key}] {error.message}")
+            raise ValueError("Configuration validation failed")
+
+        # Log warnings
+        for warning in validation_result.warnings:
+            logger.warning(
+                f"[{warning.section}.{warning.key}] {warning.message}"
+            )
+
+        self._config = self._create_config_from_dict(config_dict)
+
+        # Save to file
+        self.save()
+
+        logger.info(f"Switched to profile: {profile_name}")
+        return self._config
 
     def reset_to_defaults(self) -> AppConfig:
         """
