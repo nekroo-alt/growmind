@@ -667,23 +667,39 @@ This document defines a series of tasks to enhance L4D v4 with housekeeping capa
 
 ---
 
-### Task 4.2: Local Decision Making
+### Task 4.2: Local Decision Making ✅ **COMPLETE**
 
 **Title**: Implement local decision making to avoid LLM calls
 
 **Acceptance Criteria**:
-- Identify decisions that can be made without LLM
-- Implement rule-based decision engine
-- Implement decision trees for common scenarios
-- Fall back to LLM for complex decisions
-- Track decision accuracy
-- Report savings from local decisions
+- [x] Identify decisions that can be made without LLM
+- [x] Implement rule-based decision engine
+- [x] Implement decision trees for common scenarios
+- [x] Fall back to LLM for complex decisions
+- [x] Track decision accuracy
+- [x] Report savings from local decisions
 
 **Module**: `logic/local_decision_engine.py` (new)
 
-**Estimated Lines**: ~400
+**Estimated Lines**: ~400 (actual: ~600 with comprehensive features)
 
 **Dependencies**: V4 reasoning_engine
+
+**Implementation**:
+- Created `LocalDecisionEngine` class with full local decision making functionality
+- Implemented rule-based error classification (transient, permanent, network)
+- Added decision trees for retry logic with exponential backoff
+- Implemented progress stagnation and regression detection
+- Added token budget selection based on task complexity
+- Implemented context expansion decision logic
+- Added file selection validation
+- Implemented comprehensive decision tracking and statistics
+- Added decision outcome recording for learning
+- Implemented statistics persistence to JSON file
+- Added report generation with detailed statistics
+- Created 20+ comprehensive unit tests
+
+**Status**: ✅ IMPLEMENTED - 2025-01-24
 
 **Technical Notes**:
 - Decisions suitable for local logic:
