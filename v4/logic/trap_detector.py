@@ -1952,10 +1952,47 @@ class TrapDetector:
             return str(reasoning).strip().lower()
 
 
+def get_trap_detector(
+    loop_threshold: int = 3,
+    dead_end_threshold: int = 5,
+    enable_prevention: bool = True
+) -> TrapDetector:
+    """
+    Get singleton TrapDetector instance
+    
+    Args:
+        loop_threshold: Number of repetitions before loop detection
+        dead_end_threshold: Number of operations without progress
+        enable_prevention: Enable trap prevention
+        
+    Returns:
+        TrapDetector instance
+    """
+    if not hasattr(get_trap_detector, '_instance'):
+        get_trap_detector._instance = TrapDetector(
+            loop_threshold=loop_threshold,
+            dead_end_threshold=dead_end_threshold,
+            enable_prevention=enable_prevention
+        )
+        logger.info("Created singleton TrapDetector instance")
+    
+    return get_trap_detector._instance
+
+
+def reset_trap_detector():
+    """
+    Reset singleton TrapDetector instance
+    Useful for testing or reinitialization
+    """
+    if hasattr(get_trap_detector, '_instance'):
+        del get_trap_detector._instance
+        logger.info("Reset singleton TrapDetector instance")
+
+
 def create_trap_detector() -> TrapDetector:
     """
     Factory function to create a TrapDetector instance.
-    
+
     Returns:
         Configured TrapDetector instance
     """

@@ -658,3 +658,43 @@ class ContextExpander:
                 for task_type, level in self.DEFAULT_OPTIMAL_LEVELS.items()
             }
             logger.info("Reset optimal levels to defaults")
+
+
+# Global instance for singleton pattern
+_context_expander_instance = None
+
+
+def get_context_expander(
+    context_hierarchy_manager=None,
+    telemetry_manager=None
+) -> ContextExpander:
+    """
+    Get or create singleton ContextExpander instance
+    
+    Args:
+        context_hierarchy_manager: Manager for accessing hierarchical context
+        telemetry_manager: Manager for tracking expansion operations
+        
+    Returns:
+        ContextExpander instance
+    """
+    global _context_expander_instance
+    
+    if _context_expander_instance is None:
+        _context_expander_instance = ContextExpander(
+            context_manager=context_hierarchy_manager,
+            telemetry_manager=telemetry_manager
+        )
+        logger.info("Created singleton ContextExpander instance")
+    
+    return _context_expander_instance
+
+
+def reset_context_expander():
+    """
+    Reset singleton ContextExpander instance
+    Useful for testing or reinitialization
+    """
+    global _context_expander_instance
+    _context_expander_instance = None
+    logger.info("Reset singleton ContextExpander instance")

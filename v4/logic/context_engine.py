@@ -2,10 +2,31 @@ import os
 import hashlib
 import subprocess
 from typing import List, Dict, Optional, Tuple, Set
+from enum import Enum
+from dataclasses import dataclass
 from data.semantic_mapper import SemanticMapper
 from data.cache_manager import get_cache_manager
 from logic.task_impact_analyzer import TaskImpactAnalyzer
 from logic.dependency_traverser import DependencyTraverser
+
+
+class ContextLevel(Enum):
+    """Context hierarchy levels for progressive loading."""
+    IMMEDIATE = 0  # Current file and immediate dependencies only
+    RECENT = 1      # Add upstream/downstream functions
+    SESSION = 2      # Add session history and patterns
+    PROJECT = 3      # Full project context
+
+
+@dataclass
+class ContextLevelInfo:
+    """Information about a specific context level."""
+    level: ContextLevel
+    name: str
+    description: str
+    token_multiplier: float  # Multiplier for estimated tokens at this level
+    average_success_rate: float  # Historical success rate at this level
+    expansion_count: int  # Number of times expanded to this level
 
 
 class ContextEngine:
@@ -30,6 +51,12 @@ class ContextEngine:
 
         # Integration with CacheManager for AST caching
         self.cache_manager = get_cache_manager()
+
+        # V5: Progressive context loading
+        self._context_levels = self._initialize_context_levels()
+        self._optimal_levels: Dict[str, ContextLevel] = {}  # Task type -> optimal level
+        self._expansion_stats: Dict[str, Dict] = {}  # Task type -> expansion statistics
+        self._level_usage_stats: Dict[int, int] = {0: 0, 1: 0, 2: 0, 3: 0}
 
     def get_pruned_context(
         self,
@@ -256,6 +283,453 @@ class ContextEngine:
         )
 
         return final_context
+
+    def get_progressive_context(
+        self,
+        task_query: str,
+        files: List[str],
+        task_type: str = "general",
+        initial_level: ContextLevel = ContextLevel.IMMEDIATE,
+        max_level: ContextLevel = ContextLevel.PROJECT,
+        use_smart_scoping: bool = True,
+        task_title: str = "",
+        acceptance_criteria: str = "",
+        force_refresh: bool = False,
+    ) -> Tuple[str, Dict]:
+        """
+        Get progressive context starting from minimal level, expanding as needed.
+
+        Implements V5 progressive context loading:
+        - Starts with minimal context (L0: immediate file only)
+        - Expands to higher levels only if needed
+        - Learns optimal starting level per task type
+        - Tracks expansion statistics for learning
+
+        Args:
+            task_query: Query string for matching code
+            files: List of file paths to analyze
+            task_type: Type of task (e.g., "bug_fix", "new_feature", "refactor")
+            initial_level: Starting context level (default: L0)
+            max_level: Maximum context level to expand to
+            use_smart_scoping: Use AST-based impact analysis
+            task_title: Title of task
+            acceptance_criteria: Acceptance criteria for task
+            force_refresh: Force refresh of cache
+
+        Returns:
+            Tuple of (context_string, context_info_dict)
+            - context_string: The context content
+            - context_info_dict: Information about context including level, expansion, etc.
+
+        Examples:
+            >>> engine = ContextEngine(workspace_root=".")
+            >>> context, info = engine.get_progressive_context(
+            ...     task_query="add user authentication",
+            ...     files=["auth.py"],
+            ...     task_type="new_feature",
+            ...     initial_level=ContextLevel.IMMEDIATE
+            ... )
+            >>> print(f"Context at level {info['final_level']}")
+            >>> print(f"Expanded {info['expansion_count']} times")
+        """
+        # Step 1: Determine starting level (use learned optimal or default)
+        starting_level = self._get_starting_level(task_type, initial_level)
+
+        # Step 2: Initialize context info
+        context_info = {
+            "starting_level": starting_level.value,
+            "final_level": starting_level.value,
+            "expansion_count": 0,
+            "task_type": task_type,
+            "files_analyzed": len(files),
+            "estimated_tokens": 0,
+            "expansion_reason": None,
+        }
+
+        # Step 3: Get context at starting level
+        current_level = starting_level
+        context = self._get_context_at_level(
+            current_level,
+            task_query,
+            files,
+            use_smart_scoping,
+            task_title,
+            acceptance_criteria,
+            force_refresh,
+            context_info,
+        )
+
+        # Step 4: Check if context is sufficient
+        while current_level < max_level and not self._is_context_sufficient(
+            context, current_level, task_type, context_info
+        ):
+            # Expand to next level
+            next_level = ContextLevel(current_level.value + 1)
+            context_info["expansion_count"] += 1
+            current_level = next_level
+
+            # Get expanded context
+            context = self._get_context_at_level(
+                current_level,
+                task_query,
+                files,
+                use_smart_scoping,
+                task_title,
+                acceptance_criteria,
+                force_refresh,
+                context_info,
+            )
+
+            # Track expansion reason
+            if current_level == ContextLevel.RECENT:
+                context_info["expansion_reason"] = "Insufficient immediate context"
+            elif current_level == ContextLevel.SESSION:
+                context_info["expansion_reason"] = "Insufficient recent context"
+            elif current_level == ContextLevel.PROJECT:
+                context_info["expansion_reason"] = "Insufficient session context"
+
+        # Step 5: Update final level in info
+        context_info["final_level"] = current_level.value
+
+        # Step 6: Update statistics
+        self._update_context_level_stats(current_level.value)
+        self._update_expansion_stats(task_type, starting_level, current_level)
+
+        # Step 7: Learn optimal level if task succeeded
+        # (This is called separately after task completion)
+        # self._record_task_outcome(task_type, starting_level, current_level, success)
+
+        return context, context_info
+
+    def _initialize_context_levels(self) -> Dict[ContextLevel, ContextLevelInfo]:
+        """
+        Initialize context level definitions.
+
+        Returns:
+            Dictionary mapping ContextLevel to ContextLevelInfo
+        """
+        return {
+            ContextLevel.IMMEDIATE: ContextLevelInfo(
+                level=ContextLevel.IMMEDIATE,
+                name="Immediate",
+                description="Current file and immediate dependencies only",
+                token_multiplier=1.0,
+                average_success_rate=0.70,  # Conservative estimate
+                expansion_count=0,
+            ),
+            ContextLevel.RECENT: ContextLevelInfo(
+                level=ContextLevel.RECENT,
+                name="Recent",
+                description="Add upstream/downstream functions",
+                token_multiplier=2.5,
+                average_success_rate=0.85,
+                expansion_count=0,
+            ),
+            ContextLevel.SESSION: ContextLevelInfo(
+                level=ContextLevel.SESSION,
+                name="Session",
+                description="Add session history and patterns",
+                token_multiplier=5.0,
+                average_success_rate=0.92,
+                expansion_count=0,
+            ),
+            ContextLevel.PROJECT: ContextLevelInfo(
+                level=ContextLevel.PROJECT,
+                name="Project",
+                description="Full project context",
+                token_multiplier=10.0,
+                average_success_rate=0.98,
+                expansion_count=0,
+            ),
+        }
+
+    def _get_starting_level(
+        self, task_type: str, default_level: ContextLevel
+    ) -> ContextLevel:
+        """
+        Get starting context level for a task type.
+
+        Uses learned optimal level if available, otherwise uses default.
+
+        Args:
+            task_type: Type of task
+            default_level: Default starting level
+
+        Returns:
+            ContextLevel to start with
+        """
+        # Use learned optimal level if we have enough data
+        if task_type in self._optimal_levels:
+            level_info = self._context_levels[self._optimal_levels[task_type]]
+            if level_info.expansion_count >= 5:  # Require minimum samples
+                return self._optimal_levels[task_type]
+
+        # Use default
+        return default_level
+
+    def _get_context_at_level(
+        self,
+        level: ContextLevel,
+        task_query: str,
+        files: List[str],
+        use_smart_scoping: bool,
+        task_title: str,
+        acceptance_criteria: str,
+        force_refresh: bool,
+        context_info: Dict,
+    ) -> str:
+        """
+        Get context at a specific context level.
+
+        Args:
+            level: Context level to retrieve
+            task_query: Task query string
+            files: List of file paths
+            use_smart_scoping: Whether to use smart scoping
+            task_title: Task title
+            acceptance_criteria: Acceptance criteria
+            force_refresh: Force refresh cache
+            context_info: Context info dictionary to update
+
+        Returns:
+            Context string at specified level
+        """
+        level_info = self._context_levels[level]
+
+        # Adjust file scope based on level
+        if level == ContextLevel.IMMEDIATE:
+            # Only current file
+            scoped_files = files[:1] if files else files
+            max_depth = 0  # No dependency traversal
+        elif level == ContextLevel.RECENT:
+            # Current file + direct dependencies
+            scoped_files = files
+            max_depth = 1  # One level of dependency
+        elif level == ContextLevel.SESSION:
+            # All files in task + dependencies
+            scoped_files = files
+            max_depth = 2  # Two levels of dependency
+        else:  # PROJECT
+            # All files + full dependencies
+            scoped_files = files
+            max_depth = 3  # Full dependency traversal
+
+        # Get context using existing get_pruned_context method
+        context = self.get_pruned_context(
+            task_query=task_query,
+            files=scoped_files,
+            use_smart_scoping=use_smart_scoping,
+            task_title=task_title,
+            acceptance_criteria=acceptance_criteria,
+            force_refresh=force_refresh,
+        )
+
+        # Update context info with estimated tokens
+        estimated_tokens = len(context.split()) * level_info.token_multiplier
+        context_info["estimated_tokens"] = int(estimated_tokens)
+
+        return context
+
+    def _is_context_sufficient(
+        self,
+        context: str,
+        current_level: ContextLevel,
+        task_type: str,
+        context_info: Dict,
+    ) -> bool:
+        """
+        Determine if current context is sufficient for the task.
+
+        Uses heuristics to predict if expansion is needed:
+        - Check context size (too small = insufficient)
+        - Check task complexity (complex tasks need more context)
+        - Check historical success rate at current level
+        - Check expansion frequency (if always expanding, start higher)
+
+        Args:
+            context: Current context string
+            current_level: Current context level
+            task_type: Type of task
+            context_info: Context info dictionary
+
+        Returns:
+            True if context is sufficient, False if expansion needed
+        """
+        # Heuristic 1: Check context size
+        context_lines = context.count("\n")
+        min_lines = 10 * (current_level.value + 1)  # More lines needed at higher levels
+        if context_lines < min_lines:
+            return False
+
+        # Heuristic 2: Check estimated token count
+        # If very low tokens, might be insufficient
+        if context_info.get("estimated_tokens", 0) < 500:
+            return False
+
+        # Heuristic 3: Check task type complexity
+        # Complex tasks typically need more context
+        complex_tasks = {"refactor", "architecture", "multi_file_feature"}
+        if task_type in complex_tasks and current_level.value < 2:
+            return False
+
+        # Heuristic 4: Check historical expansion frequency
+        # If this task type always requires expansion, start higher
+        if task_type in self._expansion_stats:
+            stats = self._expansion_stats[task_type]
+            avg_final_level = stats.get("avg_final_level", 0)
+            if avg_final_level > current_level.value + 1:
+                return False  # Usually needs higher level
+
+        # Heuristic 5: Check success rate at current level
+        level_info = self._context_levels[current_level]
+        if level_info.average_success_rate < 0.75 and current_level.value < 3:
+            return False
+
+        # Default: context is sufficient
+        return True
+
+    def _update_context_level_stats(self, level: int) -> None:
+        """
+        Update usage statistics for context level.
+
+        Args:
+            level: Context level value (0-3)
+        """
+        self._level_usage_stats[level] = self._level_usage_stats.get(level, 0) + 1
+
+    def _update_expansion_stats(
+        self, task_type: str, starting_level: ContextLevel, final_level: ContextLevel
+    ) -> None:
+        """
+        Update expansion statistics for task type.
+
+        Tracks:
+        - Average final level
+        - Average expansion count
+        - Starting level success rate
+
+        Args:
+            task_type: Type of task
+            starting_level: Starting context level
+            final_level: Final context level
+        """
+        if task_type not in self._expansion_stats:
+            self._expansion_stats[task_type] = {
+                "count": 0,
+                "total_final_level": 0,
+                "total_expansion_count": 0,
+                "avg_final_level": 0.0,
+                "avg_expansion_count": 0.0,
+            }
+
+        stats = self._expansion_stats[task_type]
+        stats["count"] += 1
+        stats["total_final_level"] += final_level.value
+        stats["total_expansion_count"] += (final_level.value - starting_level.value)
+
+        # Calculate averages
+        stats["avg_final_level"] = stats["total_final_level"] / stats["count"]
+        stats["avg_expansion_count"] = stats["total_expansion_count"] / stats["count"]
+
+    def record_task_outcome(
+        self,
+        task_type: str,
+        starting_level: ContextLevel,
+        final_level: ContextLevel,
+        success: bool,
+    ) -> None:
+        """
+        Record task outcome for learning optimal levels.
+
+        Updates success rates for context levels and learns optimal starting level.
+
+        Args:
+            task_type: Type of task
+            starting_level: Starting context level
+            final_level: Final context level
+            success: Whether task succeeded at this level
+
+        Examples:
+            >>> engine = ContextEngine()
+            >>> engine.get_progressive_context(...)  # Task executed
+            >>> engine.record_task_outcome(
+            ...     task_type="bug_fix",
+            ...     starting_level=ContextLevel.IMMEDIATE,
+            ...     final_level=ContextLevel.RECENT,
+            ...     success=True
+            ... )
+        """
+        # Update success rate for final level
+        level_info = self._context_levels[final_level]
+        total_attempts = level_info.expansion_count + 1
+        success_rate = (
+            (level_info.average_success_rate * level_info.expansion_count + (1.0 if success else 0.0))
+            / total_attempts
+        )
+        level_info.average_success_rate = success_rate
+        level_info.expansion_count = total_attempts
+
+        # Learn optimal starting level for this task type
+        # Optimal level = highest level that consistently succeeds without expansion
+        if task_type not in self._optimal_levels:
+            self._optimal_levels[task_type] = starting_level
+        else:
+            current_optimal = self._optimal_levels[task_type]
+            stats = self._expansion_stats.get(task_type, {})
+
+            # If starting level succeeds without expansion > 80% of time, it's optimal
+            if success and starting_level == final_level:
+                success_rate_no_expansion = stats.get("avg_expansion_count", 0) < 0.2
+                if success_rate_no_expansion:
+                    self._optimal_levels[task_type] = starting_level
+
+    def get_optimal_levels(self) -> Dict[str, ContextLevel]:
+        """
+        Get learned optimal context levels per task type.
+
+        Returns:
+            Dictionary mapping task type to optimal context level
+        """
+        return self._optimal_levels.copy()
+
+    def get_expansion_stats(self) -> Dict[str, Dict]:
+        """
+        Get expansion statistics for all task types.
+
+        Returns:
+            Dictionary of task type to expansion statistics
+        """
+        return self._expansion_stats.copy()
+
+    def get_level_usage_stats(self) -> Dict[int, int]:
+        """
+        Get usage statistics for context levels.
+
+        Returns:
+            Dictionary mapping level value to usage count
+        """
+        return self._level_usage_stats.copy()
+
+    def get_context_level_info(self, level: ContextLevel) -> Optional[ContextLevelInfo]:
+        """
+        Get information about a specific context level.
+
+        Args:
+            level: Context level to query
+
+        Returns:
+            ContextLevelInfo or None if level not found
+        """
+        return self._context_levels.get(level)
+
+    def get_all_context_levels(self) -> Dict[ContextLevel, ContextLevelInfo]:
+        """
+        Get all context level definitions.
+
+        Returns:
+            Dictionary mapping ContextLevel to ContextLevelInfo
+        """
+        return self._context_levels.copy()
 
     def get_smart_file_scope(
         self,

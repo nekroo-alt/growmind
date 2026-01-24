@@ -909,3 +909,36 @@ class LessonLearner:
             return json.dumps([lesson.to_dict() for lesson in lessons], indent=2)
         else:
             raise ValueError(f"Unsupported output format: {output_format}")
+
+
+# Singleton instance
+_lesson_learner_instance: Optional[LessonLearner] = None
+
+
+def get_lesson_learner(db_path: str = "lessons_learned.db") -> LessonLearner:
+    """
+    Factory function to get or create singleton LessonLearner instance.
+    
+    Args:
+        db_path: Path to SQLite database for storing lessons
+    
+    Returns:
+        Singleton LessonLearner instance
+    """
+    global _lesson_learner_instance
+    
+    if _lesson_learner_instance is None:
+        _lesson_learner_instance = LessonLearner(db_path=db_path)
+        print("Created singleton LessonLearner instance")
+    
+    return _lesson_learner_instance
+
+
+def reset_lesson_learner():
+    """
+    Reset singleton LessonLearner instance.
+    Useful for testing or reinitialization.
+    """
+    global _lesson_learner_instance
+    _lesson_learner_instance = None
+    print("Reset singleton LessonLearner instance")

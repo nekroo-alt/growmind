@@ -1059,6 +1059,40 @@ class TrapRecoveryEngine:
         self.logger.info("Recovery history reset")
 
 
+def get_trap_recovery(
+    checkpoint_manager: Optional[Any] = None,
+    telemetry_manager: Optional[Any] = None
+) -> TrapRecoveryEngine:
+    """
+    Get singleton TrapRecoveryEngine instance
+    
+    Args:
+        checkpoint_manager: Optional checkpoint manager
+        telemetry_manager: Optional telemetry manager
+        
+    Returns:
+        TrapRecoveryEngine instance
+    """
+    if not hasattr(get_trap_recovery, '_instance'):
+        get_trap_recovery._instance = TrapRecoveryEngine(
+            checkpoint_manager=checkpoint_manager,
+            telemetry_manager=telemetry_manager
+        )
+        logger.info("Created singleton TrapRecoveryEngine instance")
+    
+    return get_trap_recovery._instance
+
+
+def reset_trap_recovery():
+    """
+    Reset singleton TrapRecoveryEngine instance
+    Useful for testing or reinitialization
+    """
+    if hasattr(get_trap_recovery, '_instance'):
+        del get_trap_recovery._instance
+        logger.info("Reset singleton TrapRecoveryEngine instance")
+
+
 def create_trap_recovery_engine(
     checkpoint_manager: Optional[Any] = None,
     telemetry_manager: Optional[Any] = None

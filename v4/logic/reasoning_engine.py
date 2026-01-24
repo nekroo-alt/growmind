@@ -187,9 +187,8 @@ class ReasoningEngine:
         }
         
         logger.info(
-            "ReasoningEngine initialized",
-            default_strategy=default_strategy.value,
-            confidence_threshold=confidence_threshold
+            f"ReasoningEngine initialized with default_strategy={default_strategy.value}, "
+            f"confidence_threshold={confidence_threshold}"
         )
     
     def analyze(self, context: Dict[str, Any]) -> SituationReport:
@@ -806,3 +805,49 @@ class ReasoningEngine:
         perf["average_efficiency"] = (
             (total_efficiency + validation_result.efficiency_score) / perf["total"]
         )
+
+
+# Global instance for singleton pattern
+_reasoning_engine_instance = None
+
+
+def get_reasoning_engine(
+    context_hierarchy_manager=None,
+    telemetry_manager=None,
+    default_strategy: ReasoningStrategy = ReasoningStrategy.BALANCED,
+    confidence_threshold: float = 0.7
+) -> ReasoningEngine:
+    """
+    Get or create the singleton ReasoningEngine instance
+    
+    Args:
+        context_hierarchy_manager: Manager for accessing hierarchical context
+        telemetry_manager: Manager for tracking reasoning operations
+        default_strategy: Default reasoning strategy to use
+        confidence_threshold: Minimum confidence threshold for decisions
+        
+    Returns:
+        ReasoningEngine instance
+    """
+    global _reasoning_engine_instance
+    
+    if _reasoning_engine_instance is None:
+        _reasoning_engine_instance = ReasoningEngine(
+            context_hierarchy_manager=context_hierarchy_manager,
+            telemetry_manager=telemetry_manager,
+            default_strategy=default_strategy,
+            confidence_threshold=confidence_threshold
+        )
+        logger.info("Created singleton ReasoningEngine instance")
+    
+    return _reasoning_engine_instance
+
+
+def reset_reasoning_engine():
+    """
+    Reset the singleton ReasoningEngine instance
+    Useful for testing or reinitialization
+    """
+    global _reasoning_engine_instance
+    _reasoning_engine_instance = None
+    logger.info("Reset singleton ReasoningEngine instance")

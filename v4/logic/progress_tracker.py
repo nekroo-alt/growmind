@@ -1138,3 +1138,49 @@ class ProgressTracker:
             self.ops_without_progress = data['stagnation'].get('ops_without_progress', 0)
             
         self.last_progress = self._calculate_overall_progress()
+
+
+# Global instance for singleton pattern
+_progress_tracker_instance = None
+
+
+def get_progress_tracker(
+    telemetry_manager=None,
+    context_hierarchy_manager=None,
+    minimal_threshold: float = 0.1,
+    expected_threshold: float = 0.3
+) -> ProgressTracker:
+    """
+    Get or create singleton ProgressTracker instance
+    
+    Args:
+        telemetry_manager: Manager for tracking operations
+        context_hierarchy_manager: Manager for accessing context
+        minimal_threshold: Minimum progress threshold (0.0-1.0)
+        expected_threshold: Expected progress threshold (0.0-1.0)
+        
+    Returns:
+        ProgressTracker instance
+    """
+    global _progress_tracker_instance
+    
+    if _progress_tracker_instance is None:
+        _progress_tracker_instance = ProgressTracker(
+            telemetry_manager=telemetry_manager,
+            context_hierarchy_manager=context_hierarchy_manager,
+            minimal_threshold=minimal_threshold,
+            expected_threshold=expected_threshold
+        )
+        logger.info("Created singleton ProgressTracker instance")
+    
+    return _progress_tracker_instance
+
+
+def reset_progress_tracker():
+    """
+    Reset singleton ProgressTracker instance
+    Useful for testing or reinitialization
+    """
+    global _progress_tracker_instance
+    _progress_tracker_instance = None
+    logger.info("Reset singleton ProgressTracker instance")

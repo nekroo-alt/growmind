@@ -952,3 +952,23 @@ def get_decision_history_manager() -> DecisionHistoryManager:
             if _decision_history_manager is None:
                 _decision_history_manager = DecisionHistoryManager()
     return _decision_history_manager
+
+
+def get_decision_history() -> DecisionHistoryManager:
+    """
+    Alias for get_decision_history_manager() for compatibility.
+    
+    Returns:
+        DecisionHistoryManager instance
+    """
+    return get_decision_history_manager()
+
+
+def reset_decision_history():
+    """
+    Reset global decision history manager instance.
+    Useful for testing or reinitialization.
+    """
+    global _decision_history_manager
+    with _decision_history_lock:
+        _decision_history_manager = None

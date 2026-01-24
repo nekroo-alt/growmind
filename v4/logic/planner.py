@@ -13,7 +13,7 @@ from core.telemetry import telemetry
 from core.logging_config import get_module_logger, log_error_with_context
 # V4: Adaptive reasoning components
 from data.context_hierarchy import get_context_hierarchy
-from data.decision_history import get_decision_history
+from data.decision_history import get_decision_history_manager
 from logic.reasoning_engine import get_reasoning_engine
 from logic.context_expander import get_context_expander
 from logic.progress_tracker import get_progress_tracker
@@ -39,7 +39,7 @@ class Planner:
         self.telemetry_manager = get_telemetry_manager()  # V3 telemetry
         # V4: Adaptive reasoning components
         self.context_hierarchy = get_context_hierarchy()
-        self.decision_history = get_decision_history()
+        self.decision_history = get_decision_history_manager()
         self.reasoning_engine = get_reasoning_engine()
         self.context_expander = get_context_expander()
         self.progress_tracker = get_progress_tracker()
