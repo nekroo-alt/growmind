@@ -15,6 +15,11 @@ from v3.logic.context_expander import get_context_expander
 from v3.logic.progress_tracker import get_progress_tracker as get_progress_tracker_v4
 from v3.logic.trap_detector import get_trap_detector
 from v3.logic.trap_recovery import get_trap_recovery
+# V4: Meta-cognition components
+from v3.logic.pattern_recognizer import get_pattern_recognizer
+from v3.logic.self_reflection import get_self_reflection
+from v3.logic.lesson_learner import get_lesson_learner
+from v3.logic.adaptive_heuristics import get_adaptive_heuristics
 
 logger = get_module_logger(__name__)
 
@@ -73,7 +78,12 @@ class Verifier:
         self.progress_tracker_v4 = get_progress_tracker_v4()
         self.trap_detector = get_trap_detector()
         self.trap_recovery = get_trap_recovery()
-        logger.info("Verifier initialized successfully with V4 adaptive reasoning and trap detection")
+        # V4: Meta-cognition components
+        self.pattern_recognizer = get_pattern_recognizer()
+        self.self_reflection = get_self_reflection()
+        self.lesson_learner = get_lesson_learner()
+        self.adaptive_heuristics = get_adaptive_heuristics()
+        logger.info("Verifier initialized successfully with V4 adaptive reasoning, trap detection, and meta-cognition")
 
     @fcid_mapping("VER-100")
     def run_tests(self, test_file="v1/test_poc.py", tracking_id=None):
@@ -139,6 +149,12 @@ class Verifier:
                     action="Run Tests",
                     status="Failed",
                     cot_blob=f"Tests failed for {test_file}\nOutput: {result.stdout}",
+                )
+                # V4: Learn from test failure
+                self.lesson_learner.record_failure(
+                    failure_type="test_execution",
+                    context={"test_file": test_file},
+                    error_message=f"Tests failed for {test_file}"
                 )
                 return False
         except Exception as e:
@@ -744,6 +760,38 @@ class Verifier:
                         "mutations_killed": killed_mutations,
                         "total_mutations": total_mutations
                     }
+                )
+            
+            # V4: Learn from mutation testing failure
+            if mutation_score < 100:
+                self.lesson_learner.record_failure(
+                    failure_type="mutation_testing",
+                    context={"target_file": target_file, "test_file": test_file},
+                    error_message=f"Mutation score {mutation_score:.1f}% is below required 100%"
+                )
+            # V4: Record validation decision
+            decision_id = self.decision_history.record_decision(
+                context={"mutation_score": mutation_score, "killed": killed_mutations, "total": total_mutations},
+                reasoning=f"Mutation testing completed with score {mutation_score:.1f}%",
+                action="mutation_validation",
+                alternatives={
+                    "alternative_1": "Accept lower mutation score",
+                    "alternative_2": "Skip mutation testing"
+                },
+                confidence=mutation_score / 100.0
+            )
+            
+            if mutation_score == 100:
+                self.decision_history.record_outcome(
+                    decision_id=decision_id,
+                    outcome="success",
+                    actual_success=True
+                )
+            else:
+                self.decision_history.record_outcome(
+                    decision_id=decision_id,
+                    outcome="failure",
+                    actual_success=False
                 )
             
             log_activity(

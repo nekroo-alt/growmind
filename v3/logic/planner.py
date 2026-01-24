@@ -19,6 +19,11 @@ from v3.logic.context_expander import get_context_expander
 from v3.logic.progress_tracker import get_progress_tracker
 from v3.logic.trap_detector import get_trap_detector
 from v3.logic.trap_recovery import get_trap_recovery
+# V4: Meta-cognition components
+from v3.logic.pattern_recognizer import get_pattern_recognizer
+from v3.logic.self_reflection import get_self_reflection
+from v3.logic.lesson_learner import get_lesson_learner
+from v3.logic.adaptive_heuristics import get_adaptive_heuristics
 
 logger = get_module_logger(__name__)
 
@@ -40,7 +45,12 @@ class Planner:
         self.progress_tracker = get_progress_tracker()
         self.trap_detector = get_trap_detector()
         self.trap_recovery = get_trap_recovery()
-        logger.info("Planner initialized successfully with V4 adaptive reasoning and trap detection")
+        # V4: Meta-cognition components
+        self.pattern_recognizer = get_pattern_recognizer()
+        self.self_reflection = get_self_reflection()
+        self.lesson_learner = get_lesson_learner()
+        self.adaptive_heuristics = get_adaptive_heuristics()
+        logger.info("Planner initialized successfully with V4 adaptive reasoning, trap detection, and meta-cognition")
 
     @fcid_mapping("PLAN-0100")
     def breakdown_requirements(
@@ -316,12 +326,64 @@ class Planner:
                 estimated_cost=result["cost"],
             )
 
+            # V4: Record planning decision for meta-cognition
+            decision_id = self.decision_history.record_decision(
+                context=context,
+                reasoning=f"Task breakdown for {task_title} generated {len(subtasks)} subtasks",
+                action="task_breakdown",
+                alternatives={
+                    "alternative_1": "Break down into fewer, larger tasks",
+                    "alternative_2": "Break down into more granular tasks"
+                },
+                confidence=0.85 if new_tasks_added > 0 else 0.5
+            )
+            
+            # V4: Recognize patterns in planning decisions
+            self.pattern_recognizer.recognize_patterns(
+                decisions=self.decision_history.get_recent_decisions(limit=10)
+            )
+            
+            # V4: Perform self-reflection after planning
+            reflection_result = self.self_reflection.perform_reflection(
+                trigger="after_task",
+                recent_decisions=self.decision_history.get_recent_decisions(limit=5)
+            )
+            if reflection_result["recommendations"]:
+                logger.info(f"Self-reflection recommendations: {reflection_result['recommendations']}")
+                
             logger.info(
                 f"Task breakdown completed: {len(subtasks)} tasks, {new_tasks_added} new tasks added"
             )
             telemetry.info(
                 f"Task breakdown completed: {len(subtasks)} tasks, {new_tasks_added} new tasks added"
             )
+            
+            # V4: Record decision outcome
+            if new_tasks_added > 0:
+                self.decision_history.record_outcome(
+                    decision_id=decision_id,
+                    outcome="success",
+                    actual_success=True
+                )
+                # V4: Update heuristics based on success
+                self.adaptive_heuristics.update_heuristics(
+                    heuristic_type="planning_success",
+                    success=True,
+                    context=context
+                )
+            else:
+                self.decision_history.record_outcome(
+                    decision_id=decision_id,
+                    outcome="failure",
+                    actual_success=False
+                )
+                # V4: Learn from planning failure
+                self.lesson_learner.record_failure(
+                    failure_type="planning",
+                    context=context,
+                    error_message="No new tasks were generated from planning"
+                )
+                
             return new_tasks_added
 
     def _build_semantic_mappers(self, affected_files: List[Dict]):

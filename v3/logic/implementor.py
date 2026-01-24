@@ -22,6 +22,11 @@ from v3.logic.reasoning_engine import get_reasoning_engine
 from v3.logic.trap_detector import get_trap_detector
 from v3.logic.trap_recovery import get_trap_recovery
 from v3.logic.progress_tracker import get_progress_tracker
+# V4: Meta-cognition components
+from v3.logic.pattern_recognizer import get_pattern_recognizer
+from v3.logic.self_reflection import get_self_reflection
+from v3.logic.lesson_learner import get_lesson_learner
+from v3.logic.adaptive_heuristics import get_adaptive_heuristics
 
 logger = get_module_logger(__name__)
 
@@ -43,7 +48,12 @@ class Implementor:
         self.trap_detector = get_trap_detector()
         self.trap_recovery = get_trap_recovery()
         self.progress_tracker = get_progress_tracker()
-        logger.info("Implementor initialized successfully with V4 adaptive reasoning")
+        # V4: Meta-cognition components
+        self.pattern_recognizer = get_pattern_recognizer()
+        self.self_reflection = get_self_reflection()
+        self.lesson_learner = get_lesson_learner()
+        self.adaptive_heuristics = get_adaptive_heuristics()
+        logger.info("Implementor initialized successfully with V4 adaptive reasoning and meta-cognition")
 
     def _get_error_reason(self, result):
         raw_content = result.get("raw_content", "").strip()
@@ -363,6 +373,45 @@ class Implementor:
                 },
             )
 
+            # V4: Record implementation decision for meta-cognition
+            decision_id = self.decision_history.record_decision(
+                context=context,
+                reasoning=f"TDD cycle completed for task {task_title} with 3 phases (Red, Green, Refactor)",
+                action="tdd_implementation",
+                alternatives={
+                    "alternative_1": "Skip refactor phase",
+                    "alternative_2": "Implement without TDD"
+                },
+                confidence=0.9
+            )
+            
+            # V4: Recognize patterns in implementation decisions
+            self.pattern_recognizer.recognize_patterns(
+                decisions=self.decision_history.get_recent_decisions(limit=10)
+            )
+            
+            # V4: Perform self-reflection after implementation
+            reflection_result = self.self_reflection.perform_reflection(
+                trigger="after_task",
+                recent_decisions=self.decision_history.get_recent_decisions(limit=5)
+            )
+            if reflection_result["recommendations"]:
+                logger.info(f"Self-reflection recommendations: {reflection_result['recommendations']}")
+            
+            # V4: Record decision outcome
+            self.decision_history.record_outcome(
+                decision_id=decision_id,
+                outcome="success",
+                actual_success=True
+            )
+            
+            # V4: Update heuristics based on successful TDD cycle
+            self.adaptive_heuristics.update_heuristics(
+                heuristic_type="tdd_success",
+                success=True,
+                context=context
+            )
+            
             update_task_status(task_id, "completed")
             return True, None
 
@@ -447,6 +496,12 @@ Keep changes focused and under 100 lines per commit.
                     metrics={"red_phase_attempts": attempt}
                 )
 
+            # V4: Learn from red phase failure
+            self.lesson_learner.record_failure(
+                failure_type="red_phase",
+                context=hierarchical_context,
+                error_message=last_error or "Red Phase failed after maximum attempts"
+            )
         return False, last_error or "Red Phase failed after maximum attempts."
 
     def _run_green_phase(self, task, hierarchical_context, tracking_id):
@@ -581,6 +636,12 @@ Keep changes focused and under 100 lines per commit.
                     metrics={"green_phase_attempts": attempt}
                 )
 
+            # V4: Learn from green phase failure
+            self.lesson_learner.record_failure(
+                failure_type="green_phase",
+                context=hierarchical_context,
+                error_message=last_error or "Green Phase failed after maximum attempts"
+            )
         return False, last_error or "Green Phase failed after maximum attempts."
 
     def _run_tests(self, test_file):
