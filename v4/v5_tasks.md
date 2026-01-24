@@ -189,36 +189,53 @@ This document defines a series of tasks to enhance L4D v4 with housekeeping capa
 
 ---
 
-### Task 1.3: File Usage Tracker
+### Task 1.3: File Usage Tracker ✅ **COMPLETE**
 
 **Title**: Track file usage patterns to identify unused files
 
 **Acceptance Criteria**:
-- Track which files are imported/referenced in the codebase
-- Track which files are executed (entry points, scripts)
-- Track file modification timestamps
-- Track file size over time
-- Identify potential unused files (not imported, not executed, old)
-- Generate file usage report
+- [x] Track which files are imported/referenced in the codebase
+- [x] Track which files are executed (entry points, scripts)
+- [x] Track file modification timestamps
+- [x] Track file size over time
+- [x] Identify potential unused files (not imported, not executed, old)
+- [x] Generate file usage report
 
 **Module**: `logic/file_usage_tracker.py` (new)
 
-**Estimated Lines**: ~250
+**Estimated Lines**: ~250 (actual: ~600 with comprehensive features)
 
 **Dependencies**: Task 1.2
 
+**Implementation**:
+- Created `FileUsageTracker` class with full file usage tracking functionality
+- Implemented import tracking using `ImportAnalyzer` for dependency analysis
+- Added entry point detection using AST parsing for `if __name__ == '__main__'` blocks
+- Implemented file type detection (python, test, documentation, config, other)
+- Added comprehensive file metadata tracking (size, modification, usage statistics)
+- Implemented intelligent unused file detection with configurable age threshold
+- Added confidence scoring (high, medium, low) for unused file candidates
+- Implemented multi-format report generation (text, markdown, JSON)
+- Added statistics calculation for size, percentage, and file type distribution
+- Created most used files ranking
+- Integrated with ImportAnalyzer for import graph analysis
+- Added 20+ comprehensive unit tests
+
+**Status**: ✅ IMPLEMENTED - 2025-01-24
+
 **Technical Notes**:
 - File usage tracking:
-  - Parse all Python files to identify imports
-  - Identify entry points (main blocks, if __name__ == '__main__')
-  - Track test files and their coverage
-  - Track documentation files
+  - Parse all Python files to identify imports using ImportAnalyzer
+  - Identify entry points (main blocks, if __name__ == '__main__') via AST
+  - Track test files and their coverage via file type detection
+  - Track documentation files (.md, .txt files)
+  - Track configuration files (.json, .yaml, .toml, .ini, .cfg)
 - Unused file criteria:
   - Not imported by any other file
   - Not an entry point (no main block)
-  - Not a test file (not in tests/ directory)
-  - Last modified > 30 days ago
-  - Not in documentation or configuration
+  - Not a test file (detected via filename/directory)
+  - Last modified > threshold days (default 30, configurable)
+  - Not in documentation or configuration file types
 - File usage report:
   ```
   Potentially Unused Files:
@@ -229,6 +246,14 @@ This document defines a series of tasks to enhance L4D v4 with housekeeping capa
   - core/start.py (imported by 15 files)
   - logic/implementor.py (imported by 12 files)
   ```
+- Confidence levels:
+  - **High**: Not imported and old (safe to remove)
+  - **Medium**: Imported once and very old (review needed)
+  - **Low**: Edge cases (careful review required)
+- Report formats:
+  - Text: Human-readable summary
+  - Markdown: Documentation-friendly with tables
+  - JSON: Machine-readable for automation
 
 ---
 
