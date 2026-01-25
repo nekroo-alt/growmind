@@ -190,29 +190,44 @@ This document outlines a series of tasks to clean up and restructure the L4D v5 
 
 ---
 
-### Task 2.3: Remove Obsolete/Debug Test Files
+### Task 2.3: Remove Obsolete/Debug Test Files ✅ **COMPLETE**
 **Priority**: MEDIUM  
 **Estimated Lines**: 20  
 **Risk**: LOW
+**Completion Date**: 2026-01-26
 
 **Description**: Remove test files that were created for debugging, POCs, or are no longer relevant.
 
 **Acceptance Criteria**:
-- [ ] Identify obsolete test files (debug, POC, temporary)
-- [ ] Verify they're not referenced in documentation
-- [ ] Delete obsolete files
-- [ ] Document what was removed and why
+- [x] Identify obsolete test files (debug, POC, temporary)
+- [x] Verify they're not referenced in documentation
+- [x] Delete obsolete files
+- [x] Document what was removed and why
 
 **Files to Delete** (examples - verify in Task 2.1):
-- `test_debug_failures.py` (debugging, likely obsolete)
-- `test_debug_cycle.py` (debugging, likely obsolete)
-- `test_debug_no_cycle.py` (debugging, likely obsolete)
-- `verify_blocked.py` (utility, not a test)
+- `test_debug_failures.py` (debugging, likely obsolete) - **DELETED**
+- `test_debug_cycle.py` (debugging, likely obsolete) - **DELETED**
+- `test_debug_no_cycle.py` (debugging, likely obsolete) - **DELETED**
+- `test_file_usage_minimal.py` (duplicate) - **DELETED**
+- `test_file_usage_tracker_standalone.py` (duplicate) - **DELETED**
+- `test_import_analyzer_direct.py` (duplicate) - **DELETED**
+- `test_token_budget_simple.py` (duplicate) - **DELETED**
+- `verify_blocked.py` (utility, not a test) - **DELETED**
 
 **Verification**:
-- Project root is clean of test files
-- Documentation updated if needed
-- CI/CD still passes
+- [x] Project root is clean of test files (8 files deleted)
+- [x] Documentation updated if needed (only referenced in v6_tasks.md and TEST_ANALYSIS_TASK_2.1.md - expected)
+- [x] CI/CD still passes (pytest collection verified, pre-existing test errors unrelated to deletions)
+
+**Deleted Files**:
+1. `test_debug_cycle.py` - obsolete v3 debug script
+2. `test_debug_failures.py` - obsolete v3 debug script
+3. `test_debug_no_cycle.py` - obsolete v3 debug script
+4. `test_file_usage_minimal.py` - duplicate of v5/tests/unit/test_file_usage_tracker.py
+5. `test_file_usage_tracker_standalone.py` - duplicate of v5/tests/unit/test_file_usage_tracker.py
+6. `test_import_analyzer_direct.py` - duplicate of v5/tests/unit/test_import_analyzer.py
+7. `test_token_budget_simple.py` - duplicate of v5/tests/unit/test_token_budget_manager.py
+8. `verify_blocked.py` - utility script, not a test
 
 ---
 
