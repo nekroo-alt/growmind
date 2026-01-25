@@ -5,7 +5,7 @@ import argparse
 from datetime import datetime, timedelta
 from typing import Dict, Any
 
-# Get __name__ absolute path of the L4 root (parent of v1)
+# Get __name__ absolute path of L4 root (parent of v1)
 # __file__ is /Users/ken/Desktop/growmind/v1/l4_cli.py
 # L4_ROOT is /Users/ken/Desktop/growmind
 L4_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -18,6 +18,23 @@ from v5.core.start import Orchestrator
 from v5.data.db_manager import TASK_DB_PATH, ACTIVITY_DB_PATH, init_db, get_cost_summary
 from v5.retro.retro_agent import RetroAgent
 from v5.core.log_analyzer import LogAnalyzer, LogQuery
+
+# Import commands from CLI modules (V6 refactor)
+from v5.cli.v3_commands import (
+    cmd_start, cmd_status, cmd_retro, cmd_doctor, cmd_init, cmd_reset,
+    cmd_logs, cmd_logs_summary, cmd_logs_errors, cmd_logs_timeline,
+    cmd_health, cmd_resume, cmd_checkpoints_list, cmd_checkpoints_restore,
+    cmd_checkpoints_delete, cmd_sessions_list, cmd_telemetry_list,
+    cmd_telemetry_show, cmd_telemetry_export, cmd_telemetry_stats
+)
+from v5.cli.v4_commands import (
+    cmd_decisions, cmd_profile_list, cmd_profile_show, cmd_profile_use,
+    cmd_profile_diff, cmd_explain, cmd_progress
+)
+from v5.cli.v5_commands import (
+    cmd_workflow_simple, cmd_workflow_complex, cmd_workflow_debug, cmd_workflow_refactor,
+    cmd_housekeep, cmd_cleanup, cmd_cost, cmd_deps, cmd_quality
+)
 
 # ============================================================================
 # V3 Commands (Basic functionality)
