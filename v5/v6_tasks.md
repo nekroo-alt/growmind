@@ -112,21 +112,22 @@ This document outlines a series of tasks to clean up and restructure the L4D v5 
 
 ## Phase 2: Test Organization and Cleanup (HIGH PRIORITY)
 
-### Task 2.1: Identify and Categorize Root-Level Test Files
+### Task 2.1: Identify and Categorize Root-Level Test Files ✅ **COMPLETE**
 **Priority**: HIGH  
 **Estimated Lines**: 30  
 **Risk**: LOW
+**Completion Date**: 2026-01-26
 
 **Description**: Analyze all test files at the root level and determine their purpose and status.
 
 **Acceptance Criteria**:
-- [ ] List all `test_*.py` files in project root
-- [ ] For each file, determine:
+- [x] List all `test_*.py` files in project root
+- [x] For each file, determine:
   - Purpose (unit test, integration test, debugging, POC)
   - Status (active, obsolete, broken)
   - Whether it's duplicated in `v5/tests/`
-- [ ] Categorize tests into: Keep, Move, Delete, Fix
-- [ ] Create migration plan for tests that should be moved
+- [x] Categorize tests into: Keep, Move, Delete, Fix
+- [x] Create migration plan for tests that should be moved
 
 **Files to Analyze**:
 - `test_debug_failures.py`
@@ -139,8 +140,27 @@ This document outlines a series of tasks to clean up and restructure the L4D v5 
 - `verify_blocked.py`
 
 **Verification**:
-- Documented list of all root-level tests with categorization
-- Clear migration plan for each test file
+- [x] Documented list of all root-level tests with categorization
+- [x] Clear migration plan for each test file
+
+**Analysis Document**: `v5/TEST_ANALYSIS_TASK_2.1.md`
+
+**Key Findings**:
+- All 8 root-level test files should be **DELETED**
+- 3 files are obsolete (v3 references, debug scripts)
+- 4 files are duplicates (v5/tests/ has better versions)
+- 1 file is utility script (not a test)
+- Test coverage impact: ZERO (all functionality covered in v5/tests/)
+
+**Files to Delete** (in Task 2.3):
+1. `test_debug_cycle.py` - obsolete v3 debug script
+2. `test_debug_failures.py` - obsolete v3 debug script
+3. `test_debug_no_cycle.py` - obsolete v3 debug script
+4. `test_file_usage_minimal.py` - duplicate of v5/tests/unit/test_file_usage_tracker.py
+5. `test_file_usage_tracker_standalone.py` - duplicate of v5/tests/unit/test_file_usage_tracker.py
+6. `test_import_analyzer_direct.py` - duplicate of v5/tests/unit/test_import_analyzer.py
+7. `test_token_budget_simple.py` - duplicate of v5/tests/unit/test_token_budget_manager.py
+8. `verify_blocked.py` - utility script, not a test
 
 ---
 
