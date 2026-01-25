@@ -10,7 +10,7 @@ setup(
     ],
     entry_points={
         "console_scripts": [
-            "l4d=v1.l4_cli:main",
+            "l4-dev=v5.l4_cli:main",
         ],
     },
 )
