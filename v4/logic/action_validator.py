@@ -865,3 +865,25 @@ class ActionValidator:
             self.thresholds['max_side_effects'] = max_side_effects
         
         self.logger.info(f"Updated thresholds: {self.thresholds}")
+
+
+# Singleton instance for factory pattern
+_action_validator_instance = None
+
+
+def get_action_validator(telemetry_manager=None) -> ActionValidator:
+    """
+    Get singleton instance of ActionValidator.
+    
+    Args:
+        telemetry_manager: Optional telemetry manager
+    
+    Returns:
+        ActionValidator instance
+    """
+    global _action_validator_instance
+    
+    if _action_validator_instance is None:
+        _action_validator_instance = ActionValidator(telemetry_manager)
+    
+    return _action_validator_instance
