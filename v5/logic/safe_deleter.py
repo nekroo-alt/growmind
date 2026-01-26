@@ -42,8 +42,8 @@ from typing import List, Dict, Optional, Tuple
 from dataclasses import dataclass
 from pathlib import Path
 
-from logic.git_guard import GitGuard
-from core.logging_config import get_logger
+from v5.logic import GitGuard
+from v5.core import get_logger
 
 
 @dataclass

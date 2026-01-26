@@ -13,8 +13,8 @@ from datetime import datetime
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from data.checkpoint_manager import get_checkpoint_manager
-from data.cache_manager import get_cache_manager
+from v5.data import get_checkpoint_manager
+from v5.data import get_cache_manager
 
 
 def test_cache_manager_state_capture():

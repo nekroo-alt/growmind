@@ -23,8 +23,8 @@ from typing import Optional, Dict, List, Any, Tuple, Set
 from dataclasses import dataclass
 from enum import Enum
 
-from core.logging_config import get_logger
-from llm_base.provider import LLMProvider
+from v5.core import get_logger
+from v5.llm_base import LLMProvider
 
 logger = get_logger(__name__)
 

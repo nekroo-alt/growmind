@@ -16,9 +16,9 @@ from datetime import datetime, timedelta
 import json
 
 # Import V4 modules
-from data.decision_history import DecisionHistoryManager
-from logic.pattern_recognizer import PatternRecognizer
-from logic.adaptive_heuristics import AdaptiveHeuristics
+from v5.data import DecisionHistoryManager
+from v5.logic import PatternRecognizer
+from v5.logic import AdaptiveHeuristics
 
 
 class SelfReflection:

@@ -8,7 +8,7 @@ import os
 # Add v2 to path
 sys.path.insert(0, os.path.dirname(__file__))
 
-from core.ui import StatusDashboard, create_status_dashboard, display_status
+from v5.core import StatusDashboard, create_status_dashboard, display_status
 from datetime import datetime
 
 

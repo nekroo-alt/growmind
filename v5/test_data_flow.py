@@ -7,7 +7,7 @@ import os
 
 sys.path.insert(0, os.path.dirname(__file__))
 
-from data.semantic_mapper import SemanticMapper
+from v5.data import SemanticMapper
 
 
 # Test code with various data flow patterns

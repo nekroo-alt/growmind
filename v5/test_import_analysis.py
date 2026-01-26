@@ -2,7 +2,7 @@
 Test script for import dependency analyzer (Task 1.3)
 """
 
-from data.semantic_mapper import SemanticMapper
+from v5.data import SemanticMapper
 
 
 def test_basic_imports():

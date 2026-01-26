@@ -13,8 +13,8 @@ from enum import Enum
 from typing import Optional, Dict, Any, List, Callable
 from dataclasses import dataclass, field
 
-from data.checkpoint_manager import CheckpointManager
-from data.telemetry_manager import TelemetryManager
+from v5.data import CheckpointManager
+from v5.data import TelemetryManager
 
 
 logger = logging.getLogger(__name__)

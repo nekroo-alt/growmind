@@ -1,6 +1,6 @@
 import os
 import sqlite3
-from data.db_manager import log_activity, init_db, ACTIVITY_DB_PATH
+from v5.data import log_activity, init_db, ACTIVITY_DB_PATH
 
 
 def test_log_activity_with_telemetry():

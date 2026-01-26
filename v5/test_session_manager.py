@@ -9,7 +9,7 @@ import json
 import pytest
 from datetime import datetime
 from pathlib import Path
-from core.session_manager import (
+from v5.core import (
     Session,
     SessionStatus,
     SessionManager,

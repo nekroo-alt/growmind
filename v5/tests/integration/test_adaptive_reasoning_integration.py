@@ -11,11 +11,11 @@ import sys
 # Add v3 to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
 
-from core.start import Orchestrator
-from logic.dispatcher import Dispatcher
-from logic.planner import Planner
-from logic.implementor import Implementor
-from logic.verifier import Verifier
+from v5.core import Orchestrator
+from v5.logic import Dispatcher
+from v5.logic import Planner
+from v5.logic import Implementor
+from v5.logic import Verifier
 
 
 class TestAdaptiveReasoningIntegration:

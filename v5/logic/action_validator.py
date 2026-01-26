@@ -13,7 +13,7 @@ import logging
 from datetime import datetime
 
 # Import from decision_maker
-from logic.decision_maker import Decision
+from v5.logic import Decision
 
 
 logger = logging.getLogger(__name__)

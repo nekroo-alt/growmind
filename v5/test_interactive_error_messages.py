@@ -12,13 +12,13 @@ from unittest.mock import patch, MagicMock
 # Add v2 to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from core.ui import (
+from v5.core import (
     ErrorDisplay,
     create_error_display,
     display_error,
     display_recovery_result,
 )
-from core.error_handling import (
+from v5.core import (
     L4DError,
     LLMRateLimitError,
     LLMTimeoutError,

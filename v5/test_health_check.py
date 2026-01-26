@@ -22,7 +22,7 @@ import sqlite3
 # Add parent directory to path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from core.health_check import (
+from v5.core import (
     HealthCheckManager,
     HealthStatus,
     HealthCheckResult,

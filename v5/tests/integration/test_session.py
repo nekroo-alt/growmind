@@ -16,7 +16,7 @@ import pytest
 import time
 import threading
 
-from core.session_manager import (
+from v5.core import (
     SessionManager,
     Session,
     SessionStatus,

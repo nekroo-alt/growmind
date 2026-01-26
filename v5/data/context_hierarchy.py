@@ -27,7 +27,7 @@ from pathlib import Path
 import threading
 from collections import OrderedDict
 
-from core.logging_config import get_logger
+from v5.core import get_logger
 
 logger = get_logger(__name__)
 

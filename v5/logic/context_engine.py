@@ -4,10 +4,10 @@ import subprocess
 from typing import List, Dict, Optional, Tuple, Set
 from enum import Enum
 from dataclasses import dataclass
-from data.semantic_mapper import SemanticMapper
-from data.cache_manager import get_cache_manager
-from logic.task_impact_analyzer import TaskImpactAnalyzer
-from logic.dependency_traverser import DependencyTraverser
+from v5.data.semantic_mapper import SemanticMapper
+from v5.data.cache_manager import get_cache_manager
+from v5.logic.task_impact_analyzer import TaskImpactAnalyzer
+from v5.logic.dependency_traverser import DependencyTraverser
 
 
 class ContextLevel(Enum):

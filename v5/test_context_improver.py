@@ -15,14 +15,14 @@ import os
 import shutil
 from datetime import datetime, timedelta
 
-from logic.context_improver import (
+from v5.logic import (
     ContextImprover,
     ImprovementType,
     ImprovementSuggestion,
     ImprovementPlan,
     ImprovementResult
 )
-from logic.context_quality_tracker import (
+from v5.logic import (
     ContextQualityTracker,
     ContextQualityMetrics,
     QualityMetric

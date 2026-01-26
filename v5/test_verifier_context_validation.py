@@ -5,7 +5,7 @@ Tests for Verifier context validation methods (Task 5.4)
 import os
 import tempfile
 import unittest
-from logic.verifier import Verifier
+from v5.logic import Verifier
 
 
 class TestVerifierContextValidation(unittest.TestCase):

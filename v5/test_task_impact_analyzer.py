@@ -11,7 +11,7 @@ import json
 # Add parent directory to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from logic.task_impact_analyzer import TaskImpactAnalyzer
+from v5.logic import TaskImpactAnalyzer
 
 
 def test_basic_entity_extraction():

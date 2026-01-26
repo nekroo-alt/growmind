@@ -10,7 +10,7 @@ import pytest
 from unittest.mock import Mock, patch, MagicMock, call
 from pathlib import Path
 
-from core.graceful_shutdown import (
+from v5.core import (
     GracefulShutdown,
     ShutdownState,
     init_graceful_shutdown,

@@ -9,7 +9,7 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import logging
-from core.logging_config import (
+from v5.core import (
     get_logger,
     LogMessageTemplates,
     format_log_message,

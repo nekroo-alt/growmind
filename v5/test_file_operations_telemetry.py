@@ -9,7 +9,7 @@ import os
 import tempfile
 import sqlite3
 
-from data.telemetry_manager import TelemetryManager
+from v5.data import TelemetryManager
 
 
 def test_file_operations_table_created():

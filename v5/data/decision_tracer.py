@@ -16,7 +16,7 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from data.telemetry_manager import TelemetryManager
+from v5.data.telemetry_manager import TelemetryManager
 
 
 class DecisionTracer:

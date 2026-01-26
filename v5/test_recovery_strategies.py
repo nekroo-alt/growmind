@@ -17,7 +17,7 @@ import os
 from datetime import datetime
 from unittest.mock import Mock, MagicMock, patch
 
-from core.error_handling import (
+from v5.core import (
     L4DError,
     ErrorCode,
     RecoveryManager,

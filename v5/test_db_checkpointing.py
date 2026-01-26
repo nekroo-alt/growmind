@@ -7,8 +7,8 @@ import sqlite3
 import shutil
 from pathlib import Path
 
-from data.checkpoint_manager import CheckpointManager
-from data.db_manager import TASK_DB_PATH, ACTIVITY_DB_PATH, SNAPSHOTS_DB_PATH
+from v5.data import CheckpointManager
+from v5.data import TASK_DB_PATH, ACTIVITY_DB_PATH, SNAPSHOTS_DB_PATH
 
 
 def setup_test_databases():

@@ -14,7 +14,7 @@ import os
 import tempfile
 import shutil
 from pathlib import Path
-from logic.context_engine import ContextEngine, ContextLevel
+from v5.logic import ContextEngine, ContextLevel
 
 
 class TestProgressiveContextLoading(unittest.TestCase):

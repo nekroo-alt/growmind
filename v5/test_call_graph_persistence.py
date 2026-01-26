@@ -17,7 +17,7 @@ import sqlite3
 import tempfile
 import json
 from datetime import datetime
-from data.call_graph_persistence import CallGraphPersistence
+from v5.data import CallGraphPersistence
 
 
 def test_database_initialization():

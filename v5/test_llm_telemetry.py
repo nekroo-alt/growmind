@@ -18,8 +18,8 @@ from unittest.mock import patch, MagicMock
 # Add v2 to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from llm_base.provider import LLMProvider
-from data.telemetry_manager import get_telemetry_manager
+from v5.llm_base import LLMProvider
+from v5.data import get_telemetry_manager
 
 
 def test_llm_telemetry_integration():

@@ -19,25 +19,25 @@ import json
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
-from data.context_hierarchy import ContextHierarchyManager, ContextLevel
-from data.decision_history import DecisionHistory
-from data.decision_tracer import DecisionTracer
-from logic.context_expander import ContextExpander
-from logic.reasoning_engine import ReasoningEngine, ReasoningStrategy
-from logic.context_analyzer import ContextAnalyzer, SituationType
-from logic.decision_maker import DecisionMaker, DecisionStrategy
-from logic.action_validator import ActionValidator
-from logic.strategy_selector import StrategySelector
-from logic.strategy_evaluator import StrategyEvaluator
-from logic.progress_tracker import ProgressTracker, ProgressThreshold
-from logic.trap_detector import TrapDetector, TrapType, TrapSeverity
-from logic.trap_recovery import TrapRecovery
-from logic.trap_prevention import TrapPrevention
-from logic.pattern_recognizer import PatternRecognizer
-from logic.self_reflection import SelfReflection
-from logic.lesson_learner import LessonLearner
-from logic.adaptive_heuristics import AdaptiveHeuristics
-from logic.explanation_generator import ExplanationGenerator, ExplanationFormat, AudienceType
+from v5.data import ContextHierarchyManager, ContextLevel
+from v5.data import DecisionHistory
+from v5.data import DecisionTracer
+from v5.logic import ContextExpander
+from v5.logic import ReasoningEngine, ReasoningStrategy
+from v5.logic import ContextAnalyzer, SituationType
+from v5.logic import DecisionMaker, DecisionStrategy
+from v5.logic import ActionValidator
+from v5.logic import StrategySelector
+from v5.logic import StrategyEvaluator
+from v5.logic import ProgressTracker, ProgressThreshold
+from v5.logic import TrapDetector, TrapType, TrapSeverity
+from v5.logic import TrapRecovery
+from v5.logic import TrapPrevention
+from v5.logic import PatternRecognizer
+from v5.logic import SelfReflection
+from v5.logic import LessonLearner
+from v5.logic import AdaptiveHeuristics
+from v5.logic import ExplanationGenerator, ExplanationFormat, AudienceType
 
 
 class TestAdaptiveReasoningIntegration(unittest.TestCase):

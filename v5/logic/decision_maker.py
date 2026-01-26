@@ -14,7 +14,7 @@ import logging
 from datetime import datetime
 
 # Import from context_analyzer
-from logic.context_analyzer import (
+from v5.logic import (
     ContextAnalyzer,
     SituationReport,
     SituationType,

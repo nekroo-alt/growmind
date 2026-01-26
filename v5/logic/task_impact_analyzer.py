@@ -1,8 +1,8 @@
 import os
 import json
 from typing import List, Dict, Tuple, Optional
-from data.semantic_mapper import SemanticMapper
-from llm_base.provider import LLMProvider
+from v5.data.semantic_mapper import SemanticMapper
+from v5.llm_base import LLMProvider
 
 
 class TaskImpactAnalyzer:

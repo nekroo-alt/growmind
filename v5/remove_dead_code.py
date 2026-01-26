@@ -24,9 +24,9 @@ from typing import List, Dict
 # Add v5 to path
 sys.path.insert(0, str(Path(__file__).parent))
 
-from logic.dead_code_detector import DeadCodeDetector, DeadFunctionInfo, DeadClassInfo, UnusedVariableInfo
-from logic.safe_deleter import SafeDeleter
-from core.logging_config import get_logger
+from v5.logic import DeadCodeDetector, DeadFunctionInfo, DeadClassInfo, UnusedVariableInfo
+from v5.logic import SafeDeleter
+from v5.core import get_logger
 
 
 class DeadCodeRemover:

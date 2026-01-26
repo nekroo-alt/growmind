@@ -15,8 +15,8 @@ sys.path.insert(
     0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 )
 
-from logic.context_engine import ContextEngine
-from data.cache_manager import get_cache_manager
+from v5.logic import ContextEngine
+from v5.data import get_cache_manager
 
 
 class TestContextCollectionWorkflow:

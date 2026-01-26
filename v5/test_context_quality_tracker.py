@@ -10,7 +10,7 @@ import json
 import tempfile
 import shutil
 
-from logic.context_quality_tracker import (
+from v5.logic import (
     ContextQualityTracker,
     ContextQualityMetrics,
     QualityMetric,

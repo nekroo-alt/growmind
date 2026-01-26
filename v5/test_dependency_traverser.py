@@ -10,8 +10,8 @@ import sys
 # Add parent directory to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from data.semantic_mapper import SemanticMapper
-from logic.dependency_traverser import DependencyTraverser, DependencyNode
+from v5.data import SemanticMapper
+from v5.logic import DependencyTraverser, DependencyNode
 
 
 def test_upstream_dependencies():

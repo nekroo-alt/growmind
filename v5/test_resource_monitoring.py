@@ -20,7 +20,7 @@ from pathlib import Path
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from data.telemetry_manager import TelemetryManager
+from v5.data import TelemetryManager
 
 
 def test_resource_monitoring():

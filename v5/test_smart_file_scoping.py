@@ -5,7 +5,7 @@ Tests the intelligent file selection based on task impact analysis.
 
 import os
 import sys
-from logic.context_engine import ContextEngine
+from v5.logic import ContextEngine
 
 
 def test_smart_file_scoping():

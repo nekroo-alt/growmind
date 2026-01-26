@@ -1,32 +1,32 @@
 import os
 import subprocess
 import glob
-from data.db_manager import (
+from v5.data import (
     log_activity,
     update_task_status,
     fcid_mapping,
     get_commit_count,
 )
-from logic.git_guard import GitGuard
-from logic.context_engine import ContextEngine
-from llm_base.provider import LLMProvider
-from logic.verifier import Verifier
-from core.telemetry import telemetry
-from data.telemetry_manager import get_telemetry_manager
-from core.logging_config import get_module_logger
-from data.checkpoint_manager import CheckpointManager
+from v5.logic import GitGuard
+from v5.logic import ContextEngine
+from v5.llm_base import LLMProvider
+from v5.logic import Verifier
+from v5.core import telemetry
+from v5.data import get_telemetry_manager
+from v5.core import get_module_logger
+from v5.data import CheckpointManager
 # V4: Adaptive reasoning components
-from data.context_hierarchy import get_context_hierarchy
-from data.decision_history import get_decision_history
-from logic.reasoning_engine import get_reasoning_engine
-from logic.trap_detector import get_trap_detector
-from logic.trap_recovery import get_trap_recovery
-from logic.progress_tracker import get_progress_tracker
+from v5.data import get_context_hierarchy
+from v5.data import get_decision_history
+from v5.logic import get_reasoning_engine
+from v5.logic import get_trap_detector
+from v5.logic import get_trap_recovery
+from v5.logic import get_progress_tracker
 # V4: Meta-cognition components
-from logic.pattern_recognizer import get_pattern_recognizer
-from logic.self_reflection import get_self_reflection
-from logic.lesson_learner import get_lesson_learner
-from logic.adaptive_heuristics import get_adaptive_heuristics
+from v5.logic import get_pattern_recognizer
+from v5.logic import get_self_reflection
+from v5.logic import get_lesson_learner
+from v5.logic import get_adaptive_heuristics
 
 logger = get_module_logger(__name__)
 

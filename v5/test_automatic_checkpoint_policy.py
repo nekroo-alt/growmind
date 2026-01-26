@@ -13,7 +13,7 @@ from pathlib import Path
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from data.checkpoint_manager import CheckpointManager, CheckpointPolicy
+from v5.data import CheckpointManager, CheckpointPolicy
 
 
 def test_checkpoint_policy_default():

@@ -7,7 +7,7 @@ Tests that the telemetry database schema is properly created and functional.
 import os
 import sqlite3
 import tempfile
-from data.telemetry_manager import TelemetryManager
+from v5.data import TelemetryManager
 
 
 def test_telemetry_schema_creation():

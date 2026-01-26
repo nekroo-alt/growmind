@@ -3,7 +3,7 @@ Test script for Task 1.4: Type Hint Extraction functionality
 """
 
 import json
-from data.semantic_mapper import SemanticMapper
+from v5.data import SemanticMapper
 
 # Test code with various type hints
 TEST_CODE = '''

@@ -7,7 +7,7 @@ Computes cyclomatic complexity and estimates task effort based on code structure
 
 import ast
 from typing import Dict, List, Optional, Any
-from data.semantic_mapper import SemanticMapper
+from v5.data import SemanticMapper
 
 
 class ComplexityEstimator:

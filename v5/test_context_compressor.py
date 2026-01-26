@@ -11,7 +11,7 @@ import os
 # Add v4 to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '.'))
 
-from logic.context_compressor import (
+from v5.logic import (
     ContextCompressor,
     CompressionLevel,
     CompressionResult

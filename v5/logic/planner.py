@@ -2,28 +2,28 @@ import os
 import glob
 import json
 from typing import Dict, List, Optional
-from data.db_manager import log_task, log_activity, fcid_mapping, task_exists
-from logic.context_engine import ContextEngine
-from logic.task_impact_analyzer import TaskImpactAnalyzer
-from logic.complexity_estimator import ComplexityEstimator
-from data.semantic_mapper import SemanticMapper
-from llm_base.provider import LLMProvider
-from data.telemetry_manager import get_telemetry_manager
-from core.telemetry import telemetry
-from core.logging_config import get_module_logger, log_error_with_context
+from v5.data.db_manager import log_task, log_activity, fcid_mapping, task_exists
+from v5.logic.context_engine import ContextEngine
+from v5.logic.task_impact_analyzer import TaskImpactAnalyzer
+from v5.logic.complexity_estimator import ComplexityEstimator
+from v5.data.semantic_mapper import SemanticMapper
+from v5.llm_base.provider import LLMProvider
+from v5.data.telemetry_manager import get_telemetry_manager
+from v5.core.telemetry import telemetry
+from v5.core.logging_config import get_module_logger, log_error_with_context
 # V4: Adaptive reasoning components
-from data.context_hierarchy import get_context_hierarchy
-from data.decision_history import get_decision_history_manager
-from logic.reasoning_engine import get_reasoning_engine
-from logic.context_expander import get_context_expander
-from logic.progress_tracker import get_progress_tracker
-from logic.trap_detector import get_trap_detector
-from logic.trap_recovery import get_trap_recovery
+from v5.data.context_hierarchy import get_context_hierarchy
+from v5.data.decision_history import get_decision_history_manager
+from v5.logic.reasoning_engine import get_reasoning_engine
+from v5.logic.context_expander import get_context_expander
+from v5.logic.progress_tracker import get_progress_tracker
+from v5.logic.trap_detector import get_trap_detector
+from v5.logic.trap_recovery import get_trap_recovery
 # V4: Meta-cognition components
-from logic.pattern_recognizer import get_pattern_recognizer
-from logic.self_reflection import get_self_reflection
-from logic.lesson_learner import get_lesson_learner
-from logic.adaptive_heuristics import get_adaptive_heuristics
+from v5.logic.pattern_recognizer import get_pattern_recognizer
+from v5.logic.self_reflection import get_self_reflection
+from v5.logic.lesson_learner import get_lesson_learner
+from v5.logic.adaptive_heuristics import get_adaptive_heuristics
 
 logger = get_module_logger(__name__)
 

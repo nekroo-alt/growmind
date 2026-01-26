@@ -20,14 +20,14 @@ from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass, asdict
 from enum import Enum
 
-from logic.context_quality_tracker import (
+from v5.logic import (
     ContextQualityTracker,
     ContextQualityMetrics,
     QualityMetric,
     QualityThreshold
 )
-from logic.context_scorer import ContextItem, RelevanceCategory
-from logic.context_compressor import ContextCompressor, CompressionLevel
+from v5.logic import ContextItem, RelevanceCategory
+from v5.logic import ContextCompressor, CompressionLevel
 
 
 class ImprovementType(Enum):

@@ -8,7 +8,7 @@ import shutil
 from pathlib import Path
 from unittest.mock import Mock, MagicMock, patch
 
-from core.transactions import (
+from v5.core import (
     Transaction,
     TransactionManager,
     TransactionState,

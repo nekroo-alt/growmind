@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 import logging
 
 # Import LLM provider
-from llm_base.provider import LLMProvider
+from v5.llm_base import LLMProvider
 
 
 logger = logging.getLogger(__name__)

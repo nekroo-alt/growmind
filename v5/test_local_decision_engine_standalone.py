@@ -7,7 +7,7 @@ import os
 # Add v4 to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from logic.local_decision_engine import LocalDecisionEngine, DecisionOutcome
+from v5.logic import LocalDecisionEngine, DecisionOutcome
 
 def test_basic_functionality():
     """Test basic functionality of LocalDecisionEngine"""

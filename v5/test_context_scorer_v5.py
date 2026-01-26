@@ -16,7 +16,7 @@ from datetime import datetime, timedelta
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from logic.context_scorer import (
+from v5.logic import (
     ContextScorer,
     ContextItem,
     ScoringWeights,

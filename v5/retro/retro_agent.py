@@ -3,9 +3,9 @@ import time
 import subprocess
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
-from data.db_manager import log_activity, fcid_mapping
-from llm_base.provider import LLMProvider
-from core.logging_config import get_module_logger
+from v5.data import log_activity, fcid_mapping
+from v5.llm_base import LLMProvider
+from v5.core import get_module_logger
 import json
 
 logger = get_module_logger(__name__)

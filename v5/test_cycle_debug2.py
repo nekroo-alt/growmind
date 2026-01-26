@@ -4,7 +4,7 @@
 import sys
 sys.path.insert(0, '/Users/ken/Desktop/inno/growmind/v3')
 
-from logic.trap_prevention import TrapPrevention
+from v5.logic import TrapPrevention
 
 prevention = TrapPrevention()
 

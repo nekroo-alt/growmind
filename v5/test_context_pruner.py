@@ -5,8 +5,8 @@ from pathlib import Path
 # Add parent directory to path to import v1 modules
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from data.semantic_mapper import SemanticMapper
-from logic.context_pruner import ContextPruner, PrunedContext
+from v5.data import SemanticMapper
+from v5.logic import ContextPruner, PrunedContext
 
 
 class TestContextPruner(unittest.TestCase):

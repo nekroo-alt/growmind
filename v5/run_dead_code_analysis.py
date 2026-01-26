@@ -3,7 +3,7 @@ Dead Code Analysis Script for V6 Task 3.2
 Runs dead code detector on core modules and categorizes findings.
 """
 
-from logic.dead_code_detector import DeadCodeDetector
+from v5.logic import DeadCodeDetector
 import os
 
 def analyze_core_modules():

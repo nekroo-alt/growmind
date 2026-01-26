@@ -17,9 +17,9 @@ from typing import Optional, Dict, List, Any, Tuple
 from datetime import datetime
 from dataclasses import dataclass
 
-from data.context_hierarchy import ContextHierarchyManager, ContextLevel
-from core.logging_config import get_logger
-from llm_base.provider import LLMProvider
+from v5.data import ContextHierarchyManager, ContextLevel
+from v5.core import get_logger
+from v5.llm_base import LLMProvider
 
 logger = get_logger(__name__)
 

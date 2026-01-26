@@ -14,7 +14,7 @@ import os
 import tempfile
 import shutil
 from unittest.mock import Mock, patch, MagicMock
-from logic.context_engine import ContextEngine, ContextLevel, ContextLevelInfo
+from v5.logic import ContextEngine, ContextLevel, ContextLevelInfo
 
 
 class TestContextLevelEnum(unittest.TestCase):

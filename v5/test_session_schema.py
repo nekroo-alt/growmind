@@ -5,7 +5,7 @@ Tests Task 5.1: Session State Schema
 
 import os
 import sqlite3
-from data.db_manager import (
+from v5.data import (
     init_db,
     create_session,
     end_session,

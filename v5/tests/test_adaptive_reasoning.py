@@ -20,30 +20,30 @@ import json
 from datetime import datetime, timedelta
 
 # Import V4 components
-from data.context_hierarchy import ContextHierarchyManager
-from logic.context_expander import ContextExpander
-from logic.context_scorer import ContextScorer
-from logic.context_summarizer import ContextSummarizer
-from logic.reasoning_engine import ReasoningEngine
-from logic.context_analyzer import ContextAnalyzer
-from logic.decision_maker import DecisionMaker
-from logic.action_validator import ActionValidator
-from logic.strategy_selector import StrategySelector
-from logic.strategy_evaluator import StrategyEvaluator
-from logic.strategy_switcher import StrategySwitcher
-from logic.strategy_hybridizer import StrategyHybridizer
-from logic.progress_tracker import ProgressTracker
-from logic.progress_predictor import ProgressPredictor
-from logic.trap_detector import TrapDetector
-from logic.trap_recovery import TrapRecovery
-from logic.trap_prevention import TrapPrevention
-from logic.pattern_recognizer import PatternRecognizer
-from logic.self_reflection import SelfReflection
-from logic.lesson_learner import LessonLearner
-from logic.adaptive_heuristics import AdaptiveHeuristics
-from logic.explanation_generator import ExplanationGenerator
-from data.decision_history import DecisionHistory
-from data.decision_tracer import DecisionTracer
+from v5.data import ContextHierarchyManager
+from v5.logic import ContextExpander
+from v5.logic import ContextScorer
+from v5.logic import ContextSummarizer
+from v5.logic import ReasoningEngine
+from v5.logic import ContextAnalyzer
+from v5.logic import DecisionMaker
+from v5.logic import ActionValidator
+from v5.logic import StrategySelector
+from v5.logic import StrategyEvaluator
+from v5.logic import StrategySwitcher
+from v5.logic import StrategyHybridizer
+from v5.logic import ProgressTracker
+from v5.logic import ProgressPredictor
+from v5.logic import TrapDetector
+from v5.logic import TrapRecovery
+from v5.logic import TrapPrevention
+from v5.logic import PatternRecognizer
+from v5.logic import SelfReflection
+from v5.logic import LessonLearner
+from v5.logic import AdaptiveHeuristics
+from v5.logic import ExplanationGenerator
+from v5.data import DecisionHistory
+from v5.data import DecisionTracer
 
 
 class TestContextHierarchy:

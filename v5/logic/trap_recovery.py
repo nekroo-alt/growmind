@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 import logging
 from datetime import datetime
 
-from logic.trap_detector import (
+from v5.logic import (
     TrapType,
     TrapSeverity,
     TrapDetection,

@@ -13,12 +13,12 @@ from pathlib import Path
 from typing import List, Dict
 
 # Import the modules to benchmark
-from data.semantic_mapper import SemanticMapper
-from data.cache_manager import CacheManager
-from logic.task_impact_analyzer import TaskImpactAnalyzer
-from logic.dependency_traverser import DependencyTraverser
-from logic.context_pruner import ContextPruner
-from logic.context_engine import ContextEngine
+from v5.data import SemanticMapper
+from v5.data import CacheManager
+from v5.logic import TaskImpactAnalyzer
+from v5.logic import DependencyTraverser
+from v5.logic import ContextPruner
+from v5.logic import ContextEngine
 
 
 class FixtureCodeGenerator:

@@ -8,8 +8,8 @@ import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from logic.context_pruner import ContextPruner, PrunedContext
-from data.semantic_mapper import SemanticMapper
+from v5.logic import ContextPruner, PrunedContext
+from v5.data import SemanticMapper
 import tempfile
 import shutil
 
