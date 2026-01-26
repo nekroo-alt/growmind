@@ -66,9 +66,9 @@ This document outlines a series of tasks to clean up and restructure the L4D v5 
 - `setup.py` (updated entry point to `v5.l4_cli:main`)
 
 **Verification**:
-- Run `l4-dev --help` and verify all commands are listed
-- Test each major command group: V3 (status, logs, telemetry), V4 (decisions, explain), V5 (workflow, housekeep, cost, deps, quality)
-- Verify no import errors
+- [x] Run `l4-dev --help` and verify all commands are listed
+- [x] Test each major command group: V3 (status, logs, telemetry), V4 (decisions, explain), V5 (workflow, housekeep, cost, deps, quality)
+- [x] Verify no import errors
 
 ---
 
