@@ -88,7 +88,6 @@ class DeadCodeDetector:
         self.project_root = project_root
         self.low_usage_threshold = low_usage_threshold
         self.call_graph_persistence = CallGraphPersistence(call_graph_db)
-        self.semantic_mapper = SemanticMapper(project_root)
 
     def detect_dead_functions(self, include_test_files: bool = False) -> List[DeadFunctionInfo]:
         """

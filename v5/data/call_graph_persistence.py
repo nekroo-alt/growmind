@@ -66,7 +66,7 @@ class CallGraphPersistence:
                 CREATE TABLE IF NOT EXISTS function_usage (
                     file_path TEXT NOT NULL,
                     function_name TEXT NOT NULL,
-                    function_type TEXT NOT NULL,  # 'function' or 'method'
+                    function_type TEXT NOT NULL,  -- 'function' or 'method'
                     call_count INTEGER DEFAULT 0,
                     last_used DATETIME,
                     first_seen DATETIME,
@@ -80,8 +80,8 @@ class CallGraphPersistence:
                 CREATE TABLE IF NOT EXISTS import_dependencies (
                     file_path TEXT NOT NULL,
                     module_name TEXT NOT NULL,
-                    import_type TEXT NOT NULL,  # 'import' or 'from'
-                    imported_names TEXT,  # JSON array for from imports
+                    import_type TEXT NOT NULL,  -- 'import' or 'from'
+                    imported_names TEXT,  -- JSON array for from imports
                     line_number INTEGER,
                     usage_count INTEGER DEFAULT 0,
                     last_used DATETIME,

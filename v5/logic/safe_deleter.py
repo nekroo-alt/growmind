@@ -138,7 +138,7 @@ class SafeDeleter:
         self.test_command = test_command
         self.git_enabled = git_enabled
         self.logger = logger or get_logger(__name__)
-        self.git_guard = GitGuard(str(self.project_root))
+        self.git_guard = GitGuard()
         
         # Create backup directory
         self.backup_dir.mkdir(parents=True, exist_ok=True)
