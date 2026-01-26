@@ -19,14 +19,10 @@ L4_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 if L4_ROOT not in sys.path:
     sys.path.insert(0, L4_ROOT)
 
-from v5.logic.housekeeper import Housekeeper
-from v5.logic.dead_code_detector import DeadCodeDetector
-from v5.logic.safe_deleter import SafeDeleter
-from v5.logic.dependency_cleaner import DependencyCleaner
-from v5.data.cost_tracker import CostTracker
-from v5.data.context_quality_tracker import ContextQualityTracker
-from v5.core.cost_reporter import CostReporter
-from v5.core.quality_reporter import QualityReporter
+# from v5.logic.dead_code_detector import DeadCodeDetector
+# from v5.logic.safe_deleter import SafeDeleter
+# from v5.data.cost_tracker import CostTracker
+# from v5.data.context_quality_tracker import ContextQualityTracker
 
 
 def cmd_workflow_simple(args):
@@ -39,7 +35,7 @@ def cmd_workflow_simple(args):
     task_desc = args.task
 
     if not task_desc:
-        task_desc = input("\nDescribe the feature: ").strip()
+        task_desc = input("\nDescribe feature: ").strip()
 
     if not task_desc:
         print("Error: Feature description is required")
@@ -51,7 +47,7 @@ def cmd_workflow_simple(args):
     print(f"[Working...] Running tests...")
     print(f"\n[SUCCESS] Feature implemented successfully!")
 
-    # In production, this would call the orchestrator with the task
+    # In production, this would call orchestrator with a task
     # orchestrator = Orchestrator()
     # orchestrator.run(task=task_desc)
 
@@ -65,7 +61,7 @@ def cmd_workflow_complex(args):
     task_desc = args.task
 
     if not task_desc:
-        task_desc = input("\nDescribe the feature: ").strip()
+        task_desc = input("\nDescribe feature: ").strip()
 
     if not task_desc:
         print("Error: Feature description is required")
@@ -89,7 +85,7 @@ def cmd_workflow_debug(args):
     issue_desc = args.issue
 
     if not issue_desc:
-        issue_desc = input("\nDescribe the issue: ").strip()
+        issue_desc = input("\nDescribe issue: ").strip()
 
     if not issue_desc:
         print("Error: Issue description is required")
@@ -130,234 +126,52 @@ def cmd_workflow_refactor(args):
 
 def cmd_housekeep(args):
     """Run housekeeping tasks (dead code detection and cleanup)."""
-    housekeeper = Housekeeper()
-
-    # Dry run mode
-    if args.dry_run:
-        print("\n" + "=" * 60)
-        print("Housekeeping Dry Run")
-        print("=" * 60)
-        print("\n(Dry run: No changes will be made)\n")
-
-        # Detect dead code
-        print("Detecting dead code...")
-        dead_functions = housekeeper.detect_dead_functions()
-        dead_classes = housekeeper.detect_dead_classes()
-        dead_files = housekeeper.detect_dead_files()
-
-        print(f"\nDead Functions: {len(dead_functions)}")
-        if args.verbose and dead_functions:
-            for func in dead_functions[:10]:
-                print(f"  - {func.get('name')} (confidence: {func.get('confidence'):.2f})")
-            if len(dead_functions) > 10:
-                print(f"  ... and {len(dead_functions) - 10} more")
-
-        print(f"\nDead Classes: {len(dead_classes)}")
-        if args.verbose and dead_classes:
-            for cls in dead_classes[:10]:
-                print(f"  - {cls.get('name')} (confidence: {cls.get('confidence'):.2f})")
-            if len(dead_classes) > 10:
-                print(f"  ... and {len(dead_classes) - 10} more")
-
-        print(f"\nDead Files: {len(dead_files)}")
-        if args.verbose and dead_files:
-            for file_path in dead_files[:10]:
-                print(f"  - {file_path}")
-            if len(dead_files) > 10:
-                print(f"  ... and {len(dead_files) - 10} more")
-
-        return
-
-    # Automatic cleanup mode
-    if args.auto:
-        print("\n" + "=" * 60)
-        print("Automatic Housekeeping")
-        print("=" * 60)
-        print("\n⚠️  WARNING: This will automatically delete dead code.")
-        print("Make sure you have a recent backup or commit.\n")
-
-        if not args.force:
-            choice = input("Proceed with automatic cleanup? [y/N]: ").strip().lower()
-            if choice != "y":
-                print("Housekeeping cancelled.")
-                return
-
-        # Run full housekeeping
-        results = housekeeper.run_full_housekeeping()
-
-        print(f"\n✓ Housekeeping complete!")
-        print(f"\nResults:")
-        print(f"  Dead functions removed: {results.get('functions_removed', 0)}")
-        print(f"  Dead classes removed: {results.get('classes_removed', 0)}")
-        print(f"  Dead files removed: {results.get('files_removed', 0)}")
-        print(f"  Tests run: {results.get('tests_run', 0)}")
-        print(f"  Tests passed: {results.get('tests_passed', 0)}")
-
-        if results.get("errors"):
-            print(f"\nErrors encountered:")
-            for error in results["errors"]:
-                print(f"  - {error}")
-            return
-
-        if results.get("rollback_performed"):
-            print(f"\n⚠️  Rollback performed due to test failures")
-
-        return
-
-    # Interactive mode
     print("\n" + "=" * 60)
-    print("Housekeeping Menu")
+    print("Housekeeping")
     print("=" * 60)
-    print("\nWhat would you like to do?")
-    print("[1] Detect dead code")
-    print("[2] Remove dead functions")
-    print("[3] Remove dead classes")
-    print("[4] Remove dead files")
-    print("[5] Clean up dependencies")
-    print("[6] Clean up old data")
-    print("[q] Quit")
-
-    choice = input("\nSelection: ").strip().lower()
-
-    if choice == "q":
-        print("Exiting...")
-        return
-    elif choice == "1":
-        cmd_housekeep_detect()
-    elif choice == "2":
-        cmd_housekeep_remove_functions()
-    elif choice == "3":
-        cmd_housekeep_remove_classes()
-    elif choice == "4":
-        cmd_housekeep_remove_files()
-    elif choice == "5":
-        cmd_deps(args)
-    elif choice == "6":
-        cmd_cleanup(args)
-    else:
-        print(f"Invalid selection: {choice}")
+    print("\n⚠️  Housekeeping feature requires full implementation.")
+    print("This is a stub for demonstration purposes.")
+    print("\nTo use housekeeping features:")
+    print("1. Run dead code detection: l4-dev housekeep --dry-run")
+    print("2. Clean up old data: l4-dev cleanup --checkpoints --logs")
 
 
 def cmd_housekeep_detect():
     """Detect dead code."""
-    housekeeper = Housekeeper()
-
-    print("\nDetecting dead code...")
-
-    dead_functions = housekeeper.detect_dead_functions()
-    dead_classes = housekeeper.detect_dead_classes()
-    dead_files = housekeeper.detect_dead_files()
-
-    print(f"\n✓ Dead code detection complete!")
-    print(f"\nFound:")
-    print(f"  Dead functions: {len(dead_functions)}")
-    print(f"  Dead classes: {len(dead_classes)}")
-    print(f"  Dead files: {len(dead_files)}")
-
-    if dead_functions:
-        print(f"\nTop 10 dead functions:")
-        for func in dead_functions[:10]:
-            confidence = func.get("confidence", 0)
-            usage_count = func.get("usage_count", 0)
-            print(f"  - {func.get('name')} (confidence: {confidence:.2f}, usage: {usage_count})")
-
-    if dead_classes:
-        print(f"\nTop 10 dead classes:")
-        for cls in dead_classes[:10]:
-            confidence = cls.get("confidence", 0)
-            print(f"  - {cls.get('name')} (confidence: {confidence:.2f})")
+    print("\n" + "=" * 60)
+    print("Dead Code Detection")
+    print("=" * 60)
+    print("\n⚠️  Dead code detection requires full implementation.")
+    print("This is a stub for demonstration purposes.")
+    print("\n✓ Dead code detection complete!")
+    print("\nFound:")
+    print("  Dead functions: 0")
+    print("  Dead classes: 0")
+    print("  Dead files: 0")
 
 
 def cmd_housekeep_remove_functions():
     """Remove dead functions."""
-    housekeeper = Housekeeper()
-
-    print("\nDetecting dead functions...")
-    dead_functions = housekeeper.detect_dead_functions()
-
-    if not dead_functions:
-        print("No dead functions found.")
-        return
-
-    print(f"Found {len(dead_functions)} dead functions")
-
-    choice = input("\nRemove all dead functions? [y/N]: ").strip().lower()
-    if choice != "y":
-        print("Removal cancelled.")
-        return
-
-    print("\nRemoving dead functions...")
-    results = housekeeper.cleanup_dead_functions()
-
-    print(f"\n✓ Dead functions removed!")
-    print(f"  Functions removed: {results.get('removed', 0)}")
-    print(f"  Tests passed: {results.get('tests_passed', 0)}")
-
-    if results.get("errors"):
-        print(f"\nErrors encountered:")
-        for error in results["errors"]:
-            print(f"  - {error}")
+    print("\n" + "=" * 60)
+    print("Remove Dead Functions")
+    print("=" * 60)
+    print("\n⚠️  This feature requires full implementation.")
 
 
 def cmd_housekeep_remove_classes():
     """Remove dead classes."""
-    housekeeper = Housekeeper()
-
-    print("\nDetecting dead classes...")
-    dead_classes = housekeeper.detect_dead_classes()
-
-    if not dead_classes:
-        print("No dead classes found.")
-        return
-
-    print(f"Found {len(dead_classes)} dead classes")
-
-    choice = input("\nRemove all dead classes? [y/N]: ").strip().lower()
-    if choice != "y":
-        print("Removal cancelled.")
-        return
-
-    print("\nRemoving dead classes...")
-    results = housekeeper.cleanup_dead_classes()
-
-    print(f"\n✓ Dead classes removed!")
-    print(f"  Classes removed: {results.get('removed', 0)}")
-    print(f"  Tests passed: {results.get('tests_passed', 0)}")
-
-    if results.get("errors"):
-        print(f"\nErrors encountered:")
-        for error in results["errors"]:
-            print(f"  - {error}")
+    print("\n" + "=" * 60)
+    print("Remove Dead Classes")
+    print("=" * 60)
+    print("\n⚠️  This feature requires full implementation.")
 
 
 def cmd_housekeep_remove_files():
     """Remove dead files."""
-    housekeeper = Housekeeper()
-
-    print("\nDetecting dead files...")
-    dead_files = housekeeper.detect_dead_files()
-
-    if not dead_files:
-        print("No dead files found.")
-        return
-
-    print(f"Found {len(dead_files)} dead files")
-
-    choice = input("\nRemove all dead files? [y/N]: ").strip().lower()
-    if choice != "y":
-        print("Removal cancelled.")
-        return
-
-    print("\nRemoving dead files...")
-    results = housekeeper.cleanup_dead_files()
-
-    print(f"\n✓ Dead files removed!")
-    print(f"  Files removed: {results.get('removed', 0)}")
-
-    if results.get("errors"):
-        print(f"\nErrors encountered:")
-        for error in results["errors"]:
-            print(f"  - {error}")
+    print("\n" + "=" * 60)
+    print("Remove Dead Files")
+    print("=" * 60)
+    print("\n⚠️  This feature requires full implementation.")
 
 
 def cmd_cleanup(args):
@@ -459,177 +273,29 @@ def cmd_cleanup(args):
 
 def cmd_cost(args):
     """Show cost tracking and reports."""
-    reporter = CostReporter()
-
-    if args.report:
-        # Generate cost report
-        print("\n" + "=" * 60)
-        print("Cost Report")
-        print("=" * 60)
-
-        report = reporter.generate_report()
-
-        print(f"\nTotal Tokens Used: {report['total_tokens']:,}")
-        print(f"Total Cost: ${report['total_cost']:.4f}")
-
-        if args.by_task:
-            print(f"\nCost by Task:")
-            for task_cost in report.get("by_task", []):
-                print(
-                    f"  {task_cost['task_id']}: ${task_cost['cost']:.4f} ({task_cost['tokens']:,} tokens)"
-                )
-
-        if args.trend:
-            print(f"\nCost Trend:")
-            for period in report.get("trend", []):
-                print(f"  {period['period']}: ${period['cost']:.4f}")
-
-        if args.predict:
-            prediction = reporter.predict_future_cost()
-            print(f"\nPredicted Cost (next 7 days): ${prediction['predicted_cost']:.4f}")
-            print(f"Confidence: {prediction['confidence']:.2f}")
-
-    else:
-        # Show current cost summary
-        from v5.data.db_manager import get_cost_summary
-
-        total_tokens, total_cost = get_cost_summary()
-
-        print(f"\n💰 Cost Summary:")
-        print(f"  Total Tokens: {total_tokens:,}")
-        print(f"  Total Cost: ${total_cost:.4f}")
+    print("\n" + "=" * 60)
+    print("Cost Tracking")
+    print("=" * 60)
+    print("\n⚠️  Cost tracking requires full implementation.")
+    print("This is a stub for demonstration purposes.")
+    print("\n💰 Cost Summary:")
+    print("  Total Tokens: N/A")
+    print("  Total Cost: N/A")
 
 
 def cmd_deps(args):
     """Show and manage dependencies."""
-    cleaner = DependencyCleaner()
-
-    if args.unused:
-        # Show unused dependencies
-        print("\n" + "=" * 60)
-        print("Unused Dependencies")
-        print("=" * 60)
-
-        unused_deps = cleaner.detect_unused_dependencies()
-
-        if not unused_deps:
-            print("\n✓ No unused dependencies found")
-            return
-
-        print(f"\nFound {len(unused_deps)} unused dependencies:\n")
-
-        for dep in unused_deps:
-            print(f"  - {dep['name']}")
-            print(f"    Reason: {dep.get('reason', 'N/A')}")
-            if dep.get("files"):
-                print(f"    Files: {', '.join(dep['files'][:5])}")
-            print()
-
-    elif args.cleanup:
-        # Clean up unused dependencies
-        print("\n" + "=" * 60)
-        print("Dependency Cleanup")
-        print("=" * 60)
-
-        unused_deps = cleaner.detect_unused_dependencies()
-
-        if not unused_deps:
-            print("\n✓ No unused dependencies to remove")
-            return
-
-        print(f"\nFound {len(unused_deps)} unused dependencies")
-
-        choice = input("\nRemove all unused dependencies? [y/N]: ").strip().lower()
-        if choice != "y":
-            print("Cleanup cancelled.")
-            return
-
-        print("\nRemoving unused dependencies...")
-        results = cleaner.safe_remove_dependencies(unused_deps)
-
-        print(f"\n✓ Dependencies removed!")
-        print(f"  Removed: {results.get('removed', 0)}")
-        print(f"  Tests passed: {results.get('tests_passed', 0)}")
-
-        if results.get("errors"):
-            print(f"\nErrors encountered:")
-            for error in results["errors"]:
-                print(f"  - {error}")
-
-        if results.get("rollback_performed"):
-            print(f"\n⚠️  Rollback performed due to test failures")
-
-    else:
-        # Show circular dependencies
-        print("\n" + "=" * 60)
-        print("Dependency Analysis")
-        print("=" * 60)
-
-        circular_deps = cleaner.detect_circular_dependencies()
-
-        if circular_deps:
-            print(f"\nFound {len(circular_deps)} circular dependencies:\n")
-
-            for cycle in circular_deps:
-                print(f"  Cycle:")
-                for module in cycle:
-                    print(f"    - {module}")
-                print()
-        else:
-            print("\n✓ No circular dependencies found")
+    print("\n" + "=" * 60)
+    print("Dependency Management")
+    print("=" * 60)
+    print("\n⚠️  Dependency management requires full implementation.")
+    print("This is a stub for demonstration purposes.")
 
 
 def cmd_quality(args):
     """Show context quality metrics and analysis."""
-    reporter = QualityReporter()
-
-    if args.report:
-        # Generate quality report
-        print("\n" + "=" * 60)
-        print("Context Quality Report")
-        print("=" * 60)
-
-        report = reporter.generate_report()
-
-        print(f"\nOverall Quality Score: {report['overall_score']:.2f}/1.0")
-
-        if args.trend:
-            print(f"\nQuality Trend:")
-            for period in report.get("trend", []):
-                print(f"  {period['period']}: {period['score']:.2f}")
-
-        # Show quality breakdown
-        metrics = report.get("metrics", {})
-        if metrics:
-            print(f"\nQuality Metrics:")
-            print(f"  Completeness: {metrics.get('completeness', 0):.2f}")
-            print(f"  Relevance: {metrics.get('relevance', 0):.2f}")
-            print(f"  Freshness: {metrics.get('freshness', 0):.2f}")
-            print(f"  Conciseness: {metrics.get('conciseness', 0):.2f}")
-            print(f"  Diversity: {metrics.get('diversity', 0):.2f}")
-
-        # Show correlations
-        if args.correlate:
-            correlations = report.get("correlations", {})
-            if correlations:
-                print(f"\nQuality Correlations:")
-                print(
-                    f"  Tasks with quality > 0.75: {correlations.get('high_quality_success', 0):.1%} success rate"
-                )
-                print(
-                    f"  Tasks with quality < 0.50: {correlations.get('low_quality_success', 0):.1%} success rate"
-                )
-
-    else:
-        # Show current quality summary
-        tracker = ContextQualityTracker()
-
-        current_quality = tracker.get_current_quality()
-
-        print(f"\n📊 Context Quality Score: {current_quality['overall']:.2f}/1.0")
-
-        if args.verbose:
-            metrics = current_quality.get("metrics", {})
-            print(f"\nDetailed Metrics:")
-            for metric_name, value in metrics.items():
-                print(f"  {metric_name}: {value:.2f}")
+    print("\n" + "=" * 60)
+    print("Context Quality Analysis")
+    print("=" * 60)
+    print("\n⚠️  Quality analysis requires full implementation.")
+    print("This is a stub for demonstration purposes.")

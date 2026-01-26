@@ -17,10 +17,9 @@ L4_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 if L4_ROOT not in sys.path:
     sys.path.insert(0, L4_ROOT)
 
-from v5.data.decision_history import DecisionHistory
+from v5.data.decision_history import DecisionHistoryManager
 from v5.logic.progress_tracker import ProgressTracker
 from v5.logic.explanation_generator import ExplanationGenerator
-from v5.data.context_hierarchy import ContextHierarchy
 
 
 def cmd_decisions(args):
