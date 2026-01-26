@@ -1,6 +1,6 @@
 import os
 import sys
-from v5.data import (
+from v5.data.db_manager import (
     log_activity,
     fcid_mapping,
     init_db,
@@ -19,17 +19,12 @@ from v5.logic import Verifier
 from v5.core import telemetry
 from v5.retro import RetroAgent
 from v5.core import get_session_manager, SessionStatus
-from v5.data import CheckpointManager
+from v5.data.checkpoint_manager import CheckpointManager
 from v5.core import (
     get_module_logger,
-    log_operation_started,
-    log_operation_completed,
-    log_operation_failed,
-    log_task_started,
-    log_task_completed,
-    log_task_failed,
-    log_error_with_context,
 )
+
+import logging
 # V4: Adaptive reasoning components
 from v5.data import get_context_hierarchy
 from v5.data import get_decision_history
@@ -439,8 +434,11 @@ class Orchestrator:
                                 outcome["success"] = False
                         except Exception as e:
                             reason = f"Unexpected error during implementation: {str(e)}"
-                            log_error_with_context(
-                                logger, e, task_id=task_id, task_title=task_title
+                            logger.error(
+                                f"Error in task '{task_title}': {str(e)}",
+                                exc_info=True,
+                                task_id=task_id,
+                                task_title=task_title
                             )
 
                             # V3: Create checkpoint on error

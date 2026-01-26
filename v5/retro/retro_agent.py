@@ -3,7 +3,7 @@ import time
 import subprocess
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
-from v5.data import log_activity, fcid_mapping
+from v5.data.db_manager import log_activity, fcid_mapping
 from v5.llm_base import LLMProvider
 from v5.core import get_module_logger
 import json
@@ -32,8 +32,8 @@ class RetroHandler(FileSystemEventHandler):
             return
 
         # Task 6.2: Manual Change Detection logic
-        # If the orchestrator is actively implementing, we ignore the change to avoid AI feedback loops
-        from data.db_manager import load_state
+        # If orchestrator is actively implementing, we ignore change to avoid AI feedback loops
+        from v5.data.db_manager import load_state
 
         phase = load_state("orchestrator_phase")
         if phase and "implementing" in phase:
