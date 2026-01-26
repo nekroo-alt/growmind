@@ -8,13 +8,14 @@ on failure. Uses checkpoints for state persistence and rollback.
 import threading
 import uuid
 import logging
+from typing import Optional, Any, Dict, List, Callable, ContextManager
+from dataclasses import dataclass, field
 from contextlib import contextmanager
 from enum import Enum
-from typing import Optional, Dict, Any, List, Callable
-from dataclasses import dataclass, field
+import traceback
 
-from v5.data import CheckpointManager
-from v5.data import TelemetryManager
+from v5.data.checkpoint_manager import CheckpointManager
+from v5.data.telemetry_manager import TelemetryManager
 
 
 logger = logging.getLogger(__name__)

@@ -49,10 +49,10 @@ except ImportError:
     RICH_AVAILABLE = False
 
 # Import L4D modules
-from data import db_manager
-from data import telemetry_manager
-from data import cache_manager
-from data import checkpoint_manager
+from v5.data import db_manager
+from v5.data import telemetry_manager
+from v5.data import cache_manager
+from v5.data import checkpoint_manager
 
 
 class HealthStatus(Enum):

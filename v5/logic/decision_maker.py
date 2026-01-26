@@ -13,8 +13,8 @@ from dataclasses import dataclass, field
 import logging
 from datetime import datetime
 
-# Import from context_analyzer
-from v5.logic import (
+# Import directly from context_analyzer to avoid circular imports
+from v5.logic.context_analyzer import (
     ContextAnalyzer,
     SituationReport,
     SituationType,

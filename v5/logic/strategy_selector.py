@@ -20,7 +20,7 @@ import logging
 from datetime import datetime, timedelta
 import random
 
-from v5.logic import (
+from v5.logic.reasoning_engine import (
     ReasoningStrategy,
     SituationType,
     SituationReport,

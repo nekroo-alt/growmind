@@ -122,7 +122,8 @@ class ContextExpander:
         
         # Learned optimal levels per task type
         self._optimal_levels: Dict[str, str] = {
-            task_type.value: level.value
+            task_type.value if hasattr(task_type, 'value') else task_type: 
+            level if isinstance(level, str) else level.value
             for task_type, level in self.DEFAULT_OPTIMAL_LEVELS.items()
         }
         

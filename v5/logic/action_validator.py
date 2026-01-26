@@ -13,7 +13,11 @@ import logging
 from datetime import datetime
 
 # Import from decision_maker
-from v5.logic import Decision
+# Import directly from decision_maker to avoid circular imports
+from v5.logic.decision_maker import (
+    Decision,
+    DecisionStrategy
+)
 
 
 logger = logging.getLogger(__name__)

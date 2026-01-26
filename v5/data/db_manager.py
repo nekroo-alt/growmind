@@ -1,8 +1,12 @@
 import sqlite3
 import os
 import json
+import logging
 from typing import List, Set, Dict
-from v5.core.telemetry import telemetry
+
+# Use standard logging instead of telemetry to avoid circular import
+# db_manager is a low-level utility module
+logger = logging.getLogger(__name__)
 
 # Database paths
 TASK_DB_PATH = "task.db"
@@ -356,11 +360,11 @@ def log_activity(
             msg += f" - {cot_blob}"
 
         if status == "Success":
-            telemetry.info(msg)
+            logger.info(msg)
         elif status == "Failed":
-            telemetry.error(msg)
+            logger.error(msg)
         else:
-            telemetry.info(msg)
+            logger.info(msg)
 
     # Calculate tokens_used if not provided but prompt/completion are
     if (
@@ -376,7 +380,7 @@ def log_activity(
         """
         INSERT INTO activities (summary, action, status, CoT_blob, commit_hash, tokens_used, prompt_tokens, completion_tokens, estimated_cost)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """,
+        """,
         (
             summary,
             action,

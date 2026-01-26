@@ -1,32 +1,33 @@
 import os
 import subprocess
 import glob
-from v5.data import (
+from v5.data.db_manager import (
     log_activity,
     update_task_status,
     fcid_mapping,
     get_commit_count,
 )
-from v5.logic import GitGuard
-from v5.logic import ContextEngine
+from v5.logic.git_guard import GitGuard
+from v5.logic.context_engine import ContextEngine
 from v5.llm_base import LLMProvider
-from v5.logic import Verifier
+from v5.logic.verifier import Verifier
 from v5.core import telemetry
-from v5.data import get_telemetry_manager
-from v5.core import get_module_logger
-from v5.data import CheckpointManager
-# V4: Adaptive reasoning components
-from v5.data import get_context_hierarchy
-from v5.data import get_decision_history
-from v5.logic import get_reasoning_engine
-from v5.logic import get_trap_detector
-from v5.logic import get_trap_recovery
-from v5.logic import get_progress_tracker
-# V4: Meta-cognition components
-from v5.logic import get_pattern_recognizer
-from v5.logic import get_self_reflection
-from v5.logic import get_lesson_learner
-from v5.logic import get_adaptive_heuristics
+from v5.data.telemetry_manager import get_telemetry_manager
+from v5.core.logging_config import get_module_logger
+from v5.data.checkpoint_manager import CheckpointManager
+# V4: Adaptive reasoning components - import directly from modules to avoid circular imports
+from v5.data.context_hierarchy import ContextHierarchyManager
+from v5.data.decision_history import DecisionHistoryManager
+from v5.logic.reasoning_engine import ReasoningEngine
+from v5.logic.trap_detector import TrapDetector
+from v5.logic.trap_recovery import TrapRecoveryEngine
+from v5.logic.progress_tracker import ProgressTracker
+from v5.logic.context_expander import ContextExpander  # Added missing import
+# V4: Meta-cognition components - import directly from modules
+from v5.logic.pattern_recognizer import PatternRecognizer
+from v5.logic.self_reflection import SelfReflection
+from v5.logic.lesson_learner import LessonLearner
+from v5.logic.adaptive_heuristics import AdaptiveHeuristics
 
 logger = get_module_logger(__name__)
 
@@ -41,18 +42,19 @@ class Implementor:
         self.verifier = Verifier()
         self.telemetry_manager = get_telemetry_manager()  # V3 telemetry
         self.checkpoint_manager = CheckpointManager()  # V3 checkpointing
-        # V4: Adaptive reasoning components
-        self.context_hierarchy = get_context_hierarchy()
-        self.decision_history = get_decision_history()
-        self.reasoning_engine = get_reasoning_engine()
-        self.trap_detector = get_trap_detector()
-        self.trap_recovery = get_trap_recovery()
-        self.progress_tracker = get_progress_tracker()
-        # V4: Meta-cognition components
-        self.pattern_recognizer = get_pattern_recognizer()
-        self.self_reflection = get_self_reflection()
-        self.lesson_learner = get_lesson_learner()
-        self.adaptive_heuristics = get_adaptive_heuristics()
+        # V4: Adaptive reasoning components - initialize classes directly
+        self.context_hierarchy = ContextHierarchyManager()
+        self.decision_history = DecisionHistoryManager()
+        self.reasoning_engine = ReasoningEngine()
+        self.trap_detector = TrapDetector()
+        self.trap_recovery = TrapRecoveryEngine()
+        self.progress_tracker = ProgressTracker()
+        self.context_expander = ContextExpander()  # Initialize context expander
+        # V4: Meta-cognition components - initialize classes directly
+        self.pattern_recognizer = PatternRecognizer()
+        self.self_reflection = SelfReflection()
+        self.lesson_learner = LessonLearner()
+        self.adaptive_heuristics = AdaptiveHeuristics()
         logger.info("Implementor initialized successfully with V4 adaptive reasoning and meta-cognition")
 
     def _get_error_reason(self, result):

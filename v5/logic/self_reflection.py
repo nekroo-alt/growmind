@@ -16,9 +16,9 @@ from datetime import datetime, timedelta
 import json
 
 # Import V4 modules
-from v5.data import DecisionHistoryManager
-from v5.logic import PatternRecognizer
-from v5.logic import AdaptiveHeuristics
+from v5.data.decision_history import DecisionHistoryManager
+from v5.logic.pattern_recognizer import PatternRecognizer
+from v5.logic.adaptive_heuristics import AdaptiveHeuristics
 
 
 class SelfReflection:
@@ -752,15 +752,15 @@ def get_self_reflection(
     if _self_reflection_instance is None:
         # Create default instances if not provided
         if decision_history is None:
-            from data.decision_history import get_decision_history
+            from v5.data.decision_history import get_decision_history
             decision_history = get_decision_history()
         
         if pattern_recognizer is None:
-            from logic.pattern_recognizer import get_pattern_recognizer
+            from v5.logic.pattern_recognizer import get_pattern_recognizer
             pattern_recognizer = get_pattern_recognizer()
         
         if adaptive_heuristics is None:
-            from logic.adaptive_heuristics import get_adaptive_heuristics
+            from v5.logic.adaptive_heuristics import get_adaptive_heuristics
             adaptive_heuristics = get_adaptive_heuristics()
         
         _self_reflection_instance = SelfReflection(

@@ -1,25 +1,25 @@
 import os
 import subprocess
 import ast
-from v5.data import log_activity, fcid_mapping
-from v5.data import SemanticMapper
-from v5.core import get_module_logger
-from v5.data import get_telemetry_manager
-# V4: Adaptive reasoning components
-from v5.data import get_context_hierarchy
-from v5.data import get_decision_history
-from v5.logic import get_reasoning_engine
-from v5.logic import get_action_validator
-from v5.logic import get_progress_tracker
-from v5.logic import get_context_expander
-from v5.logic import get_progress_tracker as get_progress_tracker_v4
-from v5.logic import get_trap_detector
-from v5.logic import get_trap_recovery
-# V4: Meta-cognition components
-from v5.logic import get_pattern_recognizer
-from v5.logic import get_self_reflection
-from v5.logic import get_lesson_learner
-from v5.logic import get_adaptive_heuristics
+from v5.data.db_manager import log_activity, fcid_mapping
+from v5.data.semantic_mapper import SemanticMapper
+from v5.core.logging_config import get_module_logger
+from v5.data.telemetry_manager import get_telemetry_manager
+# V4: Adaptive reasoning components - import directly from modules to avoid circular imports
+from v5.data.context_hierarchy import ContextHierarchyManager
+from v5.data.decision_history import DecisionHistoryManager
+from v5.logic.reasoning_engine import ReasoningEngine
+from v5.logic.action_validator import ActionValidator
+from v5.logic.progress_tracker import ProgressTracker
+from v5.logic.context_expander import ContextExpander
+from v5.logic.trap_detector import TrapDetector
+# Import from trap_recovery directly to avoid circular imports
+from v5.logic.trap_recovery import TrapRecoveryEngine
+# V4: Meta-cognition components - import directly from modules
+from v5.logic.pattern_recognizer import PatternRecognizer
+from v5.logic.self_reflection import SelfReflection
+from v5.logic.lesson_learner import LessonLearner
+from v5.logic.adaptive_heuristics import AdaptiveHeuristics
 
 logger = get_module_logger(__name__)
 
@@ -68,21 +68,21 @@ class Verifier:
     def __init__(self):
         logger.info("Initializing Verifier")
         self.telemetry_manager = get_telemetry_manager()
-        # V4: Adaptive reasoning components
-        self.context_hierarchy = get_context_hierarchy()
-        self.decision_history = get_decision_history()
-        self.reasoning_engine = get_reasoning_engine()
-        self.action_validator = get_action_validator()
-        self.progress_tracker = get_progress_tracker()
-        self.context_expander = get_context_expander()
-        self.progress_tracker_v4 = get_progress_tracker_v4()
-        self.trap_detector = get_trap_detector()
-        self.trap_recovery = get_trap_recovery()
-        # V4: Meta-cognition components
-        self.pattern_recognizer = get_pattern_recognizer()
-        self.self_reflection = get_self_reflection()
-        self.lesson_learner = get_lesson_learner()
-        self.adaptive_heuristics = get_adaptive_heuristics()
+        # V4: Adaptive reasoning components - initialize classes directly
+        self.context_hierarchy = ContextHierarchyManager()
+        self.decision_history = DecisionHistoryManager()
+        self.reasoning_engine = ReasoningEngine()
+        self.action_validator = ActionValidator()
+        self.progress_tracker = ProgressTracker()
+        self.context_expander = ContextExpander()
+        self.progress_tracker_v4 = ProgressTracker()  # Second instance for tracking
+        self.trap_detector = TrapDetector()
+        self.trap_recovery = TrapRecoveryEngine()
+        # V4: Meta-cognition components - initialize classes directly
+        self.pattern_recognizer = PatternRecognizer()
+        self.self_reflection = SelfReflection()
+        self.lesson_learner = LessonLearner()
+        self.adaptive_heuristics = AdaptiveHeuristics()
         logger.info("Verifier initialized successfully with V4 adaptive reasoning, trap detection, and meta-cognition")
 
     @fcid_mapping("VER-100")

@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from v5.data import CallGraphPersistence
+from v5.data.call_graph_persistence import CallGraphPersistence
 from v5.data import SemanticMapper
 
 
