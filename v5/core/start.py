@@ -39,7 +39,36 @@ logger = get_module_logger(__name__)
 
 
 class Orchestrator:
+    """
+    Main orchestration engine for the L4 Auto-Pilot development system.
+    
+    The Orchestrator coordinates between specialized agents (Planner, Implementor, Verifier)
+    and manages the overall development workflow, including session management,
+    checkpoints, telemetry, and V4 adaptive reasoning capabilities.
+    
+    Attributes:
+        git_guard: Validates git workspace state before operations
+        dispatcher: Selects and manages task execution flow
+        planner: Breaks down requirements into atomic tasks
+        implementor: Executes TDD (Test-Driven Development) cycles
+        verifier: Validates implementation quality
+        telemetry: Tracks operations, metrics, and resource usage
+        retro_agent: Monitors for human corrections and learns from them
+        session_manager: Manages session lifecycle and persistence
+        checkpoint_manager: Creates and restores system state snapshots
+        context_hierarchy: Manages multi-level context (L0-L3) for adaptive reasoning
+        decision_history: Tracks all decisions with full context
+        reasoning_engine: Provides adaptive reasoning capabilities
+        current_session: Currently active session object
+    """
+    
     def __init__(self):
+        """
+        Initialize the Orchestrator with all required components.
+        
+        Sets up V4 adaptive reasoning components (context hierarchy, decision history,
+        reasoning engine) along with V3 session management and checkpointing capabilities.
+        """
         logger.info("Initializing Orchestrator")
         self.git_guard = GitGuard()
         self.dispatcher = Dispatcher()  # Now has __init__ with telemetry_manager
@@ -63,7 +92,18 @@ class Orchestrator:
     @fcid_mapping("CORE-100")
     def cold_start_check(self):
         """
-        Ensures databases and required files exist.
+        Perform cold start validation to ensure system can operate.
+        
+        Validates that all required databases are initialized and essential
+        documentation files (product.md, technical.md) exist in the project root.
+        
+        Returns:
+            bool: True if cold start check passes, False if required files are missing
+            
+        Side Effects:
+            - Initializes SQLite databases if they don't exist
+            - Logs activity to activity.db
+            - Updates telemetry with check results
         """
         logger.info("Cold start check started")
         self.telemetry.info("Performing cold start check...")
@@ -98,6 +138,15 @@ class Orchestrator:
         return True
 
     def _update_telemetry_stats(self, current_task=None):
+        """
+        Update telemetry dashboard with current system statistics.
+        
+        Retrieves cost summary (tokens spent, costs incurred) and task completion
+        statistics, then updates the telemetry dashboard display.
+        
+        Args:
+            current_task (str, optional): Name of currently executing task for display
+        """
         tokens, cost, p_tokens, c_tokens = get_cost_summary()
         tasks_done = get_completed_tasks_count()
         self.telemetry.update_dashboard(
@@ -111,10 +160,20 @@ class Orchestrator:
 
     def _handle_interrupted_sessions(self):
         """
-        Detect and handle interrupted sessions on startup.
-
+        Detect and resume interrupted sessions from previous runs.
+        
+        Checks for sessions that were interrupted (e.g., system crash, forced shutdown)
+        and offers to resume the most recent one. Resumes session state including
+        task progress, context, and checkpoints.
+        
         Returns:
-            True if resuming a session, False otherwise
+            bool: True if a session was resumed successfully, False otherwise
+            
+        Side Effects:
+            - Detects interrupted sessions from session_manager
+            - Restores session state from checkpoint_manager
+            - Checks for external changes (file modifications) during interruption
+            - Updates current_session if resume succeeds
         """
         # Detect interrupted sessions
         interrupted = self.session_manager.detect_interrupted_sessions()
@@ -153,7 +212,18 @@ class Orchestrator:
         return False
 
     def _create_new_session(self):
-        """Create a new session for this run."""
+        """
+        Create a new session for the current run.
+        
+        Initializes a new session with configuration and metadata including
+        LLM model, cache settings, user information, and environment context.
+        
+        Side Effects:
+            - Creates new session object with unique ID
+            - Stores session configuration (model, cache settings)
+            - Stores session metadata (user, host, environment)
+            - Sets current_session attribute
+        """
         self.current_session = self.session_manager.start_session(
             config={
                 "llm_model": os.getenv("L4_LLM_MODEL", "gpt-4"),
@@ -169,7 +239,15 @@ class Orchestrator:
         self.telemetry.info(f"Started new session {self.current_session.session_id}")
 
     def _save_session_on_shutdown(self, checkpoint_id=None):
-        """Save session state before shutdown."""
+        """
+        Persist session state before system shutdown.
+        
+        Saves the current session's state including tasks completed, costs incurred,
+        and any associated checkpoint ID. Ensures session can be resumed later.
+        
+        Args:
+            checkpoint_id (str, optional): ID of checkpoint to associate with session
+        """
         if self.current_session:
             self.session_manager.save_session_on_shutdown(
                 self.current_session.session_id, checkpoint_id
@@ -179,7 +257,25 @@ class Orchestrator:
     @fcid_mapping("CORE-101")
     def run(self):
         """
-        Main orchestration loop.
+        Execute the main orchestration loop for autonomous development.
+        
+        Implements the complete development workflow:
+        1. Cold start check (validate databases and documentation)
+        2. Detect and resume interrupted sessions or create new session
+        3. Restore previous state if available
+        4. Git workspace validation
+        5. Main loop: Dispatch → Plan/Implement → Verify
+        6. Graceful shutdown with session persistence
+        
+        Uses V4 adaptive reasoning (context hierarchy, decision history) to make
+        intelligent decisions during task execution.
+        
+        Side Effects:
+            - Creates/manages session lifecycle
+            - Creates checkpoints before critical operations
+            - Updates telemetry throughout execution
+            - Manages retro watcher for human corrections
+            - Persists state for resumption
         """
         logger.info("Orchestrator main loop started")
         self.telemetry.start_dashboard()
