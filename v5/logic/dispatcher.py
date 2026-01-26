@@ -1,13 +1,13 @@
-from data.db_manager import (
+from v5.data.db_manager import (
     get_pending_task,
     get_blocked_task,
     log_activity,
     fcid_mapping,
 )
-from core.telemetry import telemetry
-from data.telemetry_manager import get_telemetry_manager
-from core.logging_config import get_module_logger
-from data.checkpoint_manager import CheckpointManager
+from v5.core.telemetry import telemetry
+from v5.data.telemetry_manager import get_telemetry_manager
+from v5.core.logging_config import get_module_logger
+from v5.data.checkpoint_manager import CheckpointManager
 
 # V4: Adaptive reasoning components (TODO: Not implemented yet)
 # from data.context_hierarchy import get_context_hierarchy
