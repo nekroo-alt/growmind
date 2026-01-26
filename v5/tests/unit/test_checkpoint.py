@@ -19,7 +19,7 @@ from pathlib import Path
 from datetime import datetime
 import pytest
 
-from data.checkpoint_manager import CheckpointManager, Checkpoint, CheckpointError
+from v5.data.checkpoint_manager import CheckpointManager, Checkpoint, CheckpointError
 
 
 class TestCheckpointCreation:

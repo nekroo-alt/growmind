@@ -2,7 +2,7 @@ import sqlite3
 import os
 import json
 from typing import List, Set, Dict
-from core.telemetry import telemetry
+from v5.core.telemetry import telemetry
 
 # Database paths
 TASK_DB_PATH = "task.db"

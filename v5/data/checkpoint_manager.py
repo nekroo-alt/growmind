@@ -16,13 +16,13 @@ from typing import Optional, Dict, List, Any, ContextManager
 from contextlib import contextmanager
 from pathlib import Path
 
-from data.db_manager import (
+from v5.data.db_manager import (
     SNAPSHOTS_DB_PATH,
     TASK_DB_PATH,
     ACTIVITY_DB_PATH,
     get_db_connection,
 )
-from core.telemetry import telemetry
+from v5.core.telemetry import telemetry
 
 
 class CheckpointManager:
@@ -48,7 +48,7 @@ class CheckpointManager:
 
     def _ensure_db_exists(self):
         """Ensure snapshots database and tables exist."""
-        from data.db_manager import init_db
+        from v5.data.db_manager import init_db
 
         init_db()  # This will create all necessary tables
 
@@ -799,7 +799,7 @@ class CheckpointManager:
 
         try:
             # Try to import and use CacheManager
-            from data.cache_manager import get_cache_manager
+            from v5.data.cache_manager import get_cache_manager
 
             cache_manager = get_cache_manager()
 
@@ -1238,7 +1238,7 @@ class CheckpointManager:
             cache_data: Cache manager state dictionary from checkpoint
         """
         try:
-            from data.cache_manager import get_cache_manager
+            from v5.data.cache_manager import get_cache_manager
 
             cache_manager = get_cache_manager()
 
@@ -1315,7 +1315,7 @@ class CheckpointManager:
             True if cache is consistent
         """
         try:
-            from data.cache_manager import get_cache_manager
+            from v5.data.cache_manager import get_cache_manager
 
             cache_manager = get_cache_manager()
 
@@ -1369,7 +1369,7 @@ class CheckpointManager:
         Clears all cache and marks files for re-analysis.
         """
         try:
-            from data.cache_manager import get_cache_manager
+            from v5.data.cache_manager import get_cache_manager
 
             cache_manager = get_cache_manager()
 
